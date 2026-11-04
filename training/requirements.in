@@ -1,0 +1,17 @@
+# golf-swing-lab training venv: top-level pins (human-edited). The full resolved set is requirements.lock.
+# Rebuild: /usr/bin/python3.12 -m venv ~/.local/share/golf-swing-lab-venv && ~/.local/share/golf-swing-lab-venv/bin/python -m pip install -r training/requirements.lock
+# torch must come from the CUDA 13 index (RTX 5060 Ti / Blackwell needs cu130 wheels); everything else from PyPI.
+--index-url https://download.pytorch.org/whl/cu130
+--extra-index-url https://pypi.org/simple
+torch==2.14.0
+mediapipe==1.2.2
+# NOTE: mediapipe 1.2.2 also requires opencv-contrib-python, which ships the same cv2 package; both end up installed.
+opencv-python-headless==5.0.0.93
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.1.0
+onnx==1.23.2
+onnxruntime==1.31.1
+gdown==6.5.1
+pytest==9.2.0
+imageio-ffmpeg==0.8.1

@@ -1,0 +1,129 @@
+{
+  "schema": "gsl-device-report/1",
+  "app_version": "0.1.0+0123456789",
+  "created_at": "2026-11-04T10:00:00.000Z",
+  "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+  "standalone": true,
+  "sw_controlled": true,
+  "precache_complete": 1,
+  "storage": {
+    "persisted": true,
+    "usage": 52000000,
+    "quota": 1000000000
+  },
+  "webcodecs": {
+    "avc1": true,
+    "hevc": false
+  },
+  "media_recorder": {
+    "types": [
+      "video/mp4",
+      "video/mp4;codecs=avc1"
+    ]
+  },
+  "gum": {
+    "calls": 1,
+    "requested_fps": 60,
+    "actual_fps": 30,
+    "width": 1920,
+    "height": 1080
+  },
+  "motion": {
+    "permission": "granted",
+    "available": true,
+    "same_click": true
+  },
+  "pose": {
+    "delegate": "GPU",
+    "lite_ms_p50": 18,
+    "full_ms_p50": 41
+  },
+  "live": {
+    "latency_p95_s": 6.2,
+    "frames_dropped_pct": 2.1,
+    "detections": 10,
+    "actual_swings": 10,
+    "touches_per_shot": null
+  },
+  "import": {
+    "last": {
+      "effective_fps": 239.8,
+      "decoded": 1440,
+      "sample_count": 1440,
+      "hevc": false
+    }
+  },
+  "setup": {
+    "durations_s": {
+      "C0": 20,
+      "C3": 60
+    },
+    "total_s": 240,
+    "view": "face_on",
+    "n": 12,
+    "p90_s": 280,
+    "new_venue_s": 540
+  },
+  "calibration": {
+    "f_px": 1500
+  },
+  "thermal": {
+    "degraded": false
+  },
+  "repro": {
+    "face_on": {
+      "n": 5,
+      "yaw_sd_deg": 0.3,
+      "roll_sd_deg": 0.2,
+      "d_sd_mm": 12,
+      "h_sd_mm": 9,
+      "ball_diam_cv_pct": 1.1,
+      "corner_sd_px": 2.5
+    },
+    "dtl": {
+      "n": 5,
+      "yaw_sd_deg": 0.3,
+      "roll_sd_deg": 0.2,
+      "d_sd_mm": 12,
+      "h_sd_mm": 9,
+      "ball_diam_cv_pct": 1.1,
+      "corner_sd_px": 2.5
+    },
+    "high_behind": {
+      "n": 5,
+      "yaw_sd_deg": 0.3,
+      "roll_sd_deg": 0.2,
+      "d_sd_mm": 12,
+      "h_sd_mm": 9,
+      "ball_diam_cv_pct": 1.1,
+      "corner_sd_px": 2.5
+    }
+  },
+  "droptest": {
+    "g_mps2": 9.8
+  },
+  "ballstats": {
+    "iron": {
+      "n": 10,
+      "speed_non_null": 8
+    },
+    "driver": {
+      "n": 10,
+      "speed_non_null": 7
+    },
+    "monitor": {
+      "uncalibrated_declared": true
+    }
+  },
+  "highspeed": {
+    "n": 4,
+    "analysis_s_max": 61
+  },
+  "offline": {
+    "was_offline": true,
+    "import_ok": true,
+    "analyze_ok": true,
+    "result_ok": true,
+    "export_ok": true
+  }
+}

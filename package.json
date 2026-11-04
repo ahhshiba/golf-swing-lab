@@ -1,0 +1,18 @@
+{
+  "name": "golf-swing-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline golf swing and ball-flight analysis PWA (personal practice)",
+  "engines": {
+    "node": ">=18.19"
+  },
+  "scripts": {
+    "test": "node --test tests/unit/",
+    "verify": "bash scripts/verify.sh",
+    "test:e2e": "node tests/e2e/run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.49.1"
+  }
+}

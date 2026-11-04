@@ -1,0 +1,28 @@
+// store/metric-ids.js — the fixed list of metric ids, in the order of docs/interfaces.md section 9.
+// The CSV column list and the comparison output are built from this list. Do not reorder: CSV columns are a
+// stable public format (tests/unit/store.export.test.mjs checks this list against interfaces.md section 9).
+
+export const METRIC_IDS = Object.freeze([
+  'backswing_s',
+  'downswing_s',
+  'tempo_ratio',
+  'head_sway_x_m',
+  'head_lift_z_m',
+  'head_depth_y_m',
+  'spine_forward_tilt_deg',
+  'spine_side_tilt_deg',
+  'shoulder_turn_deg',
+  'hip_turn_deg',
+  'x_factor_deg',
+  'hand_plane_dev_m',
+  'top_shaft_angle_deg',
+  'weight_shift_pct',
+  'early_extension_m',
+  'club_speed_mps',
+  'club_path_deg',
+  'ball_speed_mps',
+  'launch_v_deg',
+  'launch_h_deg',
+  'carry_m',
+  'smash_factor',
+]);

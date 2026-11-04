@@ -1,0 +1,478 @@
+{
+  "_expect": "requires ci95 or sigma",
+  "schema": "golf-shot/1",
+  "shot_id": "shot-fx-bad-value-without-uncertainty",
+  "session_id": "sess-fx-0001",
+  "venue_id": "venue-fx-bay-7",
+  "preset_id": "preset-fx-face-on-a",
+  "created_at": "2026-11-04T09:30:15.250+08:00",
+  "app_version": "0.1.0+fixture0000",
+  "algorithms": {
+    "pose": {
+      "version": "mediapipe-pose-landmarker-full@1.2.2",
+      "sha256": "66f237e84e8697ead88a60343b6c8296ffd104a03634cd9a5fd975947c5d7368"
+    },
+    "events": {
+      "version": "rules-1.0.0",
+      "sha256": "0730ffcf57d4e8765819fe15385cb1acc4b09975e974a5e421609fa2b58897e3"
+    },
+    "calib": {
+      "version": "calib-1.0.0",
+      "sha256": "1c588ae828a977bf5bfd89eda0af4a559c0f84d2c67b19c96d9732b3571a9af6"
+    },
+    "ball": {
+      "version": "track-ball-1.0.0",
+      "sha256": "4551711e1e9931e12c1f1646db2b0ec730edfd25ea77bd0230a33d8b75ea8cb0"
+    },
+    "fit3d": {
+      "version": "fit3d-1.0.0",
+      "sha256": "6a990bdb64d91d4407071c0aa639a64934b1fb3e11c7c255441ac94d604ce57a"
+    },
+    "carry": {
+      "version": "carry-rk4-mc500-1.0.0",
+      "sha256": "ce9ec7eb62de3d984f349a8fdae17cc9b7a5c7db5aa3af4ce291e205531f909f"
+    }
+  },
+  "capture": {
+    "mode": "highspeed",
+    "view": "face_on",
+    "source": "import",
+    "orientation": "landscape-primary",
+    "width": 1920,
+    "height": 1080,
+    "nominal_fps": 240,
+    "effective_fps": 239.94,
+    "vfr": false,
+    "timestamps": "container",
+    "clip_ref": "clip-fx-0001",
+    "trim_s": [
+      0,
+      3
+    ]
+  },
+  "calibration": {
+    "method": "mat_pnp",
+    "source": "clip",
+    "f_px": 1418.954079,
+    "f_locked": true,
+    "pose": {
+      "yaw_deg": 0.2,
+      "pitch_deg": -0.1,
+      "roll_deg": 0.1,
+      "X_m": 0.4,
+      "Y_m": -2.7,
+      "h_m": 0.84,
+      "D_m": 2.7295
+    },
+    "pose_sigma": {
+      "yaw_deg": 0.12,
+      "pitch_deg": 0.1,
+      "roll_deg": 0.08,
+      "X_m": 0.006,
+      "Y_m": 0.011,
+      "h_m": 0.004,
+      "D_m": 0.011
+    },
+    "reproj_rmse_px": 0.9,
+    "slope_deg": 0.2,
+    "preset_dev": {
+      "yaw_deg": 0.25,
+      "pitch_deg": -0.3,
+      "roll_deg": 0.1,
+      "X_m": 0.012,
+      "Y_m": -0.008,
+      "h_m": 0.004,
+      "D_m": 0.009
+    },
+    "readout_ms": 3,
+    "readout_source": "assumed",
+    "camera": {
+      "W": 1920,
+      "H": 1080,
+      "f": 1418.954079,
+      "cx": 960,
+      "cy": 540,
+      "k1": 0,
+      "R": [
+        0.999992395,
+        0.0034876,
+        -0.001745326,
+        -0.001739225,
+        -0.001751407,
+        -0.999996954,
+        -0.003490646,
+        0.999992385,
+        -0.001745328
+      ],
+      "t": [
+        -0.389114365,
+        0.835964331,
+        2.702841773
+      ],
+      "readout": {
+        "ms": 3,
+        "axis": "v",
+        "dir": 1
+      }
+    }
+  },
+  "club": {
+    "type": "driver",
+    "length_m": 1.17,
+    "lie": "tee",
+    "tee_lift_m": 0.03,
+    "tee_lift_source": "assumed"
+  },
+  "handedness": "right",
+  "events": {
+    "address": {
+      "frame": 40,
+      "t_s": 0.166667,
+      "conf": 0.9,
+      "source": "rules"
+    },
+    "toe_up": {
+      "frame": 160,
+      "t_s": 0.666667,
+      "conf": 0.9,
+      "source": "rules"
+    },
+    "mid_backswing": {
+      "frame": 250,
+      "t_s": 1.041667,
+      "conf": 0.9,
+      "source": "rules"
+    },
+    "top": {
+      "frame": 340,
+      "t_s": 1.416667,
+      "conf": 0.9,
+      "source": "rules"
+    },
+    "mid_downswing": {
+      "frame": 400,
+      "t_s": 1.666667,
+      "conf": 0.9,
+      "source": "rules"
+    },
+    "impact": {
+      "frame": 440,
+      "t_s": 1.833333,
+      "conf": 0.9500000000000001,
+      "source": "rules"
+    },
+    "mid_follow_through": {
+      "frame": 480,
+      "t_s": 2,
+      "conf": 0.9,
+      "source": "rules"
+    },
+    "finish": {
+      "frame": 620,
+      "t_s": 2.583333,
+      "conf": 0.9,
+      "source": "rules"
+    }
+  },
+  "metrics": {
+    "backswing_s": {
+      "value": 1.25,
+      "unit": "s",
+      "ci95": [
+        1.2458,
+        1.2542
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "downswing_s": {
+      "value": 0.416667,
+      "unit": "s",
+      "ci95": [
+        0.412467,
+        0.420867
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "tempo_ratio": {
+      "value": 3,
+      "unit": "ratio",
+      "ci95": [
+        2.94,
+        3.06
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "derived",
+      "measured": false,
+      "reason_codes": []
+    },
+    "head_sway_x_m": {
+      "value": 0.032,
+      "unit": "m",
+      "ci95": [
+        0.018,
+        0.046
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "head_lift_z_m": {
+      "value": -0.015,
+      "unit": "m",
+      "ci95": [
+        -0.03,
+        0
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "head_depth_y_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "spine_forward_tilt_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_PLANE_MISMATCH"
+      ]
+    },
+    "spine_side_tilt_deg": {
+      "value": 7.8,
+      "unit": "deg",
+      "ci95": [
+        3.9,
+        11.7
+      ],
+      "sigma": 2,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "shoulder_turn_deg": {
+      "value": 88,
+      "unit": "deg",
+      "ci95": [
+        72,
+        104
+      ],
+      "sigma": null,
+      "validity": "low_confidence",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "hip_turn_deg": {
+      "value": 47,
+      "unit": "deg",
+      "ci95": [
+        37,
+        57
+      ],
+      "sigma": null,
+      "validity": "low_confidence",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "x_factor_deg": {
+      "value": 41,
+      "unit": "deg",
+      "ci95": [
+        24,
+        58
+      ],
+      "sigma": null,
+      "validity": "low_confidence",
+      "value_origin": "derived",
+      "measured": false,
+      "reason_codes": []
+    },
+    "hand_plane_dev_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_PLANE_MISMATCH"
+      ]
+    },
+    "top_shaft_angle_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_PLANE_MISMATCH"
+      ]
+    },
+    "weight_shift_pct": {
+      "value": 12.5,
+      "unit": "%",
+      "ci95": [
+        5,
+        20
+      ],
+      "sigma": null,
+      "validity": "estimated",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "early_extension_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "club_speed_mps": {
+      "value": 40.2,
+      "unit": "m/s",
+      "ci95": [
+        38.2,
+        42.2
+      ],
+      "sigma": 1,
+      "validity": "estimated",
+      "value_origin": "club_track",
+      "measured": false,
+      "reason_codes": [
+        "ROLLING_SHUTTER_ASSUMED"
+      ]
+    },
+    "club_path_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "club_track",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_PLANE_MISMATCH"
+      ]
+    },
+    "ball_speed_mps": {
+      "value": 58.3,
+      "unit": "m/s",
+      "ci95": null,
+      "sigma": null,
+      "validity": "estimated",
+      "value_origin": "ball_fit3d",
+      "measured": false,
+      "reason_codes": [
+        "ROLLING_SHUTTER_ASSUMED",
+        "TEE_LIFT_ASSUMED"
+      ]
+    },
+    "launch_v_deg": {
+      "value": 13.1,
+      "unit": "deg",
+      "ci95": [
+        11.9,
+        14.3
+      ],
+      "sigma": 0.6,
+      "validity": "estimated",
+      "value_origin": "ball_fit3d",
+      "measured": false,
+      "reason_codes": [
+        "TEE_LIFT_ASSUMED"
+      ]
+    },
+    "launch_h_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "ball_fit3d",
+      "measured": false,
+      "reason_codes": [
+        "LAUNCH_DIR_UNOBSERVABLE"
+      ]
+    },
+    "carry_m": {
+      "value": 181,
+      "unit": "m",
+      "ci95": [
+        160,
+        202
+      ],
+      "sigma": null,
+      "validity": "estimated",
+      "value_origin": "ballistics",
+      "measured": false,
+      "reason_codes": [
+        "SPIN_ASSUMED",
+        "WIND_IGNORED"
+      ]
+    },
+    "smash_factor": {
+      "value": 1.45,
+      "unit": "ratio",
+      "ci95": [
+        1.38,
+        1.52
+      ],
+      "sigma": null,
+      "validity": "estimated",
+      "value_origin": "derived",
+      "measured": false,
+      "reason_codes": []
+    }
+  },
+  "quality": {
+    "pose_mean_vis": 0.93,
+    "frames_analyzed": 330,
+    "frames_dropped": 0,
+    "audio_onset": 1.836,
+    "touches": 1,
+    "warnings": [
+      "TRACK_MAY_BE_SHORT"
+    ]
+  },
+  "starred": true,
+  "note": "driver off a tee, tee height not measured",
+  "revision": 0
+}

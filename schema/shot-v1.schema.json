@@ -1,0 +1,482 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "shot-v1.schema.json",
+  "title": "golf-shot/1",
+  "description": "Per-shot result of golf-swing-lab. Every number carries ci95 or sigma, every null carries a reason code. Cross-field rules JSON Schema cannot express (ci95 bounds, warnings attribution, event order, camera consistency) are enforced by app/src/contract/validate.js; see docs/contract.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "shot_id",
+    "session_id",
+    "venue_id",
+    "preset_id",
+    "created_at",
+    "app_version",
+    "algorithms",
+    "capture",
+    "calibration",
+    "club",
+    "handedness",
+    "events",
+    "metrics",
+    "quality",
+    "starred",
+    "note",
+    "revision"
+  ],
+  "properties": {
+    "schema": { "const": "golf-shot/1" },
+    "shot_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "venue_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "null = ad-hoc setup without a saved venue"
+    },
+    "preset_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "null = ad-hoc setup without a saved camera preset"
+    },
+    "created_at": { "$ref": "#/$defs/dateTime" },
+    "app_version": { "type": "string", "minLength": 1 },
+    "algorithms": { "$ref": "#/$defs/algorithms" },
+    "capture": { "$ref": "#/$defs/capture" },
+    "calibration": { "$ref": "#/$defs/calibration" },
+    "club": { "$ref": "#/$defs/club" },
+    "handedness": { "enum": ["right", "left"] },
+    "events": { "$ref": "#/$defs/events" },
+    "metrics": {
+      "type": "object",
+      "description": "Exactly the fixed metric ids (docs/interfaces.md section 9): additionalProperties false plus minProperties = id count forces every id to be present.",
+      "additionalProperties": false,
+      "minProperties": 22,
+      "properties": {
+        "backswing_s": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "s" } } }] },
+        "downswing_s": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "s" } } }] },
+        "tempo_ratio": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "ratio" } } }]
+        },
+        "head_sway_x_m": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "m" } } }] },
+        "head_lift_z_m": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "m" } } }] },
+        "head_depth_y_m": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "m" } } }] },
+        "spine_forward_tilt_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "spine_side_tilt_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "shoulder_turn_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "hip_turn_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "x_factor_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "hand_plane_dev_m": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "m" } } }] },
+        "top_shaft_angle_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "weight_shift_pct": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "%" } } }] },
+        "early_extension_m": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "m" } } }] },
+        "club_speed_mps": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "m/s" } } }]
+        },
+        "club_path_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "ball_speed_mps": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "m/s" } } }]
+        },
+        "launch_v_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "launch_h_deg": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "deg" } } }]
+        },
+        "carry_m": { "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "m" } } }] },
+        "smash_factor": {
+          "allOf": [{ "$ref": "#/$defs/metric" }, { "properties": { "unit": { "const": "ratio" } } }]
+        }
+      }
+    },
+    "quality": { "$ref": "#/$defs/quality" },
+    "starred": { "type": "boolean" },
+    "note": { "type": "string", "maxLength": 4000 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "history": { "$ref": "#/$defs/history" }
+  },
+  "$defs": {
+    "dateTime": {
+      "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):[0-5]\\d:([0-5]\\d|60)(\\.\\d+)?(Z|[+-]([01]\\d|2[0-3]):[0-5]\\d)$",
+      "description": "ISO-8601 date-time with a timezone"
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "reasonCode": {
+      "enum": [
+        "VIEW_DEPTH_AXIS",
+        "VIEW_PLANE_MISMATCH",
+        "FPS_TOO_LOW",
+        "TRACK_TOO_SHORT",
+        "TRACK_MAY_BE_SHORT",
+        "LAUNCH_DIR_UNOBSERVABLE",
+        "DEPENDS_ON_NULL",
+        "SPIN_ASSUMED",
+        "WIND_IGNORED",
+        "TIMESTAMPS_NOMINAL",
+        "TIMEBASE_SUSPECT",
+        "SETUP_UNVERIFIED",
+        "CALIB_STALE",
+        "PRESET_MISMATCH",
+        "DEPTH_DRIFT_SUSPECT",
+        "ROLLING_SHUTTER_ASSUMED",
+        "BODY_PLANE_ASSUMED",
+        "NO_GRAVITY_REF",
+        "AUDIO_UNAVAILABLE",
+        "THERMAL_DEGRADED",
+        "TEE_LIFT_ASSUMED",
+        "POSE_LOW_VISIBILITY",
+        "EVENTS_UNCERTAIN",
+        "OUT_OF_FRAME",
+        "IMPLAUSIBLE_VALUE",
+        "NOT_IMPLEMENTED"
+      ],
+      "description": "Every code is defined, with a Traditional Chinese description, in app/src/contract/reason-codes.js"
+    },
+    "metric": {
+      "type": "object",
+      "description": "Metric value (docs/interfaces.md section 4). Invariants encoded here: a number needs a value-type validity and ci95 or sigma; a null needs a null-type validity, a reason code, and null ci95/sigma.",
+      "additionalProperties": false,
+      "required": ["value", "unit", "ci95", "sigma", "validity", "value_origin", "measured", "reason_codes"],
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "unit": { "type": "string", "minLength": 1 },
+        "ci95": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[lo, hi] with lo <= value <= hi (checked by the validator)"
+            }
+          ]
+        },
+        "sigma": { "type": ["number", "null"], "minimum": 0 },
+        "validity": {
+          "enum": [
+            "valid",
+            "estimated",
+            "low_confidence",
+            "occluded",
+            "ambiguous",
+            "dropped",
+            "stale",
+            "not_observable",
+            "implausible",
+            "not_computed"
+          ]
+        },
+        "value_origin": {
+          "enum": ["pose", "ball_fit3d", "ball_fit2d", "club_track", "ballistics", "derived", "manual"]
+        },
+        "measured": { "const": false },
+        "reason_codes": { "type": "array", "items": { "$ref": "#/$defs/reasonCode" }, "uniqueItems": true }
+      },
+      "if": {
+        "properties": { "validity": { "enum": ["valid", "estimated", "low_confidence"] } },
+        "required": ["validity"]
+      },
+      "then": {
+        "properties": { "value": { "type": "number" } },
+        "anyOf": [
+          { "properties": { "ci95": { "type": "array" } }, "required": ["ci95"] },
+          { "properties": { "sigma": { "type": "number" } }, "required": ["sigma"] }
+        ]
+      },
+      "else": {
+        "properties": {
+          "value": { "type": "null" },
+          "ci95": { "type": "null" },
+          "sigma": { "type": "null" },
+          "reason_codes": { "minItems": 1 }
+        }
+      }
+    },
+    "algorithms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pose", "events", "calib", "ball", "fit3d", "carry"],
+      "properties": {
+        "pose": { "$ref": "#/$defs/algorithm" },
+        "events": { "$ref": "#/$defs/algorithm" },
+        "calib": { "$ref": "#/$defs/algorithm" },
+        "ball": { "$ref": "#/$defs/algorithm" },
+        "fit3d": { "$ref": "#/$defs/algorithm" },
+        "carry": { "$ref": "#/$defs/algorithm" }
+      }
+    },
+    "algorithm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": { "version": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/sha256" } }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "view",
+        "source",
+        "orientation",
+        "width",
+        "height",
+        "nominal_fps",
+        "effective_fps",
+        "vfr",
+        "timestamps",
+        "clip_ref",
+        "trim_s"
+      ],
+      "properties": {
+        "mode": { "enum": ["live", "highspeed"] },
+        "view": { "enum": ["face_on", "dtl", "high_behind"] },
+        "source": { "enum": ["camera", "import"] },
+        "orientation": {
+          "enum": ["portrait-primary", "portrait-secondary", "landscape-primary", "landscape-secondary", "unknown"],
+          "description": "screen.orientation.type at capture, or unknown for an import without rotation metadata"
+        },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "nominal_fps": { "type": "number", "exclusiveMinimum": 0 },
+        "effective_fps": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "measured from the container timestamps"
+        },
+        "vfr": { "type": "boolean" },
+        "timestamps": {
+          "enum": ["container", "nominal"],
+          "description": "nominal = frame / nominal_fps because container timestamps were missing or non-monotonic"
+        },
+        "clip_ref": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "key of the stored clip, null when the clip was not kept"
+        },
+        "trim_s": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "items": { "type": "number", "minimum": 0 },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[start_s, end_s] of the analysed span inside the clip (start < end is checked by the validator)"
+            }
+          ]
+        }
+      }
+    },
+    "poseReport": {
+      "type": "object",
+      "description": "View-relative camera pose report (docs/interfaces.md section 6)",
+      "additionalProperties": false,
+      "required": ["yaw_deg", "pitch_deg", "roll_deg", "X_m", "Y_m", "h_m", "D_m"],
+      "properties": {
+        "yaw_deg": { "type": "number" },
+        "pitch_deg": { "type": "number" },
+        "roll_deg": { "type": "number" },
+        "X_m": { "type": "number" },
+        "Y_m": { "type": "number" },
+        "h_m": { "type": "number" },
+        "D_m": { "type": "number" }
+      }
+    },
+    "poseSigma": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["yaw_deg", "pitch_deg", "roll_deg", "X_m", "Y_m", "h_m", "D_m"],
+      "properties": {
+        "yaw_deg": { "type": "number", "minimum": 0 },
+        "pitch_deg": { "type": "number", "minimum": 0 },
+        "roll_deg": { "type": "number", "minimum": 0 },
+        "X_m": { "type": "number", "minimum": 0 },
+        "Y_m": { "type": "number", "minimum": 0 },
+        "h_m": { "type": "number", "minimum": 0 },
+        "D_m": { "type": "number", "minimum": 0 }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "description": "Camera object of docs/interfaces.md section 2 (OpenCV pinhole, principal point at the image centre)",
+      "additionalProperties": false,
+      "required": ["W", "H", "f", "cx", "cy", "k1", "R", "t", "readout"],
+      "properties": {
+        "W": { "type": "integer", "minimum": 1 },
+        "H": { "type": "integer", "minimum": 1 },
+        "f": { "type": "number", "exclusiveMinimum": 0 },
+        "cx": { "type": "number" },
+        "cy": { "type": "number" },
+        "k1": { "type": "number" },
+        "R": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 9,
+          "maxItems": 9,
+          "description": "row-major rotation matrix"
+        },
+        "t": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+        "readout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ms", "axis", "dir"],
+          "properties": {
+            "ms": { "type": "number", "minimum": 0 },
+            "axis": { "enum": ["u", "v"] },
+            "dir": { "enum": [1, -1] }
+          }
+        }
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "source",
+        "f_px",
+        "f_locked",
+        "pose",
+        "pose_sigma",
+        "reproj_rmse_px",
+        "slope_deg",
+        "preset_dev",
+        "readout_ms",
+        "readout_source",
+        "camera"
+      ],
+      "properties": {
+        "method": { "enum": ["mat_pnp", "club_line", "ball_only"] },
+        "source": { "enum": ["live", "clip"] },
+        "f_px": { "type": "number", "exclusiveMinimum": 0 },
+        "f_locked": { "type": "boolean" },
+        "pose": { "$ref": "#/$defs/poseReport" },
+        "pose_sigma": { "$ref": "#/$defs/poseSigma" },
+        "reproj_rmse_px": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "null when the method has no mat corners to reproject"
+        },
+        "slope_deg": {
+          "type": ["number", "null"],
+          "description": "mat surface slope, null when not measured"
+        },
+        "preset_dev": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/poseReport" }] },
+        "readout_ms": { "type": "number", "minimum": 0 },
+        "readout_source": { "enum": ["assumed", "measured"] },
+        "camera": { "$ref": "#/$defs/camera" }
+      }
+    },
+    "club": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "length_m", "lie", "tee_lift_m", "tee_lift_source"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "length_m": { "type": "number", "minimum": 0.5, "maximum": 1.5 },
+        "lie": { "enum": ["mat", "tee"] },
+        "tee_lift_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.15,
+          "description": "ball bottom above the mat"
+        },
+        "tee_lift_source": { "enum": ["measured", "assumed"] }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame", "t_s", "conf", "source"],
+      "properties": {
+        "frame": { "type": "integer", "minimum": 0 },
+        "t_s": { "type": "number", "minimum": 0 },
+        "conf": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source": { "enum": ["rules", "tcn", "manual"] }
+      }
+    },
+    "events": {
+      "type": "object",
+      "description": "The 8 GolfDB events; frames and times must be non-decreasing in this order (checked by the validator)",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "toe_up",
+        "mid_backswing",
+        "top",
+        "mid_downswing",
+        "impact",
+        "mid_follow_through",
+        "finish"
+      ],
+      "properties": {
+        "address": { "$ref": "#/$defs/event" },
+        "toe_up": { "$ref": "#/$defs/event" },
+        "mid_backswing": { "$ref": "#/$defs/event" },
+        "top": { "$ref": "#/$defs/event" },
+        "mid_downswing": { "$ref": "#/$defs/event" },
+        "impact": { "$ref": "#/$defs/event" },
+        "mid_follow_through": { "$ref": "#/$defs/event" },
+        "finish": { "$ref": "#/$defs/event" }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pose_mean_vis", "frames_analyzed", "frames_dropped", "audio_onset", "touches", "warnings"],
+      "properties": {
+        "pose_mean_vis": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "null until pose has run"
+        },
+        "frames_analyzed": { "type": "integer", "minimum": 0 },
+        "frames_dropped": { "type": "integer", "minimum": 0 },
+        "audio_onset": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "impact sound time in seconds of media time, null when none was detected"
+        },
+        "touches": { "type": "integer", "minimum": 0 },
+        "warnings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/reasonCode" },
+          "uniqueItems": true,
+          "description": "whole-shot conditions; setup-level codes must be repeated on affected metrics (docs/contract.md)"
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "description": "One entry per human correction (P6): the top-level values that the patch replaced",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision", "at", "before"],
+        "properties": {
+          "revision": { "type": "integer", "minimum": 0 },
+          "at": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/dateTime" }] },
+          "before": { "type": "object" }
+        }
+      }
+    }
+  }
+}

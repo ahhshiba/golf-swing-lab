@@ -1,0 +1,176 @@
+{
+  "schema": "gsl-vendor/1",
+  "description": "Pinned browser runtime dependencies (no CDN at runtime). Managed by scripts/vendor.mjs; see docs/ADR/0001-vendor.md.",
+  "entries": [
+    {
+      "name": "@mediapipe/tasks-vision",
+      "version": "1.2.2",
+      "license": "Apache-2.0",
+      "source": "npm:@mediapipe/tasks-vision@1.2.2",
+      "npm": {
+        "tarball": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.2.2.tgz",
+        "integrity": "sha512-Z7BikxnTvlKgc3d/Nw+LV6B0xyAACxYeAHHUu/xUhm1SV7jlExa9M37beiF/wZFoy0H+cs1PlIT2Z4km02UEHQ=="
+      },
+      "notes": "ESM bundle + wasm loaders. vision_wasm_internal.* is the classic-worker/page variant, vision_wasm_module_internal.* is for ES-module workers (FilesetResolver.forVisionTasks(base, true)); only one variant needs precaching. 1.2.2 has no nosimd variants. The npm package ships no LICENSE file, so LICENSE is the repository file at tag v1.2.2 (Apache-2.0 text plus third-party notices).",
+      "files": [
+        {
+          "path": "app/vendor/mediapipe/vision_bundle.mjs",
+          "sha256": "b65acb59b370cd6561afd9d04c29ed7a87e7ed6386922ac1b263af1f1ad06b7d",
+          "bytes": 156062,
+          "tar_path": "package/vision_bundle.mjs"
+        },
+        {
+          "path": "app/vendor/mediapipe/wasm/vision_wasm_internal.js",
+          "sha256": "f2b9c17131ea79716ec6bf07b117a087b2749a6f8a1e2f1f2e77a9382092db5b",
+          "bytes": 334128,
+          "tar_path": "package/wasm/vision_wasm_internal.js"
+        },
+        {
+          "path": "app/vendor/mediapipe/wasm/vision_wasm_internal.wasm",
+          "sha256": "f5bd25147ac89d506074293ce2675969b10e827180db95a0d9689c2ed80764ab",
+          "bytes": 14603354,
+          "tar_path": "package/wasm/vision_wasm_internal.wasm"
+        },
+        {
+          "path": "app/vendor/mediapipe/wasm/vision_wasm_module_internal.js",
+          "sha256": "72fba0ac8a4034ce9d63f68389df1dead52069409ea621688eedf97f01d4362f",
+          "bytes": 334166,
+          "tar_path": "package/wasm/vision_wasm_module_internal.js"
+        },
+        {
+          "path": "app/vendor/mediapipe/wasm/vision_wasm_module_internal.wasm",
+          "sha256": "b8927a2eebfe80dd98a426a210a9e820c8215168c06f3bcf5d4d09080f623db5",
+          "bytes": 14603372,
+          "tar_path": "package/wasm/vision_wasm_module_internal.wasm"
+        },
+        {
+          "path": "app/vendor/mediapipe/LICENSE",
+          "sha256": "8707eef0533987efc5b155d64761eeb6e20793f50b9bd1a68dad1cf4719d0ed8",
+          "bytes": 12331,
+          "url": "https://raw.githubusercontent.com/google-ai-edge/mediapipe/v1.2.2/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "pose_landmarker_lite",
+      "version": "float16/1",
+      "license": "Apache-2.0",
+      "source": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      "model_card": "https://storage.googleapis.com/mediapipe-assets/Model%20Card%20BlazePose%20GHUM%203D.pdf",
+      "remote": {
+        "x_goog_generation": "1682624736756847",
+        "last_modified": "2023-04-27T19:45:36Z",
+        "md5_base64": "BKdd33yBGsehpFIyZt19iA=="
+      },
+      "notes": "Versioned path float16/1, not float16/latest.",
+      "files": [
+        {
+          "path": "app/models/pose_landmarker_lite.task",
+          "sha256": "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a",
+          "bytes": 5777746,
+          "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
+        }
+      ]
+    },
+    {
+      "name": "pose_landmarker_full",
+      "version": "float16/1",
+      "license": "Apache-2.0",
+      "source": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+      "model_card": "https://storage.googleapis.com/mediapipe-assets/Model%20Card%20BlazePose%20GHUM%203D.pdf",
+      "remote": {
+        "x_goog_generation": "1682642785209422",
+        "last_modified": "2023-04-28T00:46:25Z",
+        "md5_base64": "g4eWidNz0UO+CUyXI1Xkjg=="
+      },
+      "notes": "Versioned path float16/1, not float16/latest (latest serves different bytes of the same length).",
+      "files": [
+        {
+          "path": "app/models/pose_landmarker_full.task",
+          "sha256": "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1",
+          "bytes": 9398198,
+          "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task"
+        }
+      ]
+    },
+    {
+      "name": "pose_landmarker_heavy",
+      "version": "float16/1",
+      "license": "Apache-2.0",
+      "source": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
+      "model_card": "https://storage.googleapis.com/mediapipe-assets/Model%20Card%20BlazePose%20GHUM%203D.pdf",
+      "remote": {
+        "x_goog_generation": "1682642785425305",
+        "last_modified": "2023-04-28T00:46:25Z",
+        "md5_base64": "RT3sTQLMxNPOgStt6E+lFg=="
+      },
+      "notes": "Versioned path float16/1, not float16/latest.",
+      "files": [
+        {
+          "path": "app/models/pose_landmarker_heavy.task",
+          "sha256": "64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b",
+          "bytes": 30664242,
+          "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task"
+        }
+      ]
+    },
+    {
+      "name": "mp4box",
+      "version": "2.4.1",
+      "license": "BSD-3-Clause",
+      "source": "npm:mp4box@2.4.1",
+      "npm": {
+        "tarball": "https://registry.npmjs.org/mp4box/-/mp4box-2.4.1.tgz",
+        "integrity": "sha512-0HGX7nXoDIX6FKLVl4a3wtYjBlwqsN3xuQC3GXzNtKp98FXUOhDSq623azsz8DG5ptd9ZXcXodDkgbdMZOjWvw=="
+      },
+      "notes": "Native ES module build (no UMD wrapper needed): import { createFile, MP4BoxBuffer } from './mp4box.all.mjs' in a module worker or page. mp4box.all.mjs imports the two sibling chunks by relative path, so all three .mjs files must stay together. Newest release at least 14 days before 2026-11-04 (2.5.0 was published 2026-10-25).",
+      "files": [
+        {
+          "path": "app/vendor/mp4box/mp4box.all.mjs",
+          "sha256": "34fa8fd681e8b63998ca9e4c3b477830dd11310c8aaedc37ecb8f49c5452d259",
+          "bytes": 91813,
+          "tar_path": "package/dist/mp4box.all.mjs"
+        },
+        {
+          "path": "app/vendor/mp4box/styp-9TIZZDLN.mjs",
+          "sha256": "ae15acb79233251b72af7f7cc9f47e7f47cadb209206753b7000b502a2391049",
+          "bytes": 236007,
+          "tar_path": "package/dist/styp-9TIZZDLN.mjs"
+        },
+        {
+          "path": "app/vendor/mp4box/rolldown-runtime-w6R9maHv.mjs",
+          "sha256": "183552fe973134bce551888434b581d5a2cb695a82d8907e2cd9d2b61e12ce24",
+          "bytes": 377,
+          "tar_path": "package/dist/rolldown-runtime-w6R9maHv.mjs"
+        },
+        {
+          "path": "app/vendor/mp4box/LICENSE",
+          "sha256": "ebad0332150a08f37389158289d93ab2f70b0ee8717d1db9b3d002febc6c5047",
+          "bytes": 1534,
+          "tar_path": "package/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "event-tcn-v1",
+      "version": "v1 (run c5, checkpoint epoch 254)",
+      "license": "CC-BY-NC-4.0 (trained on GolfDB, McNally et al. 2019)",
+      "source": "local: training/train_tcn.py + training/export.py on GolfDB videos_160 (not downloaded)",
+      "notes": "Event TCN weights and model card (results.split1 M3 gates, checked by scripts/check_model_card.mjs; golden parity by scripts/check_model_parity.mjs). GolfDB-derived: personal, non-commercial use only. scripts/build.mjs --no-bundled-model leaves both files out of dist/ (default for scripts/deploy_pages.sh; docs/ADR/0002-event-model-licence.md).",
+      "files": [
+        {
+          "path": "app/models/event-tcn-v1.bin",
+          "sha256": "544af30932918aa5f6d5ba5c7e569c4af617f7066388327e47d534fb7523544f",
+          "bytes": 264484,
+          "generated": "training/export.py"
+        },
+        {
+          "path": "app/models/event-tcn-v1.json",
+          "sha256": "495bf8e668c9c3df8465a09c33f819b235f846f710985e811038853c7c03d76f",
+          "bytes": 6801,
+          "generated": "training/export.py"
+        }
+      ]
+    }
+  ]
+}

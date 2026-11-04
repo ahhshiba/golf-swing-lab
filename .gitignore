@@ -1,0 +1,21 @@
+node_modules/
+dist/
+training/data/
+training/cache/
+training/vendor/golfdb/data/
+training/runs/
+*.pyc
+__pycache__/
+.DS_Store
+*.bak
+tests/fixtures/generated/
+
+# Third-party binaries: restore with `node scripts/vendor.mjs --fetch` (versions + sha256 in app/vendor/manifest.json)
+app/vendor/*
+!app/vendor/manifest.json
+app/models/*.task
+# GolfDB-derived (CC BY-NC 4.0, non-commercial): not published. Rebuild with training/ (see docs/training.md).
+app/models/event-tcn-v1.*
+tests/fixtures/event-tcn-v1.golden.json
+training/vendor/golfdb/*
+!training/vendor/golfdb/LICENSE-NOTICE.txt

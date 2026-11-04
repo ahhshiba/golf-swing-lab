@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>揮桿實驗室</title>
+<meta name="description" content="離線的高爾夫揮桿與球飛行分析（個人練習用）">
+<meta name="theme-color" content="#0f5132" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1510" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="揮桿實驗室">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png">
+<link rel="stylesheet" href="styles/app.css">
+<script type="module" src="src/main.js"></script>
+</head>
+<body>
+<button id="update-banner" class="update-banner" type="button" hidden>有新版本，點此更新</button>
+<div id="session-bar" class="session-bar" hidden role="status">
+  <span class="bar-text">練習進行中</span>
+  <button class="bar-reopen primary" type="button" hidden>重新開啟相機</button>
+</div>
+<div id="health-prompts" class="health-prompts" hidden role="status" aria-live="polite">
+  <ul class="hp-list"></ul>
+  <button class="hp-dismiss" type="button">知道了</button>
+</div>
+<main id="app">
+  <section data-screen="home" aria-label="首頁"><h1>揮桿實驗室</h1><p>載入中…</p></section>
+  <section data-screen="venue" aria-label="新增場地" hidden></section>
+  <section data-screen="setup" aria-label="架設與校正" hidden></section>
+  <section data-screen="live" aria-label="即時模式" hidden></section>
+  <section data-screen="import" aria-label="匯入影片" hidden></section>
+  <section data-screen="shot" aria-label="結果" hidden></section>
+  <section data-screen="history" aria-label="歷史" hidden></section>
+  <section data-screen="diag" aria-label="診斷" hidden></section>
+  <section data-screen="settings" aria-label="設定" hidden></section>
+  <section data-screen="about" aria-label="關於" hidden></section>
+  <p id="boot-error" class="warn" hidden></p>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<noscript>這個 App 需要開啟 JavaScript。</noscript>
+</body>
+</html>

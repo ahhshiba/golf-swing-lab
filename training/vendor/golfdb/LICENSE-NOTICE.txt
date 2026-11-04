@@ -1,0 +1,13 @@
+LICENSE-NOTICE (added by golf-swing-lab; NOT part of upstream wmcnally/golfdb)
+
+This file is only a pointer. The upstream repository
+https://github.com/wmcnally/golfdb (commit a63b4ce8c0900d09abbe92519223efe16810f5f4)
+contains NO LICENSE file. Its only licence statement is line 3 of README.md in this
+directory, quoted here (verbatim except the trailing space at the end of the line):
+
+  The code in this repository is licensed under a [Creative Commons Attribution-NonCommercial 4.0 International License](https://creativecommons.org/licenses/by-nc/4.0/).
+
+Consequence for this project: treat the code and the GolfDB data as CC BY-NC 4.0,
+personal and non-commercial use only. The README.md next to this file is the
+authoritative text and is kept unmodified. See also ../README.md and
+docs/interfaces.md section 8.

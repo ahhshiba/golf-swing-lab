@@ -1,0 +1,536 @@
+// assembleShot: decoded frames + pose + calibration -> one validated golf-shot/1 (CAFCR F2, F3, P5; KD2, KD9).
+// Pure end-to-end assembly (no DOM, no WebCodecs; Node-testable). Owner: integration-core. pipeline/clip.js and
+// pipeline/live.js (media owner) call it after decoding; scripts/synth_e2e.mjs runs the M4 machine gate through it.
+//
+// assembleShot(input) -> { shot, timings_ms, debug, track }   (track = the track.analyzeClip result or null)
+// input = {
+//   capture:     { mode, view, source, orientation, width, height, nominal_fps, effective_fps, vfr,
+//                  timestamps: 'container'|'nominal' | number[] (container CTS of the whole clip), clip_ref?, trim_s? }
+//   calibration: Calibration (calib/, interfaces.md §4, incl. camera)            venue?: { mat_L, mat_W, ... }
+//   club:        { type, lie?, tee_lift_m?, tee_lift_source?, length_m? }        handedness: 'right'|'left'
+//   poseSeq:     PoseSeq | null          events: EventSet | null (null -> events.detect on poseSeq)
+//   audioOnset_t?: number (s)            clubObs?: club-head observations for rows 11 (dtl top shaft angle)
+//   nPathMC = 600: Monte Carlo draws of the high_behind club path
+//   ballFrames?: { frames: Uint8Array[], times, W, H, origin?: {u, v}, roi? }  grayscale crop of the impact window
+//   track?:      the `track` of an earlier assembleShot result for the same ballFrames (skips track.analyzeClip)
+//   restBall?:   { u, v, w_px } resting ball in full-image pixels (setup C7); predicted from the calibration if absent
+//   ids:         { shot_id, session_id, venue_id, preset_id, created_at, app_version }
+//   warnings:    [RC...] setup-level / whole-shot codes (SETUP_UNVERIFIED, CALIB_STALE, NO_GRAVITY_REF, ...)
+//   quality?:    { frames_dropped, touches }   algorithms?: { key: { version, sha256 } } overrides
+//   seed = 1, nMC = 2000, nCarry = 500, now?: () => ms (clock, for timings only)
+// }
+// Steps: events -> computeMetrics (rows 1–13, registry nulls, face_on row 14 from pose below 200 fps) ->
+// (face_on | high_behind) ∧ effective_fps ≥ 200 ∧ ballFrames (or a given track): track.analyzeClip ->
+//   face_on: physics.analyzeFaceOn (start = static ball ray ∩ ball-centre height incl. tee lift) -> rows 14, 16–20;
+//   high_behind: physics.analyzeHighBehind -> row 15 (club path, club-head track) and row 18 (launch direction);
+//   camera more than 0.15 m off the ball line (C1.3 red light) -> SETUP_UNVERIFIED;
+// -> merged under the registry cell (metrics/registry.js is the only source of which cell is allowed and at
+// which validity) -> shot-level checks (TIMESTAMPS_NOMINAL, TIMEBASE_SUSPECT, TRACK_MAY_BE_SHORT) ->
+// attributeWarnings -> validateShot (throws ContractError on any violation).
+// Allowed rows 14–20 without the data they need are null + not_computed + TRACK_TOO_SHORT (no ball frames / too
+// few detections) or OUT_OF_FRAME (no resting ball to start from); never NOT_IMPLEMENTED.
+//
+// Event frames in the shot are indices into the CAPTURE clip (nearest container timestamp); t_s is authoritative.
+// Given events are re-indexed from t_s, so a P6 correction can pass shot.events straight back in.
+
+import { RC, REASON_CODES } from '../contract/reason-codes.js';
+import { EVENTS, METRIC_IDS, METRIC_UNITS, VIEWS } from '../contract/enums.js';
+import { metricNull, metricValue, downgrade } from '../contract/metric.js';
+import { newShot, attributeWarnings } from '../contract/shot.js';
+import { validateShot, ContractError, formatErrors } from '../contract/validate.js';
+import { REGISTRY, cellFor } from '../metrics/registry.js';
+import { computeMetrics } from '../metrics/compute.js';
+import { worseValidity } from '../metrics/common.js';
+import { detect } from '../events/detect.js';
+import { FEATURE_VERSION } from '../events/features.js';
+import { analyzeClip } from '../track/pipeline.js';
+import { analyzeFaceOn, analyzeHighBehind } from '../physics/pipeline.js';
+import { POSE_CLUB_MAX_FPS } from '../physics/clubspeed_pose.js';
+import { SIDE_OFFSET_RED_M } from '../physics/clubpath.js';
+import { startFromStaticBall } from '../physics/fit3d.js';
+import { BALL_MIN_FPS } from '../physics/result.js';
+import { ballPlausibility } from '../physics/plausibility.js';
+import { readoutModel } from '../physics/shutter.js';
+import { clubCategory } from '../physics/ballistics.js';
+import { ballHeight, predictedBallWidthPx, framesBudget } from '../calib/ballspot.js';
+import { project } from '../geom/camera.js';
+import { nearestFrame, resolveTimestamps } from './frames.js';
+import { fpsAtLeast } from '../geom/constants.js';
+
+export const ASSEMBLE_VERSION = 'assemble-1.0.0';
+/** P5: plausible downswing duration (top -> impact); outside -> TIMEBASE_SUSPECT. */
+export const DOWNSWING_RANGE_S = Object.freeze([0.15, 0.6]);
+/** Metrics whose number scales with the time base (downgraded on TIMEBASE_SUSPECT). */
+export const TIME_SCALED_IDS = Object.freeze(['backswing_s', 'downswing_s', 'club_speed_mps', 'ball_speed_mps', 'carry_m']);
+/** Metrics computed from event times (carry TIMESTAMPS_NOMINAL on top of the physics rows). */
+const TEMPO_IDS = ['backswing_s', 'downswing_s', 'tempo_ratio'];
+/** Rows 14–20 that physics/ produces for face_on (analyzeFaceOn). */
+const PHYSICS_IDS = ['club_speed_mps', 'ball_speed_mps', 'launch_v_deg', 'launch_h_deg', 'carry_m', 'smash_factor'];
+/** Rows that physics/ produces for high_behind (analyzeHighBehind). */
+const HIGH_BEHIND_IDS = ['club_path_deg', 'launch_h_deg'];
+/** Typical club lengths (m) per physics club category; schema needs length_m in [0.5, 1.5]. */
+export const CLUB_LENGTH_M = Object.freeze({
+  driver: 1.15, wood: 1.07, hybrid: 1.0, iron_long: 0.98, iron_mid: 0.94, iron_short: 0.91, wedge: 0.89, unknown: 0.94,
+});
+/** Algorithm versions recorded in shot.algorithms (sha256 = SHA-256 of the descriptor unless overridden). */
+export const ALGORITHM_VERSIONS = Object.freeze({
+  events: `rules-1.0.0+${FEATURE_VERSION}`,
+  ball: 'track-ball-1.0.0',
+  fit3d: 'fit3d-1.0.0',
+  carry: 'carry-rk4-mc-1.0.0',
+});
+
+const BALL_ROW_IDS = METRIC_IDS.filter((id) => REGISTRY[id].row >= 14);
+const uniq = (a) => [...new Set(a.filter(Boolean))];
+const defaultNow = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : 0);
+
+// ------------------------------------------------------------------------------------------------ sha256 (pure)
+
+const K256 = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,
+  0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+  0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8,
+  0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+  0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+  0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+  0xc67178f2,
+]);
+
+function utf8(s) {
+  const out = [];
+  for (const ch of String(s)) {
+    let c = ch.codePointAt(0);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+
+/** SHA-256 of a string (UTF-8) or byte array, as 64 lowercase hex characters. */
+export function sha256Hex(input) {
+  const bytes = typeof input === 'string' ? utf8(input) : Array.from(input);
+  const L = bytes.length;
+  const nBlocks = Math.ceil((L + 9) / 64);
+  const m = new Uint8Array(nBlocks * 64);
+  m.set(bytes);
+  m[L] = 0x80;
+  const bits = L * 8;
+  const dv = new DataView(m.buffer);
+  dv.setUint32(m.length - 8, Math.floor(bits / 0x100000000));
+  dv.setUint32(m.length - 4, bits >>> 0);
+  const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  const w = new Uint32Array(64);
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  for (let b = 0; b < nBlocks; b++) {
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(b * 64 + 4 * i);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let [a, bb, c, d, e, f, g, hh] = h;
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (hh + S1 + ch + K256[i] + w[i]) >>> 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const mj = (a & bb) ^ (a & c) ^ (bb & c);
+      const t2 = (S0 + mj) >>> 0;
+      hh = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = bb; bb = a; a = (t1 + t2) >>> 0;
+    }
+    h[0] += a; h[1] += bb; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+  }
+  return Array.from(h, (x) => x.toString(16).padStart(8, '0')).join('');
+}
+
+// ------------------------------------------------------------------------------------------------ helpers
+
+function plainCamera(cam, orientation, view) {
+  const readout = cam.readout && Number.isFinite(cam.readout.ms)
+    ? { ms: cam.readout.ms, axis: cam.readout.axis, dir: cam.readout.dir }
+    : readoutModel({ orientationType: orientation, view }).readout;
+  return {
+    W: cam.W, H: cam.H, f: cam.f, cx: cam.cx, cy: cam.cy, k1: cam.k1 ?? 0,
+    R: Array.from(cam.R), t: Array.from(cam.t), readout,
+  };
+}
+
+function plainCalibration(c, orientation, view) {
+  const camera = plainCamera(c.camera, orientation, view);
+  return {
+    method: c.method, source: c.source, f_px: c.f_px, f_locked: Boolean(c.f_locked), pose: { ...c.pose },
+    pose_sigma: { ...c.pose_sigma }, reproj_rmse_px: c.reproj_rmse_px ?? null, slope_deg: c.slope_deg ?? null,
+    preset_dev: c.preset_dev ? { ...c.preset_dev } : null, readout_ms: camera.readout.ms,
+    readout_source: c.readout_source ?? 'assumed', camera,
+  };
+}
+
+function rebuild(m, patch) {
+  const next = { ...m, ...patch };
+  if (next.value === null) return metricNull(next.validity, next.reason_codes, next.unit, next.value_origin);
+  return metricValue({
+    value: next.value, unit: next.unit, ci95: next.ci95, sigma: next.sigma, validity: next.validity,
+    value_origin: next.value_origin, reason_codes: next.reason_codes,
+  });
+}
+
+/** Append a code to a metric that carries a number, keeping its validity. Nulls are left alone. */
+function appendCode(m, code) {
+  if (m.value === null || m.reason_codes.includes(code)) return m;
+  return rebuild(m, { reason_codes: [...m.reason_codes, code] });
+}
+
+function registryNull(id, code) {
+  return metricNull(code === RC.DEPENDS_ON_NULL ? 'not_computed' : 'not_observable', [code], METRIC_UNITS[id], REGISTRY[id].value_origin);
+}
+
+/**
+ * Frame rate used for the registry cells: effective_fps, but a slow-motion clip whose effective rate is within 1 %
+ * of its nominal rate counts as the nominal class (a 240 fps iPhone file measures 239.9x fps; the 240 fps tiers
+ * of F2 rows 14 and 20 must still apply to it).
+ */
+export function registryFps(capture) {
+  const eff = capture.effective_fps;
+  const nom = capture.nominal_fps;
+  if (Number.isFinite(nom) && nom > 0 && Number.isFinite(eff) && Math.abs(eff - nom) <= 0.01 * nom) return Math.max(eff, nom);
+  return eff;
+}
+
+function poseRate(poseSeq) {
+  const t = poseSeq?.t_s;
+  if (!t || t.length < 2) return NaN;
+  const d = [];
+  for (let i = 1; i < t.length; i++) if (t[i] > t[i - 1]) d.push(t[i] - t[i - 1]);
+  if (!d.length) return NaN;
+  d.sort((a, b) => a - b);
+  return 1 / d[d.length >> 1];
+}
+
+function meanVisibility(poseSeq) {
+  const img = poseSeq?.img;
+  if (!img || !img.length) return null;
+  let s = 0;
+  let n = 0;
+  for (let q = 3; q < img.length; q += 4) if (Number.isFinite(img[q])) { s += img[q]; n++; }
+  return n ? Math.min(1, Math.max(0, s / n)) : null;
+}
+
+/** EventSet -> { ok, shot (capture-frame indexed), metric (pose-frame indexed), source }. */
+function normalizeEvents(ev, capTimes, fps, poseSeq) {
+  const ok = Boolean(ev) && EVENTS.every((e) => ev[e] && Number.isFinite(ev[e].t_s));
+  if (!ok) {
+    const t0 = capTimes && capTimes.length ? Math.max(0, capTimes[0]) : 0;
+    const shot = {};
+    const metric = {};
+    for (const e of EVENTS) {
+      shot[e] = { frame: 0, t_s: t0, conf: 0, source: 'rules' };
+      metric[e] = { frame: null, t_s: null, conf: 0, source: 'rules' };
+    }
+    return { ok: false, shot, metric, source: null };
+  }
+  const shot = {};
+  const metric = {};
+  for (const e of EVENTS) {
+    const x = ev[e];
+    const t = x.t_s;
+    const conf = Number.isFinite(x.conf) ? Math.min(1, Math.max(0, x.conf)) : 0;
+    const source = ['rules', 'tcn', 'manual'].includes(x.source) ? x.source : 'rules';
+    const frame = capTimes && capTimes.length ? nearestFrame(capTimes, t) : Math.max(0, Math.round(t * fps));
+    shot[e] = { frame, t_s: Math.max(0, t), conf, source };
+    metric[e] = { frame: poseSeq?.t_s?.length ? nearestFrame(poseSeq.t_s, t) : frame, t_s: t, conf, source };
+  }
+  return { ok: true, shot, metric, source: shot.impact.source };
+}
+
+function algorithmsBlock(poseSeq, calibration, eventsSource, overrides) {
+  const versions = {
+    pose: poseSeq ? `mediapipe-pose-landmarker-${poseSeq.model ?? 'unknown'}` : 'none',
+    events: eventsSource === 'tcn' ? `tcn+${FEATURE_VERSION}` : eventsSource === 'manual' ? 'manual' : ALGORITHM_VERSIONS.events,
+    calib: `calib-1.0.0+${calibration.method}`,
+    ball: ALGORITHM_VERSIONS.ball,
+    fit3d: ALGORITHM_VERSIONS.fit3d,
+    carry: ALGORITHM_VERSIONS.carry,
+  };
+  const out = {};
+  for (const k of Object.keys(versions)) {
+    const o = overrides?.[k];
+    out[k] = o && o.version && /^[0-9a-f]{64}$/.test(o.sha256 ?? '')
+      ? { version: o.version, sha256: o.sha256 }
+      : { version: versions[k], sha256: sha256Hex(`golf-swing-lab/${k}/${versions[k]}`) };
+  }
+  return out;
+}
+
+function clubBlock(club, lieHint) {
+  const type = club?.type ? String(club.type) : 'unknown';
+  const cat = clubCategory(type);
+  let lie = club?.lie;
+  if (lie !== 'mat' && lie !== 'tee') lie = lieHint ?? (cat === 'driver' ? 'tee' : 'mat');
+  const src = club?.tee_lift_source ?? (Number.isFinite(club?.tee_lift_m) ? 'measured' : 'assumed');
+  const hgt = ballHeight(lie, club?.tee_lift_m ?? null, src);
+  const L = Number.isFinite(club?.length_m) ? club.length_m : CLUB_LENGTH_M[cat ?? 'unknown'];
+  return {
+    club: { type, length_m: Math.min(1.5, Math.max(0.5, L)), lie, tee_lift_m: hgt.tee_lift_m, tee_lift_source: hgt.tee_lift_source },
+    height: hgt,
+  };
+}
+
+// ------------------------------------------------------------------------------------------------ main
+
+/**
+ * One golf-shot/1 from decoded frames, pose and calibration. Returns { shot, timings_ms, debug, track }; throws
+ * ContractError when the assembled shot violates the contract and RangeError/TypeError on unusable input.
+ */
+export function assembleShot(input) {
+  const now = input.now ?? defaultNow;
+  const T0 = now();
+  const timings = { events: 0, metrics: 0, track: 0, physics: 0, total: 0 };
+  const cap = input.capture;
+  if (!cap || !VIEWS.includes(cap.view)) throw new RangeError(`assembleShot: capture.view must be one of ${VIEWS.join('|')}`);
+  if (!input.calibration || !input.calibration.camera) throw new TypeError('assembleShot: a Calibration with camera is required');
+  const view = cap.view;
+  const handedness = input.handedness === 'left' ? 'left' : 'right';
+  const fps = cap.effective_fps;
+  const regFps = registryFps(cap);
+  const orientation = cap.orientation ?? 'unknown';
+  const calibration = plainCalibration(input.calibration, orientation, view);
+  const cam = calibration.camera;
+  const poseSeq = input.poseSeq && input.poseSeq.t_s && input.poseSeq.t_s.length ? input.poseSeq : null;
+  const debug = { view, fps, registry_fps: regFps };
+
+  // ---- time base (interfaces.md §2 "Time")
+  let tsKind = cap.timestamps === 'nominal' ? 'nominal' : 'container';
+  let capTimes = null;
+  if (Array.isArray(cap.timestamps) || ArrayBuffer.isView(cap.timestamps)) {
+    const r = resolveTimestamps(cap.timestamps, cap.timestamps.length, cap.nominal_fps);
+    tsKind = r.kind;
+    capTimes = r.times;
+  }
+  const tsCodes = tsKind === 'nominal' ? [RC.TIMESTAMPS_NOMINAL] : [];
+
+  // ---- 1. events
+  let t = now();
+  let rawEvents = input.events ?? null;
+  if (!rawEvents && poseSeq) rawEvents = detect(poseSeq, { view, handedness, audioOnset_t: input.audioOnset_t });
+  const ev = normalizeEvents(rawEvents, capTimes, fps, poseSeq);
+  timings.events = now() - t;
+  debug.events_ok = ev.ok;
+
+  // ---- 2. rows 1–13 (and the registry nulls of every 不可 cell)
+  t = now();
+  const pr = poseRate(poseSeq);
+  const metricsFps = Number.isFinite(pr) ? Math.min(regFps, pr) : regFps;
+  const { club: clubOut0, height: height0 } = clubBlock(input.club, null);
+  const metrics = computeMetrics({
+    view, fps: metricsFps, poseSeq, events: ev.metric, calibration, handedness, venue: input.venue,
+    club: clubOut0, clubObs: input.clubObs,
+  });
+  timings.metrics = now() - t;
+  debug.metrics_fps = metricsFps;
+
+  // ---- 3. rows 14–20: registry first, physics only inside allowed cells
+  const cells = {};
+  for (const id of BALL_ROW_IDS) {
+    const cell = cellFor(id, view, regFps);
+    cells[id] = cell;
+    if (cell.validity === null) metrics[id] = registryNull(id, cell.code);
+    else if (id === 'club_speed_mps' && view === 'face_on' && !fpsAtLeast(fps, POSE_CLUB_MAX_FPS)) {
+      // F2 row 14 at 30–199 fps: the pose estimate of computeMetrics (metrics/club.js), never better than the cell
+      const m = metrics[id];
+      metrics[id] = m.value === null ? m : rebuild(m, { validity: worseValidity(m.validity, cell.validity) });
+    } else metrics[id] = metricNull('not_computed', [RC.TRACK_TOO_SHORT], METRIC_UNITS[id], REGISTRY[id].value_origin);
+  }
+
+  let clubOut = clubOut0;
+  let height = height0;
+  let trackResult = null;
+  const warnings = [];
+  const bf = input.ballFrames;
+  const haveFrames = Boolean(bf && bf.frames && bf.frames.length >= 3);
+  if (view === 'high_behind' && fpsAtLeast(fps, BALL_MIN_FPS) && (haveFrames || input.track)) {
+    t = now();
+    const origin = bf?.origin ?? { u: 0, v: 0 };
+    const X0 = [0, 0, height.z_m];
+    let rb = input.restBall;
+    if (!rb || !Number.isFinite(rb.u) || !Number.isFinite(rb.v)) {
+      const p = project(cam, X0);
+      rb = { u: p.u, v: p.v, w_px: predictedBallWidthPx(cam, X0) };
+    }
+    const p0 = project(cam, X0);
+    const p1 = project(cam, [0.3, 0, height.z_m + 0.1]);
+    const dl = Math.hypot(p1.u - p0.u, p1.v - p0.v) || 1;
+    const impactGuessT = ev.ok ? ev.metric.impact.t_s : undefined;
+    const trk = input.track ?? analyzeClip({
+      frames: bf.frames, times: bf.times, W: bf.W, H: bf.H, roi: bf.roi ?? null,
+      restBall: { u: rb.u - origin.u, v: rb.v - origin.v, w_px: rb.w_px > 0 ? rb.w_px : predictedBallWidthPx(cam, X0), lie: clubOut.lie },
+      impactFrameGuess: Number.isFinite(impactGuessT) ? nearestFrame(bf.times, impactGuessT) : undefined,
+      opts: { origin, expectedDir: [(p1.u - p0.u) / dl, (p1.v - p0.v) / dl], now },
+    });
+    trackResult = trk;
+    timings.track = now() - t;
+    t = now();
+    const rest = trk.restBall;
+    const start = rest ? startFromStaticBall(cam, rest.u, rest.v, { lift_m: height.tee_lift_m, sigma_px: rest.refined ? 0.3 : 1.5 }) : null;
+    let tGuess = impactGuessT;
+    const dep = trk.info?.departure;
+    const times = bf?.times;
+    if (times && Number.isInteger(dep) && dep > 0 && dep < times.length) tGuess = 0.5 * (times[dep - 1] + times[dep]);
+    if (start) {
+      const hb = analyzeHighBehind({
+        cam, ballObs: trk.ballTrack?.obs ?? [], clubObs: trk.clubTrack ?? [], start, fps, club: clubOut, t_impact_guess: tGuess,
+        calibration, venue: input.venue, handedness, seed: input.seed ?? 1, nMC: input.nPathMC ?? 600, extra_codes: tsCodes,
+      });
+      for (const id of HIGH_BEHIND_IDS) {
+        const cell = cells[id];
+        if (cell.validity === null) continue;
+        const m = hb.metrics[id];
+        metrics[id] = m.value === null ? m : rebuild(m, { validity: worseValidity(m.validity, cell.validity) });
+      }
+      debug.high_behind = {
+        path: hb.path.ok ? { value: hb.path.club_path_deg, sigma: hb.path.sigma, n_used: hb.path.n_used, side_offset_m: hb.path.side_offset_m } : { codes: hb.path.reason_codes, n_used: hb.path.n_used ?? 0 },
+        launch: hb.launch.ok ? { value: hb.launch.launch_h_deg, sigma: hb.launch.sigma, terms: hb.launch.terms, speed: hb.launch.fit.ball_speed_mps, launch_v: hb.launch.fit.launch_v_deg } : { codes: hb.launch.reason_codes },
+      };
+    } else {
+      for (const id of HIGH_BEHIND_IDS) {
+        if (cells[id].validity !== null) metrics[id] = metricNull('not_computed', [RC.OUT_OF_FRAME], METRIC_UNITS[id], REGISTRY[id].value_origin);
+      }
+    }
+    timings.physics = now() - t;
+    debug.track = { n: trk.ballTrack?.n ?? 0, club_obs: trk.clubTrack?.length ?? 0, reason_codes: trk.reason_codes ?? [] };
+  }
+  if (view === 'high_behind' && Number.isFinite(calibration.pose?.Y_m) && Math.abs(calibration.pose.Y_m) > SIDE_OFFSET_RED_M) {
+    // C1.3 red light: the camera is off the ball line; the plane assumption of row 15 degrades (its σ already
+    // includes it), and the setup check would not have passed
+    warnings.push(RC.SETUP_UNVERIFIED);
+  }
+  if (view === 'face_on' && fpsAtLeast(fps, BALL_MIN_FPS) && haveFrames) {
+    t = now();
+    const origin = bf.origin ?? { u: 0, v: 0 };
+    // resting ball: setup detection or the calibrated prediction (ball spot at the ball-centre height)
+    const X0 = [0, 0, height.z_m];
+    let rb = input.restBall;
+    if (!rb || !Number.isFinite(rb.u) || !Number.isFinite(rb.v)) {
+      const p = project(cam, X0);
+      rb = { u: p.u, v: p.v, w_px: predictedBallWidthPx(cam, X0) };
+    }
+    const p0 = project(cam, X0);
+    const p1 = project(cam, [0.3, 0, height.z_m + 0.1]);
+    const dl = Math.hypot(p1.u - p0.u, p1.v - p0.v) || 1;
+    const impactGuessT = ev.ok ? ev.metric.impact.t_s : undefined;
+    // input.track: the result of an earlier call for the SAME ballFrames (P6 recompute after an event correction,
+    // or a re-run with another calibration readout) — the 2D tracking does not depend on events or calibration
+    const trk = input.track ?? analyzeClip({
+      frames: bf.frames, times: bf.times, W: bf.W, H: bf.H, roi: bf.roi ?? null,
+      restBall: { u: rb.u - origin.u, v: rb.v - origin.v, w_px: rb.w_px > 0 ? rb.w_px : predictedBallWidthPx(cam, X0), lie: clubOut.lie },
+      impactFrameGuess: Number.isFinite(impactGuessT) ? nearestFrame(bf.times, impactGuessT) : undefined,
+      opts: { origin, expectedDir: [(p1.u - p0.u) / dl, (p1.v - p0.v) / dl], now },
+    });
+    trackResult = trk;
+    timings.track = now() - t;
+    // the lie seen by the tee detector decides only when the user did not say
+    if (input.club?.lie !== 'mat' && input.club?.lie !== 'tee' && trk.restBall && trk.restBall.lie_conf >= 0.6) {
+      ({ club: clubOut, height } = clubBlock({ ...input.club, lie: trk.restBall.lie }, null));
+    }
+    t = now();
+    const rest = trk.restBall;
+    const start = rest ? startFromStaticBall(cam, rest.u, rest.v, { lift_m: height.tee_lift_m, sigma_px: rest.refined ? 0.3 : 1.5 }) : null;
+    // impact-time guess: the departure of the ball from its spot, else the pose impact event
+    let tGuess = impactGuessT;
+    const dep = trk.info?.departure;
+    if (Number.isInteger(dep) && dep > 0 && dep < bf.times.length) tGuess = 0.5 * (bf.times[dep - 1] + bf.times[dep]);
+    let phys = null;
+    if (start) {
+      phys = analyzeFaceOn({
+        cam, ballObs: trk.ballTrack.obs, clubObs: trk.clubTrack.length ? trk.clubTrack : undefined, start, fps,
+        club: clubOut, t_impact_guess: tGuess, view, readout_source: calibration.readout_source, calibration,
+        seed: input.seed ?? 1, nMC: input.nMC ?? 2000, nCarry: input.nCarry ?? 500, extra_codes: tsCodes,
+      });
+      for (const id of PHYSICS_IDS) {
+        const cell = cells[id];
+        if (cell.validity === null) continue;
+        const m = phys.metrics[id];
+        metrics[id] = m.value === null ? m : rebuild(m, { validity: worseValidity(m.validity, cell.validity) });
+      }
+      if (phys.fit?.ok) {
+        const fb = framesBudget(cam, view, phys.fit.ball_speed_mps, phys.fit.launch_v_deg, undefined, { fps, z0_m: height.z_m });
+        warnings.push(...fb.reason_codes);
+      }
+    } else {
+      for (const id of PHYSICS_IDS) {
+        if (cells[id].validity !== null) metrics[id] = metricNull('not_computed', [RC.OUT_OF_FRAME], METRIC_UNITS[id], REGISTRY[id].value_origin);
+      }
+    }
+    timings.physics = now() - t;
+    debug.track = {
+      n: trk.ballTrack.n, gaps: trk.ballTrack.gaps, reason_codes: trk.reason_codes, departure: trk.info?.departure ?? null,
+      rest: rest ? { u: rest.u, v: rest.v, w_px: rest.w_px, lie: rest.lie, lie_conf: rest.lie_conf, refined: rest.refined } : null,
+      club_obs: trk.clubTrack.length, timings_ms: trk.timings_ms,
+    };
+    debug.t_impact_guess = tGuess ?? null;
+    if (phys) {
+      const f = phys.fit;
+      const pl = f?.ok ? ballPlausibility(f, tGuess ?? null) : null;
+      debug.fit = f ? {
+        ok: f.ok, plausible: pl ? pl.ok : null, implausible_checks: pl ? pl.failed : [], ball_speed_mps: f.ball_speed_mps ?? null, launch_v_deg: f.launch_v_deg ?? null, psi_deg: f.launch_h_deg ?? null,
+        t0: f.t0 ?? null, n_used: f.n_used ?? null, residual_rmse_px: f.residual_rmse_px ?? null, flags: f.flags ?? [],
+      } : null;
+      const b = phys.fit2d;
+      debug.fit2d = b ? { ok: b.ok, ball_speed_mps: b.ball_speed_mps ?? null, launch_v_deg: b.launch_v_deg ?? null } : null;
+      debug.start = start ? { X: start.X, sigma: start.sigma } : null;
+    }
+  }
+
+  // ---- 4. shot-level time checks (P5)
+  for (const code of tsCodes) {
+    warnings.push(code);
+    for (const id of TEMPO_IDS) metrics[id] = appendCode(metrics[id], code);
+  }
+  if (ev.ok) {
+    const D = ev.shot.impact.t_s - ev.shot.top.t_s;
+    debug.downswing_s = D;
+    if (!(D >= DOWNSWING_RANGE_S[0] && D <= DOWNSWING_RANGE_S[1])) {
+      warnings.push(RC.TIMEBASE_SUSPECT);
+      for (const id of TIME_SCALED_IDS) metrics[id] = downgrade(metrics[id], RC.TIMEBASE_SUSPECT);
+    }
+  } else warnings.push(RC.EVENTS_UNCERTAIN);
+
+  // ---- 5. setup-level and whole-shot warnings
+  for (const c of input.warnings ?? []) {
+    if (typeof c !== 'string' || !Object.prototype.hasOwnProperty.call(REASON_CODES, c)) throw new RangeError(`assembleShot: unknown warning code ${String(c)}`);
+    warnings.push(c);
+  }
+
+  // ---- 6. the shot
+  const ballTimes = bf?.times?.length ? bf.times : null;
+  let trim = cap.trim_s ?? null;
+  if (!trim && ballTimes && ballTimes[0] >= 0 && ballTimes[ballTimes.length - 1] > ballTimes[0]) trim = [ballTimes[0], ballTimes[ballTimes.length - 1]];
+  const ids = input.ids ?? {};
+  const capture = {
+    mode: cap.mode, view, source: cap.source, orientation, width: cap.width, height: cap.height,
+    nominal_fps: cap.nominal_fps, effective_fps: cap.effective_fps, vfr: Boolean(cap.vfr), timestamps: tsKind,
+    clip_ref: cap.clip_ref ?? null, trim_s: trim,
+  };
+  const audio = Number.isFinite(input.audioOnset_t) && input.audioOnset_t >= 0 ? input.audioOnset_t : null;
+  let shot = newShot({
+    shot_id: ids.shot_id, session_id: ids.session_id, venue_id: ids.venue_id ?? null, preset_id: ids.preset_id ?? null,
+    created_at: ids.created_at, app_version: ids.app_version,
+    algorithms: algorithmsBlock(poseSeq, calibration, ev.source, input.algorithms),
+    capture, calibration, club: clubOut, handedness, events: ev.shot, metrics,
+    quality: {
+      pose_mean_vis: meanVisibility(poseSeq),
+      frames_analyzed: (poseSeq ? poseSeq.t_s.length : 0) + (bf?.frames?.length ?? 0),
+      frames_dropped: Number.isInteger(input.quality?.frames_dropped) ? input.quality.frames_dropped : 0,
+      audio_onset: audio,
+      touches: Number.isInteger(input.quality?.touches) ? input.quality.touches : 0,
+      warnings: uniq(warnings),
+    },
+  });
+  shot = attributeWarnings(shot);
+  const v = validateShot(shot);
+  timings.total = now() - T0;
+  if (!v.ok) throw new ContractError(`assembleShot: shot violates golf-shot/1. ${formatErrors(v.errors)}`, v.errors);
+  return { shot, timings_ms: timings, debug, track: trackResult };
+}
