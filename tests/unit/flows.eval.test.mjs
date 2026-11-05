@@ -50,10 +50,14 @@ test('labelStartEvents prefers the stored label; buildLabel needs all 8 events i
   assert.equal(ok.record.revision, 1);
   const ev = labelStartEvents(shot);
   delete ev.finish;
-  assert.match(buildLabel(shot, ev, { at: '2026-11-04T01:00:00Z', fps: 60 }).error, /1 個事件/);
+  const miss = buildLabel(shot, ev, { at: '2026-11-04T01:00:00Z', fps: 60 });
+  assert.equal(miss.record, undefined);
+  assert.equal(miss.params.n, 1, 'one missing event reported'); // ui/shot.js now returns { code, params } (PRODUCT-SPEC §3.4)
   const bad = labelStartEvents(shot);
   bad.top = { ...bad.top, frame: 1000, t_s: 10 };
-  assert.match(buildLabel(shot, bad, { at: '2026-11-04T01:00:00Z', fps: 60 }).error, /順序/);
+  const order = buildLabel(shot, bad, { at: '2026-11-04T01:00:00Z', fps: 60 });
+  assert.equal(order.record, undefined);
+  assert.match(String(order.code), /order|monoton/i, `order code: ${order.code}`);
 });
 
 test('evaluateOwnerSet: Impact ±1 frame rate and per-event errors at 60 Hz', () => {
@@ -125,4 +129,27 @@ test('CLI: first run writes the baseline next to the input, later runs compare (
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('§7.3 --split session on the 24-swing fixture: holdout ≥ 20 swings gated (Impact ±1, address ±3, tempo ±0.3) and passes', () => {
+  const fx = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/fixtures/owner/labels-fixture.json'), 'utf8'));
+  const r = evaluateOwnerSet(fx, { split: 'session' });
+  assert.equal(r.n_scored, 24);
+  assert.ok(r.split.tune.length <= 12 && r.split.holdout.length >= 20);
+  assert.equal(new Set([...r.split.tune_sessions, ...r.split.holdout_sessions]).size, 6, 'whole sessions');
+  const g = compareWithBaseline(r, null);
+  assert.equal(g.gated, true);
+  assert.equal(g.pass, true, g.lines.join('\n'));
+  // the stored detections score the same way
+  assert.equal(compareWithBaseline(evaluateOwnerSet(fx, { split: 'session', detector: 'stored' }), null).pass, true);
+  // a detector that misses impact by 2 frames on every holdout swing fails the gate
+  const worse = JSON.parse(JSON.stringify(fx));
+  for (const sw of worse.swings) sw.detected.impact.t_s += 2 / 60;
+  assert.equal(compareWithBaseline(evaluateOwnerSet(worse, { split: 'session', detector: 'stored' }), null).pass, false);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsl-owner-split-'));
+  try {
+    const base = path.join(dir, 'b.json');
+    assert.equal(main([path.join(ROOT, 'tests/fixtures/owner/labels-fixture.json'), '--split', 'session', '--baseline', base], () => {}), 0);
+    assert.equal(main([path.join(ROOT, 'tests/fixtures/owner/labels-fixture.json'), '--split', 'session', '--baseline', base], () => {}), 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

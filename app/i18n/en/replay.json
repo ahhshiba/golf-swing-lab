@@ -1,0 +1,17 @@
+{
+  "no_clip.title": "No video saved",
+  "no_clip.body": "This shot has no video (it may have been cleaned up). You can still adjust the swing phases.",
+  "frame": "Frame {f} · {s} s",
+  "canvas": "Replay, frame {f}, {s} s{at}",
+  "canvas_at": ", {events}",
+  "prev_frame": "Previous frame",
+  "next_frame": "Next frame",
+  "set_frame": "Set to this frame",
+  "reset_event": "Reset to detected",
+  "events.label": "Swing phases",
+  "selected": "{event} · frame {f} · {source}",
+  "selected_none": "{event} · not set",
+  "marker.valuetext": "{event}, frame {f}, {s} s",
+  "error.order": "Wrong order: “{event}” cannot come before “{before}”",
+  "error.save": "Could not save the correction. Try again."
+}

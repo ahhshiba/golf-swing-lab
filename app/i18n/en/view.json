@@ -1,0 +1,8 @@
+{
+  "face_on": "Face-on",
+  "dtl": "Down the line",
+  "high_behind": "High behind",
+  "face_on.hint": "Phone straight in front of you, facing your chest",
+  "dtl.hint": "Phone behind you, along the target line",
+  "high_behind.hint": "Phone high behind you; sees the ball start left or right"
+}

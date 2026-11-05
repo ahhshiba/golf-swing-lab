@@ -1,9 +1,40 @@
-# e2e hooks (owner: devtools)
+# e2e hooks (owner: foundation; previously devtools)
 
 What `tests/e2e/*.mjs` (Playwright 1.49.1, Chromium; WebKit variants) needs from the app. Run: `npm run test:e2e`, or
 `RUN_BROWSER_E2E=1 bash scripts/verify.sh --only browser-e2e`, or `node tests/e2e/run.mjs --only m1,screens,m2,m2-ui,m2-shot,m5,m6,m6-ui,real-pose,m1@webkit,screens@webkit,m2@webkit,real-pose@webkit [--dist dir]`.
 Runner serves `dist/` with `scripts/devserve.py` on a free `127.0.0.1` port, prefix `/golf-swing-lab/`.
 A missing hook makes that gate FAIL with the testid in the message; nothing passes silently.
+
+## Package gates and parallel runs (PRODUCT-SPEC §8.0.12–13, drop 1)
+
+- A package gate is a file `tests/e2e/gates/<pkg>-<name>.mjs` (`<pkg>` = a…f) exporting `meta = { id, title, timeoutMs }`
+  and `run(ctx)` (returns a summary string, throws to FAIL, throws `Skip` from lib.mjs to SKIP), and/or `gates = [{ meta,
+  run }]`. `run.mjs` discovers them after the built-in gates; ids must be unique (convention: `<pkg>-<name>`). A module that
+  fails to import is reported as a FAIL gate with its file name.
+- `ctx = { baseUrl, dist }`. Launch browsers with `launch(ctx, opts)` from `lib.mjs`: its contexts default to locale
+  `zh-TW` (Playwright would report `en-US` and the app would switch to English); pass `locale` to `newContext` to test
+  another locale, or set `GSL_E2E_LOCALE` for a whole run.
+- Run your own gates against your own build without touching `dist/`:
+  `node scripts/build.mjs --out <scratch>/dist-<pkg>` then
+  `GSL_E2E_DIST=<scratch>/dist-<pkg> GSL_E2E_PORT=<8811…8816> node tests/e2e/run.mjs --only '<pkg>-*'`
+  (`--dist` and `--port` do the same; `--list` prints the selected gates; `--only` takes ids and prefixes ending in `*`).
+- Integration screenshot matrix (§8.7 step 4): `node tests/e2e/screenshot_matrix.mjs --dist <dist> --out <dir> [--port N]
+  [--json file]` — 10 screens × 390/430 (+ 844×390 for setup and live) × light/dark/sun × zh-Hant/en × text 100/200 %
+  (264 states), each screenshotted and checked for h-scroll, control overlap, obscured / clipped glance targets (live
+  pill, hero tiles, count, club, toolbar; setup title, primary, ≥ 2 lines of the instruction in landscape), truncation,
+  split words, spec codes, CJK in en and hero sizes; exit code = states with findings. verify runs it as gate
+  `a-matrix` (browser-e2e stage, 0 findings required).
+- Shared checks: `tests/e2e/checks.mjs` (see docs/design-system.md §6). Screenshots: `screenshotSet()` writes to
+  `$GSL_SHOTS_DIR` (default `tests/e2e/.shots`).
+- New testids declared by the spec (§8.0.12): `onb-next`, `onb-skip`, `onb-allow`, `setup-step` (with `data-step`),
+  `setup-primary`, `camera-retry`, `camera-import-instead`, `live-state`, `live-hero`, `live-club`, `live-end`,
+  `shot-hero`, `shot-unmeasured`, `event-chip`, `event-set-frame`, `event-undo`, `history-session`, `shot-star`,
+  `shot-delete`, `undo-toast`, `teach-accept`, `teach-progress`, `import-queue`, `import-error-card`, `settings-locale`,
+  `settings-units`, `settings-theme`, `privacy-delete-all`, `about-version`, `diag-save`, `tabbar-<id>`. Components keep
+  the testid you pass (`filePicker` puts it on the `<input type=file>`; `switchRow` on the switch; `confirmSheet` uses
+  `confirm-yes` / `confirm-no` unless you pass a testid).
+- Shell hooks: `#toast` (`role=status`, info), `#toast-alert` (`role=alert`, errors), `#icon-sprite`; diag record
+  `errors.last` (until D's `events[]` ring exists) and `i18n.missing`.
 
 ## UI hooks (all present since the integration step, 2026-11-04)
 
@@ -13,13 +44,13 @@ A missing hook makes that gate FAIL with the testid in the message; nothing pass
 | `[data-screen="<id>"]` on each screen root (`home`, `live`, `history`, ...) | all screens | m5, m6-ui |
 | `data-testid="nav-import"` (fallback today: button text 匯入影片) | button/tab that shows the import screen (optional: m2 clicks it only if present) | m2 |
 | `data-testid="import-file-input"` (fallback today: `#import-file`) | the `<input type="file">` that starts probe + decode + analysis (must exist in the DOM, may be visually hidden) | m2 |
-| `data-testid="nav-history"` (fallback: `[data-go="history"]` or button text 歷史) | opens the history screen | m6-ui |
+| `data-testid="tabbar-history"` (fallback: `[data-go="history"]`) | the History tab of the bottom tab bar (the home `nav-history` row was removed at integration, 2026-11-05: History and Settings are tabs, §2.1) | m6-ui, screens, c-*, f-* |
 | `data-testid="history-import-input"` (fallback: `#hist-import`) | `<input type="file">` importing an export JSON (`golf-swing-lab-export/1`) | m6-ui |
 | `data-testid="shot-row"` (fallback: `[data-screen="history"] button.linklike`, one per shot) | one element per shot in the history list | m6-ui |
 | `data-testid="history-export-json"` (fallback: button text 匯出 JSON; the test also clicks the `a[download]` link it produces) | button that exports all shots as JSON | m6-ui |
 | `data-testid="btn-start-practice"` (fallback: `#start-practice`) | the 開始練習 button on home | m5 |
 | `data-testid="btn-skip-setup"` | e2e-only, rendered only when `globalThis.__GSL_E2E__` is set before boot (`context.addInitScript`): setup -> `live` (or `import` in high-speed mode) without a calibration | m5, screens |
-| `data-testid="nav-venue"`, `nav-diag`, `nav-settings`, `nav-about` | the other home menu buttons | screens |
+| `data-testid="nav-venue"` | home's "add a venue" row (`nav-diag`, `nav-settings`, `nav-about` are gone: Diagnostics and About are under Settings as `settings-diag` / `settings-about`, Settings is `tabbar-settings`) | screens, b-* |
 | `data-testid="import-start"` | the 開始分析 button of the import screen | m2-shot |
 
 ## e2e-only seams (`globalThis.__GSL_E2E__`, never set by the app itself)
@@ -27,7 +58,13 @@ A missing hook makes that gate FAIL with the testid in the message; nothing pass
 | Field | Effect | Gate |
 |---|---|---|
 | (object present) | setup shows `btn-skip-setup` | m5, screens |
+| `app` (set by main.js at boot) | the app object: gates navigate with `__GSL_E2E__.app.nav.go(id, params)` and wait for the late layers with `await __GSL_E2E__.app.ready()` | a-shell |
 | `pose(bitmap, t_s, model, { crop }) -> { img: Float32Array(132), world: Float32Array(99) }` | the live screen uses it instead of the vision worker's MediaPipe pose (it must `close()` the bitmap). Frame tap, recorder, onsets, live state machine and diag stay real. | m5 |
+| `clipPose(bitmap, t_s, { crop }) -> { img: Float32Array(132), world: Float32Array(99) }` | when a function at boot, the worker client's `init` carries `e2e_clip_pose: true`; the worker still runs MediaPipe on every frame of the trimmed `analyze_clip` window (the cost is measured) and then asks the page for the landmarks to use (`e2e_pose` / `e2e_pose_reply` messages, workers/protocol.js) | d-latency |
+| `workerDelayMs` (number > 0) | every message to the vision worker is delayed by that much (a stalled worker), so per-call timeouts fire (`ANALYSIS_TIMEOUT`) | d-worker-crash |
+| `vision` (set by workers/client.js) | the live vision client (`terminate()` it to simulate a worker crash) | d-worker-crash |
+| `analyzeClip(file, options, { onProgress }) -> Promise<result>` | the import queue uses it instead of the vision worker's analysis; probe, queue, save and every screen state stay real | c-import-batch |
+| `onboarding` (truthy) | an automated browser (`navigator.webdriver`) shows onboarding on a fresh profile only when this is set before boot; otherwise onboarding is skipped so the older gates start on home | b-onboarding, f-privacy |
 
 ## Needed diag records (`diag.record(path, value)`, read by e2e through `src/diag/record.js`)
 
@@ -156,3 +193,59 @@ rules. `options.use_tcn = false` forces the rules. The source lands in `shot.eve
   "value ± ci" or "—" with at least one Traditional Chinese reason. The fixture has no golfer and the import has no
   calibration, so today every row is an honest null (pose rows EVENTS_UNCERTAIN / POSE_LOW_VISIBILITY / registry codes,
   ball rows SETUP_UNVERIFIED); the numeric ball path in the browser is UNVERIFIED (it is covered in Node by synth_e2e).
+
+## Gates of the foundation package (WP-A, 2026-11-05)
+
+- `a-contracts` — drop 1 contracts (i18n, title/focus, components, error toast).
+- `a-shell` — title + focus on all 10 screens, top stack vs sticky header in setup (scrolled 700 px), no horizontal
+  scroll at `html { font-size: 200% }` on all 10 screens, tab bar (3 tabs ≥ 44 px, hidden on setup/live), CSP
+  (0 `securitypolicyviolation`, cross-origin fetch probe blocked), error in a click handler → `role=alert` toast +
+  diag `events()` ring, `indexedDB.open` that never settles → 重新載入 within 9 s and `#app-ready[data-repo="0"]`.
+- `a-matrix` — the screenshot matrix above, all 264 states, 0 findings (200 % text included).
+- `a-coldstart` — Fast-3G (562.5 ms RTT, 180 kB/s) + CPU ×4, no SW: `#app-ready` ≤ 6 s, `<link rel=modulepreload>` ≤ 30,
+  no `capture/ import/ pipeline/ physics/ track/ vendor/` request before `#app-ready`.
+- Shell hooks added: `#top-stack` (update banner, `#repo-banner`, `#session-bar`, `#health-prompts`), `#tabbar` with
+  `tabbar-practice|history|settings` (`aria-current="page"` on the active one), `#boot-error` (start-up error state,
+  `[data-boot="reload|unsaved|copy"]`), `#app-ready[data-repo="0|1"]`.
+- CSP and Playwright: the app's CSP has no `'unsafe-eval'`, and Playwright's `page.waitForFunction` evaluates a polled
+  predicate from a string. `lib.mjs` therefore replaces `waitForFunction` on every page it creates with a loop over
+  `page.evaluate` (same arguments and timeout). Gates keep CSP on; never pass `bypassCSP`.
+
+## Screen testids (integration, 2026-11-05)
+
+Every `data-testid` in app/src, by screen (besides the ones in the tables above and the §8.0.12 list). A gate may rely
+on any of them; renaming one is a contract change.
+
+- Onboarding: `onb-next`, `onb-skip`, `onb-allow`, `onb-no-tripod`.
+- Home: `home-context`, `home-venue`, `home-venue-sheet`, `home-venue-add`, `home-preset`, `home-view`, `home-club`,
+  `home-mode`, `home-session`, `home-back-live`, `home-end`, `home-end-confirm`, `home-last`, `home-no-repo`.
+- Venue / venues: `venue-step`, `venue-primary`, `venue-slope-status`, `venue-list`, `venue-row`, `venues-add`,
+  `venue-rename-save`, `venue-delete`.
+- Setup: `setup-step`, `setup-primary`, `setup-tripod`, `setup-view`, `setup-enable-level`, `setup-skip-level`,
+  `setup-skip-ball`, `setup-fix`, `setup-anyway`, `setup-force`, `setup-mic-off`, `setup-sun-use`, `setup-clip-input`,
+  `camera-off`, `camera-retry`, `camera-import-instead`, `health-done`, `droptest-done`.
+- Live: `live-state`, `live-hero`, `live-count`, `live-club`, `live-club-sheet`, `live-last`, `live-end`,
+  `live-end-confirm`, `live-reopen`.
+- Import: `import-file-input`, `import-guide`, `import-settings`, `import-settings-done`, `import-view`, `import-calib`,
+  `import-club`, `import-low-anyway`, `import-start`, `import-queue`, `import-steps`, `import-cancel`, `import-leave`,
+  `import-error-card`, `import-error-another`, `import-error-noball`, `import-error-dismiss`, `import-next`,
+  `import-open-shot`.
+- Shot / replay: `shot-hero`, `shot-notices`, `shot-unmeasured`, `shot-mode`, `shot-star`, `shot-delete`, `shot-share`,
+  `shot-leave`, `shot-import-next`, `shot-restore-original`, `glossary-sheet`, `replay-empty`, `replay-prev`,
+  `replay-next`, `event-chips`, `event-chip`, `event-marker` (`role=slider`, `aria-valuenow` = frame), `event-set-frame`,
+  `event-undo`, `event-reset`, `event-save`, `label-status`, `label-save`.
+- History / compare / teach: `history-session`, `history-more-groups`, `history-more-rows`, `history-filter-view`,
+  `history-filter-club`, `history-empty`, `history-empty-start`, `history-compare-toggle`, `history-compare-open`,
+  `compare-sheet`, `history-export-json`, `history-export-csv`, `history-include-clips`, `history-import-input`,
+  `history-restore-status`, `history-teach`, `teach-accept`, `teach-skip`, `teach-progress`, `teach-export` (writes one
+  `golf-swing-lab-labels/1` file: pose sequences + labels, no video; read by `scripts/eval_owner_set.mjs` and
+  `training/`), `teach-empty`, `undo-toast`, `undo-toast-undo`.
+- Settings / trust: `settings-locale`, `settings-units`, `settings-theme`, `settings-hand`, `settings-height`,
+  `settings-club`, `settings-club-length`, `settings-lie`, `settings-live-metrics`, `settings-voice`, `settings-venues`,
+  `settings-storage`, `settings-privacy`, `settings-help`, `settings-about`, `settings-diag`, `settings-developer`,
+  `storage-summary`, `storage-persist`, `storage-persisted`, `storage-evict`, `storage-backup`, `storage-cleanup`,
+  `cleanup`, `privacy-delete-all`, `help-rerun-onboarding`, `help-diag`, `about-version`, `about-version-row` (7 taps
+  reveal the Developer section; `dev-enabled-toast`), `about-events`, `about-privacy`, `about-licences`, `about-help`,
+  `support-link`, `dev-off`, `dev-pose-model`, `dev-heavy-download`, `dev-spec-codes`, `dev-diag`, `model-status`,
+  `model-import`, `model-json-input`, `model-bin-input`, `model-import-status`, `model-rollback`.
+- Diagnostics: `diag-summary`, `diag-errors`, `diag-no-errors`, `diag-copy`, `diag-save`, `diag-refresh`.

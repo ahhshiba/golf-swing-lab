@@ -1,11 +1,19 @@
-// ui/setup.js — P3 setup and calibration (CAFCR C3 steps C0–C10): live preview with the ghost frame, gravity
-// level bubble, 4-corner magnifier taps, traffic light with every failing check in Chinese (calib/checks
-// evaluate), setup timer, 鎖定 (C9), force start (SETUP_UNVERIFIED), high-speed calibration clip (C10), P16, P17.
-
-import { h, clear, card, toast, screenHeader, select, badge } from './dom.js';
-import { VIEW_LABELS, LIGHT_LABELS, failureTexts, fmtDuration, fmtNum } from './format.js';
+// ui/setup.js — setup and calibration as a six-step stepper (PRODUCT-SPEC §2.3 Setup; UX-02, UX-03/R8, UX-07, V05,
+// A11Y-5/6/7): S1 place the tripod (top-down diagram with this venue's numbers) → S2 level (bubble, auto-advance after
+// 1 s green) → S3 mat corners (ghost frame, picker with loupe + fine adjust; the focal length locks from 3 refined
+// solves taken automatically 1 s apart) → S4 ball → S5 stand at address → S6 done (green: start; amber/red: one plain
+// fix instruction, "start anyway" through a ConfirmSheet). One instruction and one primary (`setup-primary`) per step.
+// Camera denied / busy / missing replaces everything with a recovery state (`camera-retry` = same-click reopen,
+// `camera-import-instead`). Checks, limits and the solve are the pure calib/* modules; pose numbers, RMSE and the
+// C0–C10 timer show only with settings.dev. High-speed mode adds the C10 calibration clip to step 3.
+import { h, clear } from './dom.js';
+import { button, screenHeader, notice, segmented, confirmSheet, icon, filePicker } from './components.js';
+import { t, fmtNum } from '../i18n/index.js';
+import { fmtQuantity } from '../i18n/units.js';
 import { createCornerPicker, snapshot, grayOf } from './magnifier.js';
 import { startMotion } from './sensors.js';
+import { tripodDiagram } from './tripod-diagram.js';
+import { classifyCameraError } from './onboarding.js';
 import { calibrate } from '../calib/ladder.js';
 import { evaluate, cornerDrift, COMMON_LIMITS, meanLuma } from '../calib/checks.js';
 import { ghostCorners, ghostDistance } from '../calib/ghost.js';
@@ -15,16 +23,19 @@ import { createGravityTracker, gravityPrior, orientationName } from '../calib/gr
 import { framesBudget, predictedBallWidthPx, ballHeight } from '../calib/ballspot.js';
 import { nominalF } from '../calib/pnp.js';
 import { fLockFromSolves } from '../calib/preset.js';
-import { SETUP_STEPS, STEP_ESTIMATE_S, SETUP_LIMITS } from '../calib/timer.js';
+import { SETUP_STEPS, STEP_ESTIMATE_S } from '../calib/timer.js';
 import { nominalCamera, project } from '../geom/camera.js';
 import { detectRestBall } from '../track/ball.js';
+import { tripodPlacement } from '../session/bay.js';
+import { saveSettings } from '../session/settings.js';
 import { RC } from '../contract/reason-codes.js';
-import { bayAdvice } from '../session/bay.js';
 
-const STEP_LABELS = Object.freeze({
-  C0: '裝機', C1: '物理定位', C2: '開 App、取得權限', C3: '水平', C4: '幽靈框對齊', C5: '墊角精修',
-  C6: '位姿檢查', C7: '放球', C8: '框景（address 2 秒）', C9: '鎖定', C10: '高速校正短片',
-});
+export const SETUP_UI_STEPS = Object.freeze(['tripod', 'level', 'corners', 'ball', 'address', 'done']);
+const VIEWS = ['face_on', 'dtl', 'high_behind'];
+const LEVEL_HOLD_S = 1;
+const FLOCK_SOLVES = 3;
+const FLOCK_EVERY_MS = 1000;
+const SUN_LUMA = 200;
 
 function screenAngle() {
   try { return orientationName(globalThis.screen?.orientation?.angle ?? globalThis.orientation ?? 0); } catch (_) { return 'portrait'; }
@@ -40,26 +51,91 @@ export function streamFocal(venue, preset, W, H) {
   return { f: nominalF(W, H), locked: false };
 }
 
+/** Camera trouble from the permission state and the getUserMedia error name: null | 'denied' | 'busy' | 'missing'. */
+export function cameraProblem(perm, errName, hasApi = true) {
+  if (!hasApi) return 'missing';
+  if (perm === 'busy' || perm === 'missing') return perm;
+  if (perm === 'unsupported') return 'missing';
+  if (perm === 'denied') { const k = classifyCameraError(errName); return k === 'unsupported' ? 'denied' : k; }
+  return null;
+}
+
+// first failing check decides the one fix instruction (most fundamental first)
+const FIX_ORDER = ['preset_view', 'corners_in_frame', 'rmse_px', 'edge_residual_px', 'f_format', 'min_D_m', 'abs_Y_m',
+  'abs_yaw_deg', 'rel_yaw_deg', 'abs_roll_deg', 'rel_roll_deg', 'abs_pitch_deg', 'rel_pitch_deg', 'rel_D_m', 'rel_h_m',
+  'rel_X_m', 'rel_Y_m', 'ghost_px', 'ball_width', 'ball_min_px', 'frames_budget'];
+
+/**
+ * One plain instruction for the most fundamental failing check: { check, code, deg?, m? } | null.
+ * Signs (geom/camera.js): yaw + = turned left (CCW from above), pitch + = aimed up, roll + = turned clockwise seen
+ * from behind the phone; face-on X + = moved to the camera's right, DTL / high behind Y + = moved to its left;
+ * rel_* = report − preset (D + too far, h + too high).
+ */
+export function fixInstruction(evaluation) {
+  const fails = evaluation?.failures ?? [];
+  if (!fails.length) return null;
+  const rank = (f) => { const i = FIX_ORDER.indexOf(f.check); return (f.severity === 'amber' ? 100 : 0) + (i < 0 ? 99 : i); };
+  const f = [...fails].sort((a, b) => rank(a) - rank(b))[0];
+  const v = Number(f.value);
+  const abs = Math.abs(v);
+  const out = (k, extra = {}) => ({ check: f.check, code: `setup.fix.${k}`, ...extra });
+  switch (f.check) {
+    case 'abs_yaw_deg': case 'rel_yaw_deg': return out(v > 0 ? 'turn_right' : 'turn_left', { deg: abs });
+    case 'abs_pitch_deg': case 'rel_pitch_deg': return out(v > 0 ? 'tilt_down' : 'tilt_up', { deg: abs });
+    case 'abs_roll_deg': case 'rel_roll_deg': return out(v > 0 ? 'rotate_ccw' : 'rotate_cw', { deg: abs });
+    case 'rel_D_m': return out(v > 0 ? 'move_closer' : 'move_back', { m: abs });
+    case 'min_D_m': return out('move_back', { m: Math.max(0.01, Number(f.limit) - v) });
+    case 'rel_h_m': return out(v > 0 ? 'lower' : 'raise', { m: abs });
+    case 'rel_X_m': return out(v > 0 ? 'move_left' : 'move_right', { m: abs });
+    case 'rel_Y_m': return out(v > 0 ? 'move_right' : 'move_left', { m: abs });
+    case 'abs_Y_m': return out(v > 0 ? 'move_right' : 'move_left', { m: Math.max(0.01, abs - Number(f.limit)) });
+    case 'corners_in_frame': return out('frame_mat');
+    case 'rmse_px': case 'edge_residual_px': return out('retap');
+    case 'f_format': return out('lens_1x');
+    case 'ghost_px': return out('align_ghost');
+    case 'ball_width': case 'ball_min_px': return out('ball_again');
+    case 'preset_view': return out('preset_view');
+    case 'frames_budget': return out('frames_budget');
+    default: return out('generic');
+  }
+}
+
 export function mountSetup(root, app) {
   let raf = 0;
-  let tick = 0;
   let stopMotion = null;
   let tracker = null;
   let grav = null; // latest { pitch_deg, roll_deg, stable }
+  let gravSeen = false;
+  let levelOkAt = null;
+  let levelWait = 0;
   let ghost = null;
   let result = null; // { calibration, solve, evaluation, corners, W, H }
-  let ball = null;
+  let ball = null; // { w_px, predicted_w_px, lie } | { missing: true }
   let recorded = new Set();
+  let step = 0;
+  let picking = false;
+  let flock = null; // { n, timer } auto focal-lock run
+  let msgLine = null; // { code, params, kind }
+  let addressTimer = 0;
+  let unsub = null;
+  let offStream = null;
+  let levelWaitTimer = 0;
+  let mounted = false; // show() ran and hide() has not: a second show() is a re-render in place (locale change)
   let els = {};
 
   const ctx = () => app.current ?? { venue: null, preset: null, view: app.store.get().view, mode: 'live' };
+  const units = () => app.units();
+  // lengths in the user's body unit; imperial lengths of a metre or more read better as feet and inches
+  const dist = (m, digits) => (units().body === 'in' && Math.abs(m) >= 0.9 ? fmtQuantity(Math.abs(m), 'height', { ...units(), height: 'ftin' }).text : fmtQuantity(m, 'body', units(), digits === undefined ? {} : { digits }).text);
+  const save = (patch) => { const s = saveSettings(patch); app.updateSettings?.(s); return s; };
+  const say = (code, params = {}, kind = '') => { msgLine = { code, params, kind }; paintMsg(); };
 
-  function rec(step) {
-    if (recorded.has(step)) return;
-    const t = app.controller.setupTimer;
-    const last = t.events().at(-1)?.t_s ?? 0;
-    try { t.record(step, Math.max(last, performance.now() / 1000)); recorded.add(step); } catch (_) { /* ignore */ }
-    renderTimer();
+  function rec(s) {
+    if (recorded.has(s)) return;
+    const tm = app.controller.setupTimer;
+    if (!tm) return;
+    const last = tm.events().at(-1)?.t_s ?? 0;
+    try { tm.record(s, Math.max(last, performance.now() / 1000)); recorded.add(s); } catch (_) { /* ignore */ }
   }
 
   function dims() {
@@ -75,15 +151,24 @@ export function mountSetup(root, app) {
     try {
       if (preset?.pose && preset.view === view) return ghostCorners(preset, venue, { W: d.W, H: d.H, f }).corners;
       const opts = { W: d.W, H: d.H, f };
-      if (view === 'face_on' && Number.isFinite(venue.bay_B_m)) {
-        const a = bayAdvice(venue.bay_B_m);
-        if (a.ok) Object.assign(opts, { D: a.D_m, h: Math.min(0.84, a.h_max) });
-      }
+      const p = tripodPlacement(venue, view);
+      if (view === 'face_on') Object.assign(opts, { D: p.D_m, h: p.h_m, shift: p.side_m });
       const pose = poseReport(nominalCamera(view, opts), view);
       return ghostCorners({ pose, view, f_locked: f, W: d.W, H: d.H }, venue, { W: d.W, H: d.H, f }).corners;
     } catch (_) {
       return null;
     }
+  }
+
+  // ------------------------------------------------------------------ stream (R1: re-attach after a reopen)
+  function attachStream(stream) {
+    const m = app.controller.media();
+    const s = stream ?? m.stream;
+    if (els.video && s && els.video.srcObject !== s) {
+      els.video.srcObject = s;
+      els.video.play?.().catch(() => {});
+    }
+    if (s && els.waiting) els.waiting.hidden = true;
   }
 
   function drawOverlay() {
@@ -92,15 +177,18 @@ export function mountSetup(root, app) {
     const c = els.overlay;
     const d = dims();
     if (!c || !d) return;
-    if (c.width !== d.W) { c.width = d.W; c.height = d.H; els.stage.style.aspectRatio = `${d.W} / ${d.H}`; ghost = computeGhost(); }
+    if (c.width !== d.W || c.height !== d.H) { c.width = d.W; c.height = d.H; els.stage.style.aspectRatio = `${d.W} / ${d.H}`; els.stage.style.setProperty('--ar', String(d.W / d.H)); ghost = computeGhost(); }
     const g = c.getContext('2d');
     g.clearRect(0, 0, c.width, c.height);
     const s = Math.max(2, d.W / 480);
-    if (ghost) {
+    const showGhost = SETUP_UI_STEPS[step] === 'corners' || SETUP_UI_STEPS[step] === 'tripod';
+    if (ghost && showGhost) {
       g.save();
       g.setLineDash([8 * s, 6 * s]);
       g.lineWidth = 2 * s;
       g.strokeStyle = 'rgba(255,255,255,0.95)';
+      g.shadowColor = 'rgba(0,0,0,0.8)';
+      g.shadowBlur = 2 * s;
       g.beginPath();
       ghost.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])));
       g.closePath();
@@ -112,72 +200,79 @@ export function mountSetup(root, app) {
       g.fillStyle = result.evaluation.light === 'green' ? '#00c878' : result.evaluation.light === 'amber' ? '#ffb000' : '#ff3b30';
       for (const p of result.corners) { g.beginPath(); g.arc(p[0], p[1], 5 * s, 0, 2 * Math.PI); g.fill(); }
     }
-    // 95 % frame box (C2 入鏡)
-    g.strokeStyle = 'rgba(255,255,255,0.35)';
+    // 95 % frame box (everything must be inside it)
+    g.strokeStyle = 'rgba(255,255,255,0.45)';
     g.lineWidth = s;
     g.setLineDash([]);
     g.strokeRect(0.025 * d.W, 0.025 * d.H, 0.95 * d.W, 0.95 * d.H);
   }
 
+  // ------------------------------------------------------------------ level (S2)
   function levelLimits() {
     return ctx().view === 'high_behind' ? { pitch: 1.0, roll: 0.5, rel: true } : { pitch: 1.0, roll: 0.5, rel: false };
   }
 
-  function renderLevel() {
-    if (!els.level) return;
-    if (!grav) {
-      const perm = app.store.get().permissions?.motion;
-      clear(els.level, h('span', perm === 'denied' ? '水平儀被拒絕：' : '水平儀：等待資料…'),
-        perm === 'denied' ? h('button', { type: 'button', onclick: retryMotion }, '啟用水平儀') : null);
-      return;
-    }
+  function levelState() {
+    if (!grav) return null;
     const lim = levelLimits();
     const preset = ctx().preset;
     const pitch = lim.rel && preset?.pose ? grav.pitch_deg - preset.pose.pitch_deg : grav.pitch_deg;
     const ok = Math.abs(pitch) <= lim.pitch && Math.abs(grav.roll_deg) <= lim.roll;
-    if (ok) rec('C3');
-    const x = Math.max(-1, Math.min(1, grav.roll_deg / 3));
-    const y = Math.max(-1, Math.min(1, pitch / 3));
-    clear(els.level,
-      h('div.bubble-box', {}, h('div.bubble', { class: `bubble ${ok ? 'ok' : ''}`, style: { transform: `translate(${x * 40}px, ${-y * 40}px)` } })),
-      h('div', {}, h('div', `${lim.rel ? '俯仰（相對預設）' : '俯仰'} ${pitch.toFixed(1)}°（±${lim.pitch}）`), h('div', `滾轉 ${grav.roll_deg.toFixed(1)}°（±${lim.roll}）`), ok ? badge('水平 OK', 'ok') : badge('調整雲台', 'warn')));
+    return { pitch, roll: grav.roll_deg, ok, lim };
+  }
+
+  function onGravity(r) {
+    grav = r;
+    gravSeen = true;
+    const ls = levelState();
+    if (ls?.ok) {
+      rec('C3');
+      const now = performance.now() / 1000;
+      if (levelOkAt === null) levelOkAt = now;
+      if (SETUP_UI_STEPS[step] === 'level' && now - levelOkAt >= LEVEL_HOLD_S) { levelOkAt = null; goStep(step + 1); return; }
+    } else levelOkAt = null;
+    if (SETUP_UI_STEPS[step] === 'level') paintLevel();
   }
 
   function startLevel() {
     stopMotion?.();
     tracker = createGravityTracker({ orientation: screenAngle() });
-    stopMotion = startMotion(app, (acc, t) => { const r = tracker.push(acc, t); if (r) { grav = r; renderLevel(); } }, () => { grav = null; renderLevel(); });
+    stopMotion = startMotion(app, (acc, tt) => { const r = tracker.push(acc, tt); if (r) onGravity(r); }, () => { grav = null; if (SETUP_UI_STEPS[step] === 'level') renderStep(); });
   }
 
   function retryMotion() {
     const p = app.controller.retryMotion(); // sync from the click
-    p.then((state) => { if (state === 'granted') startLevel(); else toast('水平儀仍無法使用：俯仰與滾轉只靠墊子推算（NO_GRAVITY_REF）'); renderLevel(); });
+    p.then((st) => { if (st === 'granted') startLevel(); else say('setup.level.still_off', {}, 'bad'); renderStep(); });
   }
 
-  function renderTimer() {
-    if (!els.timer) return;
-    const t = app.controller.setupTimer;
-    const ev = t.events();
-    const total = ev.length ? performance.now() / 1000 - ev[0].t_s : 0;
-    const sum = t.summary();
-    const highspeed = ctx().mode === 'highspeed';
-    const steps = SETUP_STEPS.filter((st) => (highspeed ? st !== 'C5' : st !== 'C10'));
-    clear(els.timer,
-      h('div.timer-total', { class: `timer-total ${total > SETUP_LIMITS.per_angle_p90_s ? 'bad' : ''}` }, `架設計時 ${fmtDuration(total)} ／ 5:00`),
-      h('ol.steps', {}, steps.map((st) => h('li', { class: sum.steps[st] !== undefined ? 'done' : '' },
-        `${st} ${STEP_LABELS[st]}`, sum.steps[st] !== undefined ? ` ✓ ${Math.round(sum.steps[st])}s` : ` （約 ${STEP_ESTIMATE_S[st]}s）`))));
+  function paintLevel() {
+    if (!els.level) return;
+    const ls = levelState();
+    if (!ls) return;
+    const x = Math.max(-1, Math.min(1, ls.roll / 3));
+    const y = Math.max(-1, Math.min(1, ls.pitch / 3));
+    els.bubble.style.transform = `translate(${(x * 42).toFixed(1)}%, ${(-y * 42).toFixed(1)}%)`;
+    els.bubble.classList.toggle('ok', ls.ok);
+    els.levelBox.classList.toggle('ok', ls.ok);
+    els.levelText.textContent = ls.ok ? t('setup.level.ok') : t(Math.abs(ls.roll) / ls.lim.roll > Math.abs(ls.pitch) / ls.lim.pitch ? (ls.roll > 0 ? 'setup.level.roll_pos' : 'setup.level.roll_neg') : (ls.pitch > 0 ? 'setup.level.pitch_pos' : 'setup.level.pitch_neg'));
+    if (els.levelNums) els.levelNums.textContent = t('setup.level.numbers', { pitch: fmtNum(ls.pitch, { digits: 1 }), roll: fmtNum(ls.roll, { digits: 1 }) });
+    els.primary?.setReason(ls.ok ? null : t('setup.level.reason'));
   }
 
-  function solveWith(corners, { W, H, edge = null, source = 'live' }) {
+  // ------------------------------------------------------------------ solve (S3)
+  function solveWith(corners, { W, H, edge = null, source = 'live', quiet = false }) {
     const { venue, preset, view, mode } = ctx();
     const foc = streamFocal(venue, preset, W, H);
     const g = grav ? gravityPrior(grav) : null;
     const visible = { corners, club: null, ball: null, gravity: g };
-    const r = calibrate(visible, {
-      venue, view, W, H, f: foc.f, fLocked: foc.locked, preset: preset?.view === view ? preset : null,
-      cornerSource: 'manual', source, slope_deg: venue?.slope_deg ?? null,
-    });
-    if (!r.ok) { toast('解不出位姿：檢查四角順序（後側近端開始，逆時針）'); return null; }
+    let r;
+    try {
+      r = calibrate(visible, {
+        venue, view, W, H, f: foc.f, fLocked: foc.locked, preset: preset?.view === view ? preset : null,
+        cornerSource: 'manual', source, slope_deg: venue?.slope_deg ?? null,
+      });
+    } catch (e) { r = { ok: false }; app.record?.('setup.solve_error', String(e?.message ?? e)); }
+    if (!r.ok) { if (!quiet) say('setup.corners.no_solve', {}, 'bad'); return null; }
     const cam = r.calibration.camera;
     const ghostPx = preset?.pose && preset.view === view && ghost ? ghostDistance(corners, ghost).max_px : undefined;
     let budget;
@@ -189,18 +284,18 @@ export function mountSetup(root, app) {
       f_free_px: r.solve?.fFormat?.f_free, f_locked_px: foc.locked ? r.solve?.f : undefined, corner_source: 'manual',
       preset: preset?.view === view ? preset : null, ghost_px: ghostPx, corners, W, H,
       gravity_available: Boolean(grav), frames_budget: budget,
-      ball: ball ? { w_px: ball.w_px, predicted_w_px: ball.predicted_w_px } : undefined,
+      ball: ball && !ball.missing ? { w_px: ball.w_px, predicted_w_px: ball.predicted_w_px } : undefined,
     });
     result = { calibration: r.calibration, solve: r.solve, evaluation, corners, W, H, source };
+    app.record?.('setup.light', evaluation.light);
     if (!foc.locked) collectF(r.calibration.f_px, W, H, corners, edge, source);
     rec('C4');
     rec('C5');
     rec('C6');
-    renderLight();
     return result;
   }
 
-  // P1 f-lock inside the first setup: 3 magnifier solves with f free, lock when SD ≤ 1 % (CAFCR P1, K3)
+  // focal lock inside the first setup: 3 solves with f free, lock when SD ≤ 1 % (CAFCR P1, K3)
   function collectF(f, W, H, corners, edge, source) {
     const cur = ctx();
     const fs = [...(cur.fSolves ?? []), f];
@@ -210,82 +305,92 @@ export function mountSetup(root, app) {
       const venue = { ...cur.venue, f_locked: lock.f_locked, f_W: W, f_H: H, f_sd_pct: lock.sd_pct, f_solves: fs, f_view: cur.view };
       app.current = { ...app.current, venue, fSolves: [] };
       app.repo?.venues.put(venue).catch(() => {});
-      app.record('calibration.f_lock', { f_locked: lock.f_locked, sd_pct: lock.sd_pct, n: lock.n });
-      toast(`焦距已鎖定：f = ${lock.f_locked.toFixed(1)} px（SD ${lock.sd_pct.toFixed(2)}%）`);
-      solveWith(corners, { W, H, edge, source });
+      app.record?.('calibration.f_lock', { f_locked: lock.f_locked, sd_pct: lock.sd_pct, n: lock.n });
+      stopFlock();
+      solveWith(corners, { W, H, edge, source, quiet: true });
     }
   }
 
-  function fLockText() {
-    const cur = ctx();
-    if (Number.isFinite(cur.venue?.f_locked)) return null;
-    const fs = cur.fSolves ?? [];
-    const lock = fs.length ? fLockFromSolves(fs) : null;
-    return h('p', { class: `check ${fs.length >= 3 && !lock?.ok ? 'bad' : ''}` },
-      `焦距尚未鎖定（P1）：已點 ${fs.length} 次${fs.length ? `，f = ${fs.map((x) => x.toFixed(0)).join('、')} px` : ''}。` +
-      (fs.length < 3 ? `再「點四角」${3 - fs.length} 次（每次重新點）。` : `SD ${lock.sd_pct.toFixed(2)}% > 1%：檢查是否 1x 鏡頭、240fps，再點一次。`));
-  }
+  function fLocked() { return Number.isFinite(ctx().venue?.f_locked); }
 
-  function renderLight() {
-    if (!els.light) return;
-    if (!result) { clear(els.light, h('p', '點完墊子四角後顯示燈號。'), fLockText()); return; }
-    const e = result.evaluation;
-    const p = result.calibration.pose;
-    const lines = failureTexts(e);
-    clear(els.light,
-      h('div', { class: `light ${e.light}`, role: 'status' }, LIGHT_LABELS[e.light]),
-      lines.length ? h('ul.failures', {}, lines.map((t) => h('li', t))) : h('p', '所有檢查都通過。'),
-      e.reason_codes.includes(RC.NO_GRAVITY_REF) ? h('p.hint', '沒有水平儀資料，俯仰與滾轉只靠墊子推算。') : null,
-      fLockText(),
-      h('p.hint', `位姿：偏航 ${fmtNum(p.yaw_deg)}°、俯仰 ${fmtNum(p.pitch_deg)}°、滾轉 ${fmtNum(p.roll_deg)}°、D ${fmtNum(p.D_m)}m、h ${fmtNum(p.h_m)}m、RMSE ${fmtNum(result.calibration.reproj_rmse_px)}px`));
-    els.lockBtn.disabled = e.light === 'red';
-    els.forceBtn.hidden = e.light !== 'red';
+  /** After a manual solve: take more refined solves from fresh frames 1 s apart until the focal length locks. */
+  function startFlock() {
+    stopFlock();
+    if (fLocked() || !result) return;
+    flock = { n: 1, timer: 0 };
+    const tick = () => {
+      if (!flock || fLocked() || !result) { stopFlock(); renderStep(); return; }
+      const v = els.video;
+      if (v?.videoWidth) {
+        try {
+          const fr = snapshot(v, v.videoWidth, v.videoHeight);
+          const ref = refineCorners(grayOf(fr), result.corners);
+          if (ref?.ok) solveWith(ref.corners, { W: fr.width, H: fr.height, edge: ref.max_edge_residual_px, source: 'live', quiet: true });
+        } catch (_) { /* skip this sample */ }
+      }
+      if (!flock) { renderStep(); return; }
+      flock.n += 1;
+      if (flock.n >= FLOCK_SOLVES || fLocked()) { stopFlock(); renderStep(); return; }
+      flock.timer = setTimeout(tick, FLOCK_EVERY_MS);
+      renderStep();
+    };
+    flock.timer = setTimeout(tick, FLOCK_EVERY_MS);
   }
+  function stopFlock() { if (flock) clearTimeout(flock.timer); flock = null; }
 
-  function openPicker() {
+  function openPicker(frameCanvas = null) {
     const v = els.video;
-    if (!v.videoWidth) { toast('相機畫面還沒準備好'); return; }
-    const frame = snapshot(v, v.videoWidth, v.videoHeight);
-    els.picker.setFrame(frame);
-    els.picker.setGhost(ghost);
+    const fr = frameCanvas ?? (v?.videoWidth ? snapshot(v, v.videoWidth, v.videoHeight) : null);
+    if (!fr) { say('setup.corners.no_frame', {}, 'bad'); return; }
+    els.picker.setFrame(fr);
+    els.picker.setGhost(frameCanvas ? null : ghost);
     els.picker.reset();
+    picking = true;
     els.pickerBox.hidden = false;
     els.stage.hidden = true;
+    renderStep();
+    els.pickerBox.querySelector('canvas')?.focus?.({ preventScroll: true });
+  }
+
+  function closePicker() {
+    picking = false;
+    els.pickerBox.hidden = true;
+    els.stage.hidden = false;
+    els.pickerDone = null;
   }
 
   function finishPicker() {
     const corners = els.picker.corners();
-    if (!corners) { toast('請點完四個角'); return; }
+    if (!corners) return;
     const ref = els.picker.refine();
     const edge = ref?.ok ? ref.max_edge_residual_px : null;
     const f = els.picker.frame();
-    els.pickerBox.hidden = true;
-    els.stage.hidden = false;
-    solveWith(els.picker.corners(), { W: f.width, H: f.height, edge });
+    closePicker();
+    msgLine = null;
+    if (solveWith(els.picker.corners(), { W: f.width, H: f.height, edge })) startFlock();
+    renderStep();
   }
 
+  // ------------------------------------------------------------------ ball (S4)
   function checkBall() {
-    if (!result) { toast('先完成墊子四角'); return; }
+    if (!result) return;
     const v = els.video;
     const cam = result.calibration.camera;
     const { venue } = ctx();
-    const st = app.settings();
-    const lie = st.lie ?? 'mat';
+    const lie = app.settings().lie ?? 'mat';
     const z = ballHeight(lie, venue?.tee_lift_m ?? null, Number.isFinite(venue?.tee_lift_m) ? 'measured' : 'assumed').z_m;
     const X = [0, 0, z];
     const pr = project(cam, X);
-    if (!(pr && pr.z > 0)) { toast('無法預測球的位置'); return; }
-    const u = pr.u;
-    const vv = pr.v;
+    if (!(pr && pr.z > 0) || !v?.videoWidth) { say('setup.ball.no_predict', {}, 'bad'); return; }
     const predicted = predictedBallWidthPx(cam, X);
-    const gray = grayOf(snapshot(v, v.videoWidth, v.videoHeight));
     let det = null;
-    try { det = detectRestBall(gray, { x: 0, y: 0, w: gray.W, h: gray.H }, { u, v: vv, w_px: predicted }, { polarity: 'auto' }); } catch (_) { det = null; }
-    if (!det) { toast('在預期位置找不到球：把球放在墊子上的球位'); return; }
+    try { det = detectRestBall(grayOf(snapshot(v, v.videoWidth, v.videoHeight)), { x: 0, y: 0, w: v.videoWidth, h: v.videoHeight }, { u: pr.u, v: pr.v, w_px: predicted }, { polarity: 'auto' }); } catch (_) { det = null; }
+    if (!det) { say('setup.ball.not_found', {}, 'bad'); return; }
     ball = { w_px: det.w_px, predicted_w_px: predicted, lie: det.lie };
     rec('C7');
-    solveWith(result.corners, { W: result.W, H: result.H, edge: null, source: result.source });
-    toast(`球寬 ${det.w_px.toFixed(1)}px（預測 ${predicted.toFixed(1)}px）${det.lie === 'tee' ? '，偵測到球座' : ''}`);
+    solveWith(result.corners, { W: result.W, H: result.H, edge: null, source: result.source, quiet: true });
+    say(det.lie === 'tee' ? 'setup.ball.found_tee' : 'setup.ball.found', {}, 'ok');
+    renderStep();
   }
 
   /** P19: mean brightness of the live preview (downscaled), NaN when there is no frame. */
@@ -299,33 +404,27 @@ export function mountSetup(root, app) {
     } catch (_) { return NaN; }
   }
 
-  function checkLight() {
-    const l = sceneLuma();
-    if (!Number.isFinite(l)) { toast('還沒有畫面'); return; }
-    const r = app.controller.checkScene?.({ luma: l });
-    const b = r?.checks?.brightness;
-    if (!b || b.skipped) toast('還沒有鎖定過的校正畫面可以比較');
-    else toast(b.changed ? `光線改變 ${(100 * b.rel).toFixed(0)}%：背景模型會重建` : `光線正常（差 ${(100 * b.rel).toFixed(0)}%）`);
-  }
-
   async function doLock(forced) {
     if (!result) return;
     const { venue, preset, view, mode } = ctx();
-    if (forced && !confirm('檢查沒有全部通過。強制開始後，每一球都會標記「架設檢查沒有全部通過」並降低可信度。確定？')) return;
+    if (forced) {
+      const ok = await confirmSheet({ title: t('setup.done.force_title'), consequence: t('setup.done.force_body'), confirmLabel: t('setup.done.force_confirm'), testid: 'setup-force' });
+      if (!ok) return;
+    }
     try {
       const p = await app.controller.lock({ calibration: result.calibration, evaluation: result.evaluation, forced, venue, view, W: result.W, H: result.H, preset, corners: result.corners, luma: sceneLuma() });
       app.current = { ...ctx(), preset: p, calibration: result.calibration, lie: ball?.lie ?? app.settings().lie, setupCorners: result.corners };
-      toast(forced ? '已強制開始（SETUP_UNVERIFIED）' : '已鎖定預設');
+      if (forced) app.toast.info(t('setup.done.forced_toast'));
       app.nav.go(mode === 'highspeed' ? 'import' : 'live');
     } catch (e) {
-      toast(`鎖定失敗：${e.message}`);
+      app.errors.report(e, { where: 'setup.lock' });
     }
   }
 
-  // ---- C10: high-speed calibration clip (replaces C5) ----
+  // ------------------------------------------------------------------ C10 high-speed calibration clip
   async function calibClip(file) {
     const dec = app.deps.decode;
-    if (!dec?.decodeFile) { toast('影片解碼模組尚未安裝（import/decode.js）'); return; }
+    if (!dec?.decodeFile) { say('setup.clip.no_decoder', {}, 'bad'); return; }
     const frames = [];
     try {
       await dec.decodeFile(file, {
@@ -341,120 +440,375 @@ export function mountSetup(root, app) {
         },
       });
     } catch (e) {
-      toast(`校正短片解碼失敗：${e.message ?? e}`);
+      app.errors.report(e, { where: 'setup.clip', silent: true });
+      say('setup.clip.decode_failed', {}, 'bad');
       return;
     }
-    if (frames.length < 2) { toast('校正短片太短（要 2 秒）'); return; }
-    els.picker.setFrame(frames[0]);
-    els.picker.setGhost(null);
-    els.picker.reset();
-    els.pickerBox.hidden = false;
-    els.stage.hidden = true;
-    els.pickerDone.onclick = () => {
+    if (frames.length < 2) { say('setup.clip.too_short', {}, 'bad'); return; }
+    openPicker(frames[0]);
+    els.pickerDone = () => {
       const taps = els.picker.corners();
-      if (!taps) { toast('請點完四個角'); return; }
+      if (!taps) return;
       try {
         const a = refineCorners(grayOf(frames[0]), taps);
         const b = refineCorners(grayOf(frames[1]), taps);
-        if (!a.ok || !b.ok) { toast('角點精修失敗：放大鏡再點準一點'); return; }
+        if (!a.ok || !b.ok) { say('setup.clip.refine_failed', {}, 'bad'); return; }
         const drift = cornerDrift(a.corners, b.corners);
-        els.pickerBox.hidden = true;
-        els.stage.hidden = false;
-        els.pickerDone.onclick = finishPicker;
-        if (!(drift.max_px <= COMMON_LIMITS.clip_drift_px)) { toast(`兩幀四角漂移 ${drift.max_px.toFixed(2)}px > 1px：腳架晃動，請重錄`); return; }
+        closePicker();
+        if (!(drift.max_px <= COMMON_LIMITS.clip_drift_px)) { say('setup.clip.drift', { px: fmtNum(drift.max_px, { digits: 1 }) }, 'bad'); renderStep(); return; }
         solveWith(a.corners, { W: frames[0].width, H: frames[0].height, edge: Math.max(a.max_edge_residual_px, b.max_edge_residual_px), source: 'clip' });
         rec('C10');
-        toast(`校正短片 OK：漂移 ${drift.max_px.toFixed(2)}px`);
+        say('setup.clip.ok', { px: fmtNum(drift.max_px, { digits: 2 }) }, 'ok');
+        renderStep();
       } catch (e) {
-        toast(`校正失敗：${e.message}`);
+        app.errors.report(e, { where: 'setup.clip' });
       }
     };
+    renderStep();
   }
 
-  function attachStream() {
-    const m = app.controller.media();
-    if (els.video && m.stream && els.video.srcObject !== m.stream) {
-      els.video.srcObject = m.stream;
-      els.video.play?.().catch(() => {});
-    }
+  // ------------------------------------------------------------------ rendering
+  function goStep(i) {
+    clearTimeout(addressTimer);
+    if (picking) closePicker();
+    msgLine = null;
+    step = Math.max(0, Math.min(SETUP_UI_STEPS.length - 1, i));
+    app.record?.('setup.step', SETUP_UI_STEPS[step]);
+    renderStep();
+    els.stepTitle?.focus?.({ preventScroll: true });
   }
 
-  function render() {
-    const { view, mode, preset } = ctx();
-    result = null;
-    ball = null;
-    recorded = new Set(Object.keys(app.controller.setupTimer.summary().steps));
-    const video = h('video.preview', { playsinline: true, muted: true, autoplay: true });
-    const overlay = h('canvas.overlay', {});
-    const stage = h('div.stage', {}, video, overlay);
-    const picker = createCornerPicker({});
-    const pickerDone = h('button.primary', { type: 'button', onclick: finishPicker }, '四角完成');
-    const pickerBox = h('div.picker-box', { hidden: true }, picker.el, h('div.row', {}, h('button', { type: 'button', onclick: () => picker.reset() }, '重點'), pickerDone,
-      h('button', { type: 'button', onclick: () => { pickerBox.hidden = true; stage.hidden = false; } }, '取消')));
-    const lockBtn = h('button.primary.big', { type: 'button', disabled: true, onclick: () => doLock(false) }, '鎖定（C9）');
-    const forceBtn = h('button.danger', { type: 'button', hidden: true, onclick: () => doLock(true) }, '紅燈仍強制開始');
-    const level = h('div.level', {});
-    const light = h('div.light-box', {});
-    const timer = h('div.timer', {});
-    els = { video, overlay, stage, picker, pickerBox, pickerDone, lockBtn, forceBtn, level, light, timer };
+  function paintMsg() {
+    if (!els.msg) return;
+    els.msg.textContent = msgLine ? t(msgLine.code, msgLine.params) : '';
+    els.msg.className = `step-msg ${msgLine?.kind ?? ''}`;
+    els.msg.hidden = !msgLine;
+  }
 
-    const viewSel = select(Object.entries(VIEW_LABELS), view, { id: 'setup-view' });
-    const angleBtn = h('button', { type: 'button' }, '換角度（P16）');
-    angleBtn.addEventListener('click', async () => {
-      const v = viewSel.value;
-      let p = null;
+  function lightPill(e) {
+    const fix = fixInstruction(e);
+    const fixText = fix ? t(fix.code, { deg: fmtNum(fix.deg ?? 0, { digits: 1 }), dist: dist(fix.m ?? 0, 0) }) : null;
+    return h('div.light-summary', {},
+      h('div', { class: `light ${e.light}`, role: 'status' }, h('span.light-glyph', { 'aria-hidden': 'true' }, e.light === 'green' ? '✓' : e.light === 'amber' ? '!' : '✕'), h('span', t(`setup.light.${e.light}`))),
+      fixText && e.light !== 'green' ? h('p.fix-line', { 'data-testid': 'setup-fix' }, fixText) : null);
+  }
+
+  function devBlock() {
+    if (!app.settings().dev) return null;
+    const tm = app.controller.setupTimer;
+    const sum = tm?.summary?.() ?? { steps: {} };
+    const ev = tm?.events?.() ?? [];
+    const total = ev.length ? performance.now() / 1000 - ev[0].t_s : 0;
+    const highspeed = ctx().mode === 'highspeed';
+    const steps = SETUP_STEPS.filter((st) => (highspeed ? st !== 'C5' : st !== 'C10'));
+    const p = result?.calibration?.pose;
+    return h('details.dev-block', { 'data-spec-overlay': '' },
+      h('summary', t('setup.dev.title')),
+      h('p.mono', t('setup.dev.timer', { s: fmtNum(total) })),
+      h('ol.mono', {}, steps.map((st) => h('li', `${st} ${sum.steps[st] !== undefined ? `${Math.round(sum.steps[st])}s` : `~${STEP_ESTIMATE_S[st]}s`}`))),
+      p ? h('p.mono', `yaw ${fmtNum(p.yaw_deg, { digits: 2 })}° pitch ${fmtNum(p.pitch_deg, { digits: 2 })}° roll ${fmtNum(p.roll_deg, { digits: 2 })}° D ${fmtNum(p.D_m, { digits: 3 })} h ${fmtNum(p.h_m, { digits: 3 })} rmse ${fmtNum(result.calibration.reproj_rmse_px, { digits: 2 })}px`) : null,
+      result ? h('ul.mono', {}, result.evaluation.failures.map((f) => h('li', `${f.check}: ${typeof f.value === 'number' ? fmtNum(f.value, { digits: 3 }) : f.value} / ${f.limit}`))) : null,
+      button({ label: t('setup.dev.light_check'), size: 'md', onClick: () => { const l = sceneLuma(); const r = Number.isFinite(l) ? app.controller.checkScene?.({ luma: l }) : null; const b = r?.checks?.brightness; say(!b || b.skipped ? 'setup.dev.light_none' : b.changed ? 'setup.dev.light_changed' : 'setup.dev.light_ok', { pct: fmtNum(100 * (b?.rel ?? 0)) }); } }));
+  }
+
+  function viewPicker() {
+    const { view } = ctx();
+    return h('div.field', {},
+      h('span.field-label', { id: 'setup-view-label' }, t('setup.view.label')),
+      segmented({ label: t('setup.view.label'), testid: 'setup-view', options: VIEWS.map((v) => [v, t(`view.${v}`)]), value: view, onChange: (v) => changeAngle(v) }));
+  }
+
+  async function changeAngle(v) {
+    let p = null;
+    try {
       if (app.repo && ctx().venue) {
         const list = (await app.repo.presets.list({ index: 'venue_id', query: ctx().venue.venue_id })).filter((x) => x.view === v);
         p = list.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))[0] ?? null;
       }
-      app.controller.changeAngle(v, p);
-      app.current = { ...ctx(), view: v, preset: p };
-      render();
-      toast(`改為${VIEW_LABELS[v]}：${v === 'dtl' ? '直拍' : '橫拍'}，重新架設`);
-    });
+    } catch (_) { p = null; }
+    try { app.controller.changeAngle(v, p); } catch (e) { app.errors.report(e, { where: 'setup.angle', silent: true }); }
+    app.current = { ...ctx(), view: v, preset: p };
+    result = null;
+    ball = null;
+    ghost = null;
+    if (els.overlay) els.overlay.width = 0; // recompute the ghost
+    recorded = new Set();
+    stopFlock();
+    renderShell();
+    goStep(0);
+    app.toast.info(t('setup.view.changed', { view: t(`view.${v}`), orient: t(v === 'dtl' ? 'setup.tripod.portrait' : 'setup.tripod.landscape') }));
+  }
 
-    const clipInput = h('input', { type: 'file', accept: 'video/*', hidden: true, onchange: (e) => e.target.files[0] && calibClip(e.target.files[0]) });
-    const c10 = mode === 'highspeed' ? card('C10 高速模式校正短片',
-      h('p', '1. 對好幽靈框與水平後，點「釋放相機」。2. 用內建相機錄 2 秒空墊慢動作（240fps、1x）。3. 從「檔案」匯入這段短片。'),
-      h('div.row', {}, h('button', { type: 'button', onclick: () => app.controller.releaseCamera() }, '釋放相機'),
-        h('button', { type: 'button', onclick: () => clipInput.click() }, '匯入校正短片')), clipInput) : null;
+  function tripodContent() {
+    const { venue, view } = ctx();
+    const p = tripodPlacement(venue ?? {}, view);
+    const dm = (m) => dist(m, 0);
+    const diagram = tripodDiagram(p, venue ?? {}, { labels: { distance: dm(p.from_edge_m), target: t('setup.tripod.target'), you: t('setup.tripod.you'), title: t('setup.tripod.diagram', { view: t(`view.${view}`) }) } });
+    const rows = [
+      ['ruler', t('setup.tripod.distance'), dm(p.from_edge_m), t('setup.tripod.distance_hint', { n: fmtNum(p.drivers, { digits: p.drivers % 1 ? 1 : 0 }) })],
+      ['tripod', t('setup.tripod.height'), dm(p.h_m), t('setup.tripod.height_hint')],
+      ['target', t(p.side_dir === 'target' ? 'setup.tripod.side_target' : 'setup.tripod.side_golfer'), dm(p.side_m), null],
+      [p.orientation === 'landscape' ? 'phone-landscape' : 'phone-portrait', t('setup.tripod.orient'), t(`setup.tripod.${p.orientation}`), t('setup.tripod.lens')],
+    ];
+    return h('div.tripod', { 'data-testid': 'setup-tripod', 'data-from-edge-m': String(p.from_edge_m), 'data-height-m': String(p.h_m) },
+      h('div.tripod-figure', {}, diagram),
+      h('ul.tripod-facts', {}, rows.map(([ic, label, value, hint]) => h('li', {}, h('span.lr-icon', {}, icon(ic)), h('span.tf-text', {}, h('span.tf-label', label), hint ? h('span.tf-hint', hint) : null), h('span.tf-value', value)))),
+      p.verdict && p.verdict !== 'ideal' ? notice({ variant: p.verdict === 'not_guaranteed' ? 'caution' : 'info', title: t(`bay.verdict.${p.verdict}`), body: t(`bay.short.${p.verdict}`) }) : null,
+      p.source === 'nominal' && view === 'face_on' ? h('p.hint', t('setup.tripod.no_bay')) : null,
+      viewPicker());
+  }
 
-    clear(root,
-      screenHeader(`架設：${VIEW_LABELS[view]}`, () => app.nav.go('home')),
-      stage, pickerBox,
-      h('div.row', {}, h('button.primary', { type: 'button', onclick: openPicker }, mode === 'highspeed' ? '對齊檢查：點四角' : '點四角（放大鏡）'),
-        h('button', { type: 'button', onclick: checkBall }, '偵測球（C7）'),
-        h('button', { type: 'button', onclick: () => rec('C8') }, '框景 OK（C8）'),
-        h('button', { type: 'button', onclick: checkLight }, '光線健檢（P19）')),
-      card('水平', level),
-      card('燈號', light, h('div.row', {}, lockBtn, forceBtn)),
-      c10,
-      card('計時', timer),
-      card('換角度', viewSel, angleBtn),
-      preset ? h('p.hint', `使用預設 ${preset.preset_id}`) : h('p.hint', '新預設：鎖定後會存成這個打位、這個角度的預設。'),
+  function levelContent() {
+    const perm = app.store.get().permissions?.motion;
+    if (perm === 'denied' || perm === 'unavailable' || (!grav && levelWait >= 3)) {
+      const denied = perm === 'denied';
+      return h('div', {}, notice({ variant: 'caution', title: t(denied ? 'setup.level.denied_title' : 'setup.level.none_title'), body: t(denied ? 'setup.level.denied_body' : 'setup.level.none_body') }),
+        denied ? button({ label: t('setup.level.enable'), variant: 'tinted', size: 'lg', block: true, icon: 'level', testid: 'setup-enable-level', onClick: retryMotion }) : null);
+    }
+    const bubble = h('div.bubble', {});
+    const box = h('div.level-big', { role: 'img', 'aria-label': t('setup.level.aria') }, h('div.level-ring'), h('div.level-target'), bubble);
+    const txt = h('p.level-text', { 'aria-live': 'polite' }, grav ? '' : t('setup.level.waiting'));
+    const nums = h('p.level-nums');
+    els.bubble = bubble;
+    els.levelBox = box;
+    els.levelText = txt;
+    els.levelNums = nums;
+    els.level = box;
+    return h('div.level-wrap', {}, box, txt, nums);
+  }
+
+  function cornersContent() {
+    const { mode } = ctx();
+    const kids = [];
+    if (result) kids.push(lightPill(result.evaluation));
+    if (!fLocked() && result) {
+      const n = (ctx().fSolves ?? []).length;
+      kids.push(h('p.hint', { 'aria-live': 'polite' }, flock ? t('setup.corners.flock_running', { n: flock.n, total: FLOCK_SOLVES }) : t('setup.corners.flock_failed', { n })));
+    } else if (result && fLocked()) kids.push(h('p.hint', t('setup.corners.flock_ok')));
+    if (mode === 'highspeed') {
+      kids.push(h('details.clip-card', {},
+        h('summary', t('setup.clip.title')),
+        h('ol.plain-steps', {}, h('li', t('setup.clip.s1')), h('li', t('setup.clip.s2')), h('li', t('setup.clip.s3'))),
+        button({ label: t('setup.clip.release'), size: 'md', icon: 'camera-off', onClick: () => app.controller.releaseCamera() }),
+        filePicker({ accept: 'video/*', label: t('setup.clip.choose'), testid: 'setup-clip-input', onFiles: (fs) => calibClip(fs[0]) })));
+    }
+    return h('div', {}, ...kids);
+  }
+
+  function ballContent() {
+    const kids = [];
+    if (ball && !ball.missing) kids.push(h('p.check.ok', t('setup.ball.width', { w: fmtNum(ball.w_px, { digits: 1 }), p: fmtNum(ball.predicted_w_px, { digits: 1 }) })));
+    return h('div', {}, ...kids);
+  }
+
+  function doneContent() {
+    if (!result) return notice({ variant: 'caution', title: t('setup.done.no_calib_title'), body: t('setup.done.no_calib_body') });
+    const e = result.evaluation;
+    const kids = [lightPill(e)];
+    if (e.light === 'amber') {
+      const warn = [];
+      if (e.reason_codes.includes(RC.NO_GRAVITY_REF) || !grav) warn.push(t('setup.done.warn_no_level'));
+      if (e.failures.some((f) => f.check === 'frames_budget')) warn.push(t('setup.fix.frames_budget'));
+      if (warn.length) kids.push(notice({ variant: 'caution', title: t('setup.done.amber_title'), items: warn }));
+    }
+    if (e.light === 'green') kids.push(h('p.step-body', t('setup.done.green_body')));
+    const fails = e.failures.filter((f) => f.severity === 'red' || f.severity === 'amber');
+    if (fails.length) kids.push(h('details.all-checks', {}, h('summary', t('setup.done.all_checks', { n: fails.length })), h('ul.plain-steps', {}, fails.map((f) => h("li", t(`calib.check.${f.check}`, { limit: typeof f.limit === "number" ? dist(f.limit, 0) : "" }))))));
+    const l = sceneLuma();
+    const st = app.settings();
+    if (Number.isFinite(l) && l > SUN_LUMA && !st.sunSuggested && st.theme !== 'sun') {
+      kids.push(h('div.notice.notice-info.sun-suggest', {},
+        h('div.notice-head', {}, icon('sun'), h('span.notice-title', t('setup.sun.title'))),
+        h('div.notice-content', {}, h('p.notice-body', t('setup.sun.body')),
+          h('div.row', {},
+            button({ label: t('setup.sun.use'), variant: 'tinted', size: 'md', testid: 'setup-sun-use', onClick: () => { save({ theme: 'sun', sunSuggested: true }); app.applyTheme?.('sun'); renderStep(); } }),
+            button({ label: t('setup.sun.no'), variant: 'plain', size: 'md', onClick: () => { save({ sunSuggested: true }); renderStep(); } })))));
+    }
+    return h('div', {}, ...kids);
+  }
+
+  function stepPrimary(name) {
+    const { mode } = ctx();
+    const P = (label, onClick, extra = {}) => button({ label, variant: 'primary', size: 'lg', block: true, testid: 'setup-primary', onClick, ...extra });
+    const S = (label, onClick, extra = {}) => button({ label, variant: 'plain', size: 'lg', block: true, onClick, ...extra });
+    switch (name) {
+      case 'tripod': return [P(t('setup.tripod.cta'), () => { rec('C0'); rec('C1'); goStep(step + 1); }, { icon: 'check' })];
+      case 'level': {
+        const perm = app.store.get().permissions?.motion;
+        const blocked = perm === 'denied' || perm === 'unavailable' || (!grav && levelWait >= 3);
+        const ls = levelState();
+        return [P(t(blocked ? 'setup.level.skip_cta' : 'common.next'), () => goStep(step + 1), { reason: blocked || ls?.ok ? null : t(grav ? 'setup.level.reason' : 'setup.level.waiting') }),
+          blocked ? null : S(t('setup.level.skip'), () => goStep(step + 1), { testid: 'setup-skip-level' })];
+      }
+      case 'corners':
+        if (picking) {
+          const done = P(t('setup.corners.done'), () => (els.pickerDone ? els.pickerDone() : finishPicker()), { reason: els.picker?.corners() ? null : t('setup.corners.need_four') });
+          els.pickerPrimary = done;
+          return [done, S(t('setup.corners.cancel'), () => { closePicker(); renderStep(); })];
+        }
+        if (!result) return [P(t(mode === 'highspeed' ? 'setup.corners.tap_check' : 'setup.corners.tap'), () => openPicker(), { icon: 'target' })];
+        return [P(t('common.next'), () => goStep(step + 1)), S(t('setup.corners.again'), () => openPicker(), { icon: 'undo' })];
+      case 'ball':
+        if (ball && !ball.missing) return [P(t('common.next'), () => goStep(step + 1))];
+        return [P(t('setup.ball.detect'), checkBall, { icon: 'target' }), S(t('setup.ball.skip'), () => { ball = { missing: true }; goStep(step + 1); }, { testid: 'setup-skip-ball' })];
+      case 'address':
+        return [P(t('setup.address.cta'), () => {
+          els.primary?.setReason(t('setup.address.hold'));
+          say('setup.address.hold', {}, '');
+          clearTimeout(addressTimer);
+          addressTimer = setTimeout(() => { rec('C8'); goStep(step + 1); }, 2000);
+        }, { icon: 'check' })];
+      case 'done': {
+        if (!result) return [P(t('setup.done.back_corners'), () => goStep(2))];
+        const e = result.evaluation;
+        const go = t(mode === 'highspeed' ? 'setup.done.start_import' : 'setup.done.start');
+        if (e.light === 'red') return [P(t('setup.done.realign'), () => goStep(2), { icon: 'undo' }), S(t('setup.done.anyway'), () => doLock(true), { testid: 'setup-anyway' })];
+        return [P(go, () => doLock(false), { icon: 'play' })];
+      }
+      default: return [];
+    }
+  }
+
+  function renderStep() {
+    if (!els.rail) return;
+    const name = SETUP_UI_STEPS[step];
+    const content = { tripod: tripodContent, level: levelContent, corners: cornersContent, ball: ballContent, address: () => null, done: doneContent }[name]();
+    const [primary, secondary] = stepPrimary(name);
+    els.primary = primary;
+    const title = h('h2.step-title', { tabindex: '-1' }, t(`setup.${name}.title`));
+    els.stepTitle = title;
+    els.msg = h('p.step-msg', { role: 'status', 'aria-live': 'polite', hidden: true });
+    const perms = app.store.get().permissions ?? {};
+    const micOff = perms.microphone === 'denied' && perms.camera === 'granted';
+    els.media.dataset.step = name;
+    clear(els.railBody,
+      h('p.step-count', t('setup.step_count', { n: step + 1, total: SETUP_UI_STEPS.length })),
+      h('div.setup-step', { 'data-testid': 'setup-step', 'data-step': String(step + 1), 'data-name': name },
+        title,
+        h('p.step-body', t(picking && name === 'corners' ? 'setup.corners.picking_body' : `setup.${name}.body`)),
+        content,
+        els.msg),
+      micOff ? notice({ variant: 'caution', title: t('setup.mic_off.title'), body: t('setup.mic_off.body'), testid: 'setup-mic-off' }) : null,
+      devBlock(),
       // e2e only (docs/e2e-hooks.md): rendered only when the test harness set globalThis.__GSL_E2E__ before boot
-      globalThis.__GSL_E2E__ ? h('button', { type: 'button', 'data-testid': 'btn-skip-setup', onclick: () => app.nav.go(mode === 'highspeed' ? 'import' : 'live') }, '（測試）略過架設') : null);
+      globalThis.__GSL_E2E__ ? h('button.e2e-skip', { type: 'button', 'data-testid': 'btn-skip-setup', onclick: () => app.nav.go(ctx().mode === 'highspeed' ? 'import' : 'live') }, t('setup.e2e_skip')) : null);
+    clear(els.cta, secondary ?? null, primary);
+    paintMsg();
+    if (name === 'level') paintLevel();
+    if (picking && els.pickerPrimary) {
+      els.picker.onChangeHook = () => els.pickerPrimary?.setReason(els.picker.corners() ? null : t('setup.corners.need_four'));
+    }
+  }
+
+  function renderCameraOff(kind) {
+    const ios = /iPhone|iPad|iPod/.test(globalThis.navigator?.userAgent ?? '');
+    clear(root,
+      h('div.camera-off', { 'data-testid': 'camera-off', 'data-kind': kind },
+        screenHeader({ title: t(`camera.${kind}.title`), back: true, onBack: () => app.nav.go('home'), backLabel: t('screen.home.title') }),
+        h('div.co-icon', {}, icon('camera-off')),
+        h('p.co-body', t(`camera.${kind}.body`)),
+        kind === 'denied' ? h('div.co-path', {}, h('p.co-path-title', t('camera.denied.how')), h('ol.plain-steps', {}, [1, 2, 3].map((i) => h('li', t(`camera.denied.${ios ? 'ios' : 'other'}${i}`))))) : null,
+        h('div.co-actions', {},
+          button({ label: t('camera.retry'), variant: 'primary', size: 'lg', block: true, icon: 'camera', testid: 'camera-retry', onClick: () => retryCamera() }),
+          button({ label: t('camera.import_instead'), variant: 'tinted', size: 'lg', block: true, icon: 'film', testid: 'camera-import-instead', onClick: () => importInstead() }))));
+    els = { cameraOff: kind };
+    root.querySelector('h1')?.focus?.({ preventScroll: true });
+  }
+
+  function retryCamera() {
+    // same click: reopenCamera() invokes getUserMedia before its first await
+    const p = app.controller.reopenCamera();
+    Promise.resolve(p).then((ok) => { app.record?.('setup.camera_retry', Boolean(ok)); refreshCamera(true); }, () => refreshCamera(true));
+  }
+
+  function importInstead() {
+    save({ mode: 'highspeed' });
+    Promise.resolve(app.controller.endSession?.()).catch(() => {}).finally(() => app.updater?.sessionEnded?.());
+    app.nav.go('import');
+  }
+
+  function problemNow() {
+    const s = app.store.get();
+    const err = app.localDiag?.gum?.error ?? null;
+    return cameraProblem(s.permissions?.camera, err, Boolean(globalThis.navigator?.mediaDevices?.getUserMedia));
+  }
+
+  function refreshCamera(force = false) {
+    const kind = problemNow();
+    if (kind) { if (force || els.cameraOff !== kind) renderCameraOff(kind); return; }
+    if (els.cameraOff || force) { renderShell(); renderStep(); }
+  }
+
+  function renderShell() {
+    const { view } = ctx();
+    const video = h('video.preview', { playsinline: true, muted: true, autoplay: true, 'aria-label': t('setup.preview_label') });
+    const overlay = h('canvas.overlay', { 'aria-hidden': 'true' });
+    const waiting = h('div.stage-wait', { role: 'status' }, icon('camera'), h('span', t('setup.opening_camera')));
+    const stage = h('div.stage', {}, video, overlay, waiting);
+    const picker = createCornerPicker({ onChange: () => els.picker?.onChangeHook?.() });
+    const pickerBox = h('div.picker-box', { hidden: true }, picker.el);
+    const media = h('div.setup-media', {}, stage, pickerBox);
+    const railBody = h('div.rail-body');
+    const cta = h('div.rail-cta');
+    const rail = h('div.setup-rail', {}, railBody, cta);
+    const floatBack = h('button.setup-float-back', { type: 'button', 'aria-label': t('common.back'), onclick: () => app.nav.go('home') }, icon('chevron-left'));
+    els = { video, overlay, stage, waiting, picker, pickerBox, media, rail, railBody, cta };
+    clear(root,
+      screenHeader({ title: t('setup.title', { view: t(`view.${view}`) }), back: true, onBack: () => app.nav.go('home'), backLabel: t('screen.home.title') }),
+      h('div.setup-layout', {}, media, rail),
+      floatBack);
     attachStream();
-    renderLevel();
-    renderLight();
-    renderTimer();
   }
 
   return {
     attachStream,
     show() {
-      render();
+      if (mounted) {
+        // locale change (main.js reshow): re-render the texts, keep the step, corners, stream and picker state
+        if (els.cameraOff) { renderCameraOff(els.cameraOff); return; }
+        const hd = root.querySelector(':scope > header.screen-header');
+        hd?.replaceWith(screenHeader({ title: t('setup.title', { view: t(`view.${ctx().view}`) }), back: true, onBack: () => app.nav.go('home'), backLabel: t('screen.home.title') }));
+        els.video?.setAttribute('aria-label', t('setup.preview_label'));
+        renderStep();
+        return;
+      }
+      mounted = true;
+      result = null;
+      ball = null;
+      picking = false;
+      step = 0;
+      levelOkAt = null;
+      levelWait = 0;
+      gravSeen = false;
+      msgLine = null;
+      recorded = new Set(Object.keys(app.controller.setupTimer?.summary?.().steps ?? {}));
+      renderShell();
+      const kind = problemNow();
+      if (kind) renderCameraOff(kind); else renderStep();
       if (app.store.get().permissions?.motion !== 'denied') startLevel();
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(drawOverlay);
-      clearInterval(tick);
-      tick = setInterval(renderTimer, 1000);
+      unsub?.();
+      unsub = app.store.subscribe((s, prev) => {
+        if (s.permissions !== prev.permissions || s.cameraInterrupted !== prev.cameraInterrupted) refreshCamera();
+      });
+      offStream?.();
+      offStream = typeof app.controller.onStreamChange === 'function' ? app.controller.onStreamChange((stream) => attachStream(stream)) : null;
+      clearInterval(levelWaitTimer);
+      levelWaitTimer = setInterval(() => { if (!gravSeen && levelWait < 3) { levelWait += 1; if (levelWait === 3 && SETUP_UI_STEPS[step] === 'level') renderStep(); } }, 1000);
     },
     hide() {
+      mounted = false;
       cancelAnimationFrame(raf);
-      clearInterval(tick);
+      clearTimeout(addressTimer);
+      clearInterval(levelWaitTimer);
+      stopFlock();
       stopMotion?.();
       stopMotion = null;
+      unsub?.();
+      unsub = null;
+      offStream?.();
+      offStream = null;
     },
   };
 }

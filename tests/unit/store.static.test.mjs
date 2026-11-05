@@ -112,14 +112,38 @@ test('idb.js has no top-level DOM/global access: importing it with trapped globa
   assert.doesNotThrow(() => idb.idbBackend());
 });
 
-test('without indexedDB the backend fails with a readable Chinese StoreError instead of throwing something obscure', async () => {
+test('without indexedDB the backend fails with a coded StoreError (UNSUPPORTED) instead of throwing something obscure', async () => {
   const { idbBackend } = await import('../../app/src/store/idb.js');
   assert.equal(globalThis.indexedDB, undefined);
-  await assert.rejects(openRepository(idbBackend()), (e) => e instanceof StoreError && e.code === 'UNSUPPORTED' && /[一-鿿]/.test(e.message));
+  await assert.rejects(openRepository(idbBackend()), (e) => e instanceof StoreError && e.code === 'UNSUPPORTED' && /IndexedDB/.test(e.message) && !/[一-鿿]/.test(e.message));
   const b = idbBackend();
   await assert.rejects(b.transaction(['shots'], 'readonly', () => {}), (e) => e instanceof StoreError && e.code === 'CLOSED');
   await b.close(); // closing something never opened is fine
   // a factory that throws synchronously is reported too
   const bad = idbBackend({ factory: { open() { throw new Error('SecurityError: denied'); } } });
   await assert.rejects(openRepository(bad), (e) => e instanceof StoreError && e.code === 'BACKEND' && /denied/.test(e.message));
+});
+
+// R3: an indexedDB.open that never fires any event must not hang the boot
+test('idb open that never settles rejects with REPO_UNAVAILABLE after openTimeoutMs; a late success is closed again', async () => {
+  const { idbBackend } = await import('../../app/src/store/idb.js');
+  let req = null;
+  const factory = { open() { req = {}; return req; } };
+  const b = idbBackend({ factory, openTimeoutMs: 40 });
+  const t0 = Date.now();
+  await assert.rejects(openRepository(b), (e) => e instanceof StoreError && e.code === 'REPO_UNAVAILABLE' && /40 ms/.test(e.message));
+  assert.ok(Date.now() - t0 < 2000);
+  assert.equal(b.openState, 'timeout');
+  let closed = false;
+  req.result = { close() { closed = true; } };
+  req.onsuccess();
+  assert.equal(closed, true, 'the late connection is closed, not kept');
+  await assert.rejects(b.transaction(['shots'], 'readonly', () => {}), (e) => e.code === 'CLOSED');
+  assert.equal(typeof b.now(), 'number');
+});
+
+test('store sources (outside comments) contain no CJK text: errors are codes (PRODUCT-SPEC §3.4)', () => {
+  for (const f of ['core.js', 'idb.js', 'mem.js', 'quota.js']) {
+    assert.ok(!/[一-鿿]/.test(stripComments(read(f))), `${f}: CJK literal`);
+  }
 });

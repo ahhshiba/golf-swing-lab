@@ -1,0 +1,7 @@
+{
+  "prompt.health_due": "已打 {n} 球：建議回到架設，確認墊子四角和機位沒有跑掉。",
+  "prompt.mat_changed": "可能換了墊子：量到的墊子長差 {dL}%、寬差 {dW}%（超過 {lim}%）。請重新量墊子，建立新的場地。",
+  "prompt.brightness": "光線和架設時差了 {pct}%（超過 {lim}%）：已重新適應背景；結果怪怪的話請重新架設。",
+  "prompt.drop_test_never": "還沒做過落球測試：建議做一次，約 1 分鐘，可以確認距離和時間的準確度。",
+  "prompt.drop_test": "上次落球測試是 {days} 天前：建議每個月做一次。"
+}

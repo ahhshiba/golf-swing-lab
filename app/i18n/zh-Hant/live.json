@@ -1,0 +1,39 @@
+{
+  "preview": "相機畫面",
+  "hero": "上一球的數字",
+  "state.starting": "相機準備中…",
+  "state.idle": "站到球前準備",
+  "state.ready": "準備好了",
+  "state.swinging": "揮桿中",
+  "state.analysing": "分析中… 約 {s} 秒",
+  "state.practice": "空揮，不分析",
+  "state.done": "完成：第 {n} 球",
+  "state.failed": "即時分析無法啟動",
+  "state.no_module": "即時分析無法使用",
+  "state.too_slow": "手機太慢，即時分析已暫停",
+  "state.camera_lost": "相機中斷了",
+  "state.camera_still_off": "相機仍然打不開",
+  "problem.no_module": "這個瀏覽器不能即時分析。可以用 iPhone 相機錄慢動作再匯入。",
+  "problem.too_slow": "手機太熱或太慢，跟不上即時分析。改用慢動作錄影再匯入。",
+  "problem.camera_lost": "切到別的 App、來電或鎖定螢幕時相機會停。點下面的按鈕繼續。",
+  "reopen": "重新開啟相機",
+  "count": {
+    "other": "已打 {n} 球"
+  },
+  "club": "{club}",
+  "club_sheet": "換球桿",
+  "club_hint": "從下一球開始用新的球桿。",
+  "last.none": "還沒有球。站好準備姿勢半秒就會開始。",
+  "last.line": "第 {n} 球：{items}",
+  "last.no_numbers": "沒有量到數字",
+  "open_last": "看完整結果",
+  "speak.shot": "第 {n} 球，{items}",
+  "speak.item": "{label} {value} {unit}",
+  "end": "結束練習",
+  "end_title": "結束這次練習？",
+  "end_body": {
+    "other": "已打的 {n} 球都已儲存，相機會關閉。"
+  },
+  "resetup": "重新架設",
+  "import": "改用匯入影片"
+}

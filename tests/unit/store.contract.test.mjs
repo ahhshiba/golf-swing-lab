@@ -85,7 +85,8 @@ test('every bad contract fixture makes the whole import fail, nothing is written
     let err;
     try { await importJSON(repo, file); } catch (e) { err = e; }
     assert.ok(err instanceof ImportError, `${n}: import must be rejected`);
-    assert.ok(hasChinese(err.message), n);
+    // readable = a code + reason the UI renders from the catalog (PRODUCT-SPEC §3.4), plus per-record details
+    assert.ok(typeof err.code === 'string' && err.code.length > 0 && (typeof err.reason === 'string' || hasChinese(err.message)), n);
     assert.ok(err.details.length >= 1 && err.details.some((d) => d.includes(String(shot.shot_id))), `${n}: ${err.details.join(' | ')}`);
     for (const store of STORE_NAMES) assert.equal(await repo.count(store), 0, `${n}: ${store} must stay empty`);
   }

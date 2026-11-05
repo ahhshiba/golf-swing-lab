@@ -8,6 +8,12 @@
 // A new version installs in the background and waits; the page shows 「有新版本，點此更新」 and sends
 // { type: 'SKIP_WAITING' } only when no practice session is running. Navigation requests get the cached
 // index.html, so the app opens offline.
+//
+// Offline readiness (R11 / PF-1, PRODUCT-SPEC §5): install caches the precache list a few files at a time and posts
+//   { type: 'PRECACHE_PROGRESS', version, done, total, bytes }   to every window client (also uncontrolled ones) after
+//   each file, then { type: 'PRECACHE_DONE', version, done, total, bytes }. A page can ask at any time with
+//   { type: 'GET_PRECACHE' } -> { type: 'PRECACHE_STATUS', version, done, total, bytes, complete } (counted from the
+//   caches, so it is right after a reload too). ui/update.js turns these into app.offline.
 
 const MANIFEST = /*__GSL_MANIFEST__*/ { version: '0.0.0+template', dev: true, shell: ['index.html'], assets: [] } /*__GSL_MANIFEST_END__*/;
 
@@ -36,12 +42,53 @@ async function cacheAsset(cache, url, asset) {
   await putAsset(cache, url, asset, res);
 }
 
+async function broadcast(msg) {
+  try {
+    for (const c of await self.clients.matchAll({ includeUncontrolled: true, type: 'window' })) c.postMessage(msg);
+  } catch (_) { /* no clients yet */ }
+}
+
+async function cacheShell(cache, url) {
+  const res = await fetch(new Request(url, { cache: 'reload' }));
+  if (!res.ok) throw new Error(`precache ${url}: HTTP ${res.status}`);
+  const len = Number(res.headers.get('content-length'));
+  await cache.put(url, res.clone());
+  return Number.isFinite(len) && len > 0 ? len : (await res.blob()).size;
+}
+
+const CONCURRENCY = 4;
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const shell = await caches.open(SHELL_CACHE);
-    await shell.addAll(SHELL_URLS.map((u) => new Request(u, { cache: 'reload' })));
     const assets = await caches.open(ASSET_CACHE);
-    for (const [url, a] of ASSET_BY_URL) if (a.precache) await cacheAsset(assets, url, a);
+    const jobs = [
+      ...SHELL_URLS.map((u) => () => cacheShell(shell, u)),
+      ...[...ASSET_BY_URL].filter(([, a]) => a.precache).map(([url, a]) => async () => {
+        const hit = await assets.match(url);
+        if (hit && hit.headers.get(SHA_HEADER) === a.sha256) return 0;
+        await cacheAsset(assets, url, a);
+        const got = await assets.match(url);
+        return got ? (await got.clone().blob()).size : 0;
+      }),
+    ];
+    const total = jobs.length;
+    let done = 0;
+    let bytes = 0;
+    let next = 0;
+    let lastPost = 0;
+    const worker = async () => {
+      while (next < jobs.length) {
+        const job = jobs[next++];
+        bytes += await job();
+        done += 1;
+        const t = Date.now();
+        if (done === total || t - lastPost > 100) { lastPost = t; broadcast({ type: 'PRECACHE_PROGRESS', version: VERSION, done, total, bytes }); }
+      }
+    };
+    broadcast({ type: 'PRECACHE_PROGRESS', version: VERSION, done: 0, total, bytes: 0 });
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker));
+    broadcast({ type: 'PRECACHE_DONE', version: VERSION, done, total, bytes });
   })());
 });
 
@@ -60,7 +107,7 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
-async function precacheComplete() {
+async function precacheCount() {
   const shell = await caches.open(SHELL_CACHE);
   const assets = await caches.open(ASSET_CACHE);
   let total = 0;
@@ -72,7 +119,12 @@ async function precacheComplete() {
     const hit = await assets.match(u);
     if (hit && hit.headers.get(SHA_HEADER) === a.sha256) have++;
   }
-  return total ? have / total : 1;
+  return { done: have, total };
+}
+
+async function precacheComplete() {
+  const c = await precacheCount();
+  return c.total ? c.done / c.total : 1;
 }
 
 self.addEventListener('message', (event) => {
@@ -81,6 +133,10 @@ self.addEventListener('message', (event) => {
   else if (type === 'GET_VERSION') {
     event.waitUntil(precacheComplete().then((frac) => {
       event.source && event.source.postMessage({ type: 'VERSION', version: VERSION, precache_complete: frac });
+    }));
+  } else if (type === 'GET_PRECACHE') {
+    event.waitUntil(precacheCount().then((c) => {
+      event.source && event.source.postMessage({ type: 'PRECACHE_STATUS', version: VERSION, done: c.done, total: c.total, bytes: null, complete: c.total > 0 && c.done === c.total });
     }));
   }
 });

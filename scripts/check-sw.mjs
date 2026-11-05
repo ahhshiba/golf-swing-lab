@@ -9,7 +9,10 @@
 //   3. every precached entry (shell + assets with precache:true) and every runtime asset exists under dist/ and, for
 //      assets, matches the sha256 in the manifest
 //   4. the 10-hex part equals the recomputed hash. Algorithm = scripts/build.mjs versionOf(): entries sorted by url
-//      (code-unit order), text = for each `${url}\n${sha256hex(file bytes)}\n`, sha256 of the utf8 text, first 10 hex
+//      (code-unit order), text = for each `${url}\n${sha256hex(file bytes)}\n`, sha256 of the utf8 text, first 10 hex;
+//      src/version.js (generated, it embeds the VERSION) is left out of the hash
+//   4b. src/version.js, when listed, exports APP_VERSION equal to the sw.js VERSION (About shows it; never "dev")
+//   4c. a dev-research build (--include-golfdb-model, precache-manifest dev_research: true) is reported
 //   5. shell <= 1,000,000 B and precache (shell + precached assets) <= 35,000,000 B (build.mjs BUDGETS)
 //   6. dist/precache-manifest.json (when present) agrees with sw.js on version and with the files on disk
 //   7. deploy/last-deploy.json (when present, {"version": "<semver>+<10 hex>"}): precache contents changed but the
@@ -28,9 +31,12 @@ export const BUDGETS = Object.freeze({ shell_bytes: 1_000_000, precache_bytes: 3
 
 export const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
+/** Generated file left out of the VERSION hash (build.mjs HASH_EXCLUDED). */
+export const HASH_EXCLUDED = Object.freeze(['src/version.js']);
+
 /** entries [{url, sha256}] -> first 10 hex of the VERSION hash (same as build.mjs versionOf). */
 export function hashOf(entries) {
-  const sorted = [...entries].sort((a, b) => (a.url < b.url ? -1 : a.url > b.url ? 1 : 0));
+  const sorted = entries.filter((e) => !HASH_EXCLUDED.includes(e.url)).sort((a, b) => (a.url < b.url ? -1 : a.url > b.url ? 1 : 0));
   const text = sorted.map((e) => `${e.url}\n${e.sha256}\n`).join('');
   return sha256(Buffer.from(text, 'utf8')).slice(0, 10);
 }
@@ -120,11 +126,17 @@ export function checkSw({ dist, last, pkg }) {
     add(false, 'VERSION hash == recomputed hash', 'cannot recompute, files missing or changed');
   }
 
+  if (man.shell.includes('src/version.js')) {
+    let v = null;
+    try { v = /APP_VERSION\s*=\s*"([^"]*)"/.exec(fs.readFileSync(path.join(distRoot, 'src/version.js'), 'utf8'))?.[1] ?? null; } catch { v = null; }
+    add(v === version, 'src/version.js APP_VERSION == VERSION', `${v} vs ${version}`);
+  }
   const pm = path.join(distRoot, 'precache-manifest.json');
   if (fs.existsSync(pm)) {
     try {
       const j = JSON.parse(fs.readFileSync(pm, 'utf8'));
       add(j.version === version, 'precache-manifest.json version == sw.js version', `${j.version} vs ${version}`);
+      if (j.dev_research === true) add(true, 'dev-research build (GolfDB event model bundled)', 'local research only: deploy_pages.sh refuses it');
     } catch (e) {
       add(false, 'precache-manifest.json readable', e.message);
     }

@@ -9,6 +9,8 @@ Order: convs.0.weight, convs.0.bias, ..., convs.3.weight, convs.3.bias, head.wei
 """
 from __future__ import annotations
 
+import os
+
 import argparse
 import hashlib
 import json
@@ -103,6 +105,10 @@ def main(argv=None) -> int:
     ap.add_argument("--models-dir", default=str(MODELS))
     ap.add_argument("--golden", default=str(GOLDEN))
     args = ap.parse_args(argv)
+    if os.environ.get("RESEARCH") != "1":
+        print("GolfDB research script (CC BY-NC, dev only, ADR 0004): set RESEARCH=1 to run it; its outputs are a "
+              "benchmark report, never a ship gate or a source of constants.", file=sys.stderr)
+        return 2
 
     run_dir = RUNS / args.run
     model, mean, std, ck = load_checkpoint(run_dir / f"split{args.split}" / "best.pt")

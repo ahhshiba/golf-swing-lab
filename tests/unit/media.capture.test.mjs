@@ -163,3 +163,36 @@ test('motion permission: requestPermission is the first call (sync), states reco
   assert.deepEqual(motionReasonCodes(), []);
   assert.equal(getMotionState().available, true);
 });
+
+test('R6: a segment never exceeds maxSegmentMs: the recorder rolls it over itself unless held during a swing', async () => {
+  const made = [];
+  class MR {
+    constructor() { this.state = 'inactive'; made.push(this); }
+    static isTypeSupported(t) { return t === 'video/mp4'; }
+    start() { this.state = 'recording'; }
+    stop() { this.state = 'inactive'; setTimeout(() => { this.ondataavailable?.({ data: new Blob([new Uint8Array(3)]) }); this.onstop?.(); }, 0); }
+  }
+  let wall = 0;
+  const timers = [];
+  const env = { MediaRecorder: MR, Blob, setTimeout: (fn, ms) => { timers.push({ fn, at: wall + ms }); return timers.length; }, clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; } };
+  const advance = (ms) => { wall += ms; for (const t of timers) if (t.fn && t.at <= wall) { const f = t.fn; t.fn = null; f(); } };
+  const rec = createSegmentRecorder({}, { env, now: () => wall, maxSegmentMs: 12000 });
+  rec.start();
+  advance(11000);
+  assert.equal(made.length, 1);
+  advance(1500);
+  assert.equal(made.length, 2, 'rolled over at 12 s');
+  assert.equal(rec.stats().auto_rolls, 1);
+  rec.hold(true);
+  advance(13000);
+  assert.equal(made.length, 2, 'held: no roll during a swing');
+  rec.hold(false);
+  advance(300);
+  assert.equal(made.length, 3, 'rolled right after the hold');
+  const b = await rec.cut();
+  assert.ok(b.size >= 0);
+  const s = rec.stats();
+  assert.equal(s.segments, 3);
+  assert.ok(s.max_s >= 12 && s.max_s <= 13.4, JSON.stringify(s));
+  await rec.stop();
+});

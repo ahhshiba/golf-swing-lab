@@ -1,0 +1,21 @@
+{
+  "name": "揮桿實驗室",
+  "tagline": "離線的揮桿與球飛行分析，所有資料只留在這支手機",
+  "loading": "載入中…",
+  "noscript": "這個 App 需要開啟 JavaScript。",
+  "boot.failed.title": "App 無法啟動",
+  "boot.failed.body": "重新載入通常可以解決；也可以先在不儲存結果的情況下繼續。",
+  "boot.reload": "重新載入",
+  "boot.continue_unsaved": "以不儲存模式繼續",
+  "boot.copy_diag": "複製診斷資料",
+  "repo.unsaved": "結果不會被儲存",
+  "update.available": "有新版本，點此更新",
+  "update.deferred": "有新版本：練習結束後會更新",
+  "session.active": "練習進行中",
+  "camera.reopen": "重新開啟相機",
+  "health.dismiss": "知道了",
+  "session.practising": "練習中 · {view} · {elapsed}",
+  "session.practising_n": "練習中 · {view} · 第 {n} 球 · {elapsed}",
+  "screen.unavailable": "這個版本還沒有這個畫面。",
+  "boot.copied": "已複製"
+}

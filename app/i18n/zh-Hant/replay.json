@@ -1,0 +1,17 @@
+{
+  "no_clip.title": "沒有保存影片",
+  "no_clip.body": "這一球沒有影片（可能在清理空間時刪除），仍可調整揮桿時間點。",
+  "frame": "第 {f} 幀 · {s} 秒",
+  "canvas": "回放畫面，第 {f} 幀，{s} 秒{at}",
+  "canvas_at": "，{events}",
+  "prev_frame": "上一幀",
+  "next_frame": "下一幀",
+  "set_frame": "設為這一幀",
+  "reset_event": "重設為偵測值",
+  "events.label": "揮桿時間點",
+  "selected": "{event} · 第 {f} 幀 · {source}",
+  "selected_none": "{event} · 尚未設定",
+  "marker.valuetext": "{event}，第 {f} 幀，{s} 秒",
+  "error.order": "時間點順序不對：「{event}」不能早於「{before}」",
+  "error.save": "無法儲存修正，請再試一次"
+}

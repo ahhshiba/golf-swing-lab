@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { mulberry32 } from '../../app/src/geom/rng.js';
 import { RC, REASON_CODES } from '../../app/src/contract/reason-codes.js';
 import { compareShots, compareSets, tCritical95 } from '../../app/src/store/compare.js';
@@ -14,8 +15,11 @@ function withMetric(shot, id, value, { sigma, ci95, unit = 'ratio', validity = '
 }
 
 test('RC.PRESET_MISMATCH exists with a Chinese description', () => {
+  // reason-codes.js holds codes only (PRODUCT-SPEC §3.4); the description is the zh-Hant catalog's `.long` value
   assert.equal(RC.PRESET_MISMATCH, 'PRESET_MISMATCH');
-  assert.ok(hasChinese(REASON_CODES.PRESET_MISMATCH));
+  assert.equal(REASON_CODES.PRESET_MISMATCH, 'PRESET_MISMATCH');
+  const zh = JSON.parse(fs.readFileSync(new URL('../../app/i18n/zh-Hant/reason.json', import.meta.url), 'utf8'));
+  for (const part of ['short', 'long', 'fix']) assert.ok(hasChinese(zh[`PRESET_MISMATCH.${part}`]), `reason.PRESET_MISMATCH.${part}`);
 });
 
 test('same preset, view and club: no warnings, no notes, like_for_like', () => {
@@ -75,15 +79,15 @@ test('cross-preset comparison ALWAYS carries PRESET_MISMATCH (200 random pairs, 
   assert.equal(compareShots(base, base).like_for_like, true);
 });
 
-test('view and club mismatches produce Chinese notes', () => {
+test('view and club mismatches produce coded notes (no localized text)', () => {
   const a = makeShot({ id: 'a', view: 'face_on', club_type: '7i' });
   const b = makeShot({ id: 'b', view: 'dtl', club_type: 'driver', preset_id: 'preset-B' });
   const r = compareShots(a, b);
   const kinds = r.notes.map((n) => n.kind).sort();
   assert.deepEqual(kinds, ['club_mismatch', 'view_mismatch']);
-  for (const n of r.notes) assert.ok(hasChinese(n.text));
-  assert.match(r.notes.find((n) => n.kind === 'view_mismatch').text, /正面.*後方/);
-  assert.match(r.notes.find((n) => n.kind === 'club_mismatch').text, /7i.*driver/);
+  for (const n of r.notes) { assert.equal('text' in n, false); assert.ok(!hasChinese(JSON.stringify(n)), JSON.stringify(n)); }
+  assert.deepEqual(r.notes.find((n) => n.kind === 'view_mismatch').params, { a: 'face_on', b: 'dtl' });
+  assert.deepEqual(r.notes.find((n) => n.kind === 'club_mismatch').params, { a: '7i', b: 'driver' });
   assert.ok(r.warnings.includes(RC.PRESET_MISMATCH)); // different presets too
   // same preset but a different club: only the club note
   const c = makeShot({ id: 'c', club_type: 'driver' });
@@ -230,7 +234,8 @@ test('compareSets: mixed views/clubs, empty sets, one-shot sets, null handling',
 
   const e = compareSets([], A);
   assert.deepEqual(e.metrics, {});
-  assert.ok(e.notes.some((n) => n.kind === 'empty_set' && hasChinese(n.text)));
+  assert.ok(e.notes.some((n) => n.kind === 'empty_set' && n.params.side === 'A'));
+  for (const n of [...e.notes, ...r.notes]) assert.ok(!hasChinese(JSON.stringify(n)), JSON.stringify(n));
   assert.equal(e.like_for_like, false);
   assert.equal(compareSets([], []).notes[0].kind, 'empty_set');
 
@@ -263,4 +268,21 @@ test('compareSets works on larger sets of the fixture shots', () => {
   const t = r.metrics.tempo_ratio;
   assert.ok(t.delta_ci95[0] < 0 && t.delta_ci95[1] > 0, `${t.delta_ci95}`);
   assert.ok(rng() >= 0);
+});
+
+test('diffSummary: significant differences first, codes only', async () => {
+  const { diffSummary } = await import('../../app/src/store/compare.js');
+  const A = [mk('a1', 'preset-A', 3.0), mk('a2', 'preset-A', 3.02), mk('a3', 'preset-A', 2.98)];
+  const B = [mk('b1', 'preset-A', 2.5), mk('b2', 'preset-A', 2.52), mk('b3', 'preset-A', 2.48)];
+  const rows = diffSummary(compareSets(A, B));
+  assert.ok(rows.length > 0);
+  const tempo = rows.find((x) => x.id === 'tempo_ratio');
+  assert.equal(tempo.direction, 'lower');
+  assert.equal(tempo.significant, true);
+  near(tempo.delta, -0.5, 1e-9);
+  const firstNonSig = rows.findIndex((x) => !x.significant);
+  const lastSig = rows.map((x) => Boolean(x.significant)).lastIndexOf(true);
+  assert.ok(firstNonSig === -1 || lastSig < firstNonSig, 'significant rows come first');
+  for (const x of rows) assert.ok(!hasChinese(JSON.stringify(x)));
+  assert.deepEqual(diffSummary(null), []);
 });

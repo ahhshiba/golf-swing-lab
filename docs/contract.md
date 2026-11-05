@@ -62,7 +62,7 @@ club_track, ballistics, derived, manual`. `measured` is always `false`: this app
 | I3 | `value !== null` implies `ci95 !== null` or `sigma !== null` | `requires ci95 or sigma` | yes |
 | I4 | `ci95 = [lo, hi]` has `lo <= hi` and `lo <= value <= hi` | `exceeds upper bound` / `is outside ci95` | no |
 | I5 | `value === null` implies `ci95 === null` and `sigma === null` (no leftover uncertainty on a null) | `must be null when value is null` | yes |
-| I6 | every reason code exists in `REASON_CODES` (each has a Traditional Chinese description); a list has no duplicates | `unknown reason code` / `duplicate reason code` | yes (enum, uniqueItems) |
+| I6 | every reason code exists in `REASON_CODES` (each has `reason.<CODE>.short/long/fix` in both catalogs; the zh-Hant `.long` is its Traditional Chinese description); a list has no duplicates | `unknown reason code` / `duplicate reason code` | yes (enum, uniqueItems) |
 | I7 | `unit` equals the fixed unit of the metric id (section 3) | `for this metric` | yes |
 | I8 | `sigma >= 0`; `measured === false` | `sigma must be` / `measured must be false` | yes |
 
@@ -179,12 +179,15 @@ each a valid shot with exactly one change. A bad fixture carries `"_expect": "<s
 
 `node scripts/check_contract.mjs` (exit code = number of problems) checks: fixtures behave as declared (at least 3 valid
 covering all views, at least 8 bad); every `RC.NAME` in `app/src/**/*.js` exists; no stray quoted code names; every code
-has a Traditional Chinese description (CJK present, no Simplified-only characters from a small list); the schema parses,
+has a Traditional Chinese description (the zh-Hant catalog's `reason.<CODE>.long`: CJK present, no Simplified-only
+characters from a small list); the schema parses,
 mentions each metric id exactly once and its enums and units match `enums.js` and `reason-codes.js`.
 
 ## 9. How to add a reason code
 
-1. Add `NAME: '繁體中文說明'` to `REASON_CODES` in `app/src/contract/reason-codes.js` (UPPER_SNAKE_CASE; `RC` is derived).
+1. Add `'NAME'` to `REASON_CODE_LIST` in `app/src/contract/reason-codes.js` (UPPER_SNAKE_CASE; `REASON_CODES`/`RC` are
+   derived), and `NAME.short`, `NAME.long`, `NAME.fix` to `app/i18n/zh-Hant/reason.json` and `app/i18n/en/reason.json`
+   (the zh-Hant `.long` is the contract's description; no prose in the JS file, PRODUCT-SPEC §3.4).
 2. Add `"NAME"` to `$defs.reasonCode.enum` in `schema/shot-v1.schema.json` (the unit test and the check fail until you do).
 3. Use it as `RC.NAME` only. If it describes the whole setup (should be repeated on affected metrics), also add it to
    `SETUP_LEVEL_CODES` in `enums.js` and to section 4 above.

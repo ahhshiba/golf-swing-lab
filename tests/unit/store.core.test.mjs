@@ -7,12 +7,15 @@ import {
 import { MemBackend } from '../../app/src/store/mem.js';
 import { openMem, makeVenue, makePreset, makeSession, makeShot, makeDataset, fillRepo, hasChinese } from './store.fixtures.mjs';
 
-const rejectsStore = (p, code) => assert.rejects(p, (e) => e instanceof StoreError && e.code === code && hasChinese(e.message));
+// PRODUCT-SPEC §3.4: store errors carry a code (UI text = t('error.' + code)); the message is English developer detail
+const rejectsStore = (p, code) => assert.rejects(p, (e) => e instanceof StoreError && e.code === code && typeof e.message === 'string' && e.message.length > 0 && !hasChinese(e.message));
 
-test('schema declares the six v1 stores, the two v2 stores and the required shot indexes', () => {
-  assert.deepEqual([...STORE_NAMES], ['venues', 'presets', 'sessions', 'shots', 'poses', 'clips', 'labels', 'models']);
+test('schema declares the six v1 stores, the two v2 stores, the v3 trash store and the required shot indexes', () => {
+  assert.deepEqual([...STORE_NAMES], ['venues', 'presets', 'sessions', 'shots', 'poses', 'clips', 'labels', 'models', 'trash']);
   assert.deepEqual([...V1_STORE_NAMES], STORE_NAMES.slice(0, 6));
-  assert.equal(SCHEMA_VERSION, 2);
+  assert.equal(SCHEMA_VERSION, 3);
+  assert.equal(STORE_DEFS.trash.keyPath, 'shot_id');
+  assert.deepEqual(MIGRATIONS.map((m) => m.version), [2, 3]);
   assert.equal(STORE_DEFS.labels.keyPath, 'shot_id');
   assert.equal(STORE_DEFS.models.keyPath, 'slot');
   const idx = STORE_DEFS.shots.indexes;
@@ -70,7 +73,7 @@ test('list returns key order; limit and reverse work', async () => {
   assert.deepEqual((await repo.venues.list({ reverse: true, limit: 2 })).map((v) => v.venue_id), ['d', 'c']);
 });
 
-test('bad input is rejected with a Chinese StoreError', async () => {
+test('bad input is rejected with a coded StoreError (English detail, no prose for the UI)', async () => {
   const repo = await openMem();
   await rejectsStore(repo.put('shots', { note: 'no key' }), 'BAD_RECORD');
   await rejectsStore(repo.put('shots', { shot_id: '' }), 'BAD_RECORD');
@@ -347,7 +350,7 @@ test('a failing migration leaves the old database untouched', async () => {
   assert.equal(await again.shots.count(), 4);
 });
 
-test('opening an older app version on a newer database is refused with a Chinese message', async () => {
+test('opening an older app version on a newer database is refused with VERSION_NEWER', async () => {
   const backend = new MemBackend();
   const v2 = await openRepository(backend, { version: 2 });
   await v2.venues.put(makeVenue('v'));
@@ -368,7 +371,7 @@ test('dataset fixture is JSON-safe (no undefined) so export round trips can comp
   assert.deepStrictEqual(JSON.parse(JSON.stringify(ds)), ds);
 });
 
-test('v1 -> v2 upgrade (real MIGRATIONS): every v1 record stays readable, labels and models stores appear empty', async () => {
+test('v1 -> current upgrade (real MIGRATIONS): every v1 record stays readable, labels, models and trash appear empty', async () => {
   const backend = new MemBackend();
   const v1 = await openRepository(backend, { version: 1, stores: Object.fromEntries(V1_STORE_NAMES.map((n) => [n, STORE_DEFS[n]])) });
   await fillRepo(v1);
@@ -377,13 +380,118 @@ test('v1 -> v2 upgrade (real MIGRATIONS): every v1 record stays readable, labels
   await v1.close();
   assert.ok(MIGRATIONS.some((m) => m.version === 2));
   const v2 = await openRepository(backend);
-  assert.equal(v2.schemaVersion, 2);
+  assert.equal(v2.schemaVersion, SCHEMA_VERSION);
   assert.equal(v2.openedFromVersion, 1);
   for (const n of V1_STORE_NAMES) assert.deepStrictEqual(await v2.list(n), before[n], n);
   assert.equal(await v2.labels.count(), 0);
   assert.equal(await v2.models.count(), 0);
+  assert.equal(await v2.trash.count(), 0);
   await v2.labels.put({ shot_id: 'shot-1', events: {}, labelled_at: '2026-11-04T00:00:00Z', source: 'owner', revision: 0, fps: 60 });
   await v2.models.put({ slot: 'active', imported_at: '2026-11-04T00:00:00Z', json: {}, bin: new ArrayBuffer(4) });
   assert.equal((await v2.labels.get('shot-1')).source, 'owner');
   assert.equal((await v2.models.get('active')).bin.byteLength, 4);
+});
+
+// ------------------------------------------------------------------ PRODUCT-SPEC §8.0.8 repo additions (platform)
+
+test('v2 -> v3: a v2 database keeps every record and gains an empty trash store', async () => {
+  const backend = new MemBackend();
+  const names = STORE_NAMES.filter((n) => n !== 'trash');
+  const v2 = await openRepository(backend, { version: 2, stores: Object.fromEntries(names.map((n) => [n, STORE_DEFS[n]])) });
+  await fillRepo(v2);
+  const before = {};
+  for (const n of names) before[n] = await v2.list(n);
+  await v2.close();
+  const v3 = await openRepository(backend);
+  assert.equal(v3.openedFromVersion, 2);
+  for (const n of names) assert.deepStrictEqual(await v3.list(n), before[n], n);
+  assert.equal(await v3.trash.count(), 0);
+});
+
+test('soft delete moves the shot to the trash unchanged; restore brings it back; list({ includeDeleted })', async () => {
+  const repo = await openMem();
+  await fillRepo(repo);
+  const all = await repo.shots.list();
+  const victim = all[1];
+  await repo.put('clips', makeClipRecord({ clip_id: 'c-v', shot_id: victim.shot_id, session_id: victim.session_id, created_at: victim.created_at, blob: { size: 10 } }));
+  const r = await repo.shots.softDelete(victim.shot_id, { at: '2026-11-05T01:00:00.000Z' });
+  assert.deepEqual(r, { ok: true, deleted_at: '2026-11-05T01:00:00.000Z' });
+  assert.equal((await repo.shots.list()).length, all.length - 1);
+  assert.equal(await repo.shots.get(victim.shot_id), null);
+  assert.equal((await repo.queryShots({})).some((s) => s.shot_id === victim.shot_id), false, 'queries never see trashed shots');
+  const withDeleted = await repo.shots.list({ includeDeleted: true });
+  assert.equal(withDeleted.length, all.length);
+  assert.deepStrictEqual(withDeleted.find((s) => s.shot_id === victim.shot_id), victim, 'the stored shot is not modified');
+  assert.equal((await repo.list('clips', { index: 'shot_id', query: victim.shot_id })).length, 1, 'clips stay until purge');
+  assert.deepEqual((await repo.shots.listDeleted()).map((t) => t.shot_id), [victim.shot_id]);
+  assert.deepEqual(await repo.shots.softDelete('nope', { at: '2026-11-05T01:00:00.000Z' }), { ok: false, deleted_at: null });
+  assert.deepEqual(await repo.shots.restore(victim.shot_id), { ok: true });
+  assert.deepStrictEqual(await repo.shots.get(victim.shot_id), victim);
+  assert.equal(await repo.trash.count(), 0);
+  assert.deepEqual(await repo.shots.restore(victim.shot_id), { ok: false });
+  // a backend without a clock needs an explicit time
+  await rejectsStore(repo.shots.softDelete(victim.shot_id), 'BAD_RECORD');
+});
+
+test('purgeDeleted removes trashed shots with their pose, clips and label; olderThanMs keeps recent ones', async () => {
+  const repo = await openMem();
+  const shots = [makeShot({ id: 'a', created_at: '2026-11-01T00:00:00.000Z' }), makeShot({ id: 'b', created_at: '2026-11-02T00:00:00.000Z' }), makeShot({ id: 'c', created_at: '2026-11-03T00:00:00.000Z' })];
+  for (const s of shots) {
+    await repo.shots.put(s);
+    await repo.put('poses', { shot_id: s.shot_id, session_id: s.session_id, created_at: s.created_at });
+    await repo.put('clips', makeClipRecord({ clip_id: `clip-${s.shot_id}`, shot_id: s.shot_id, session_id: s.session_id, created_at: s.created_at, blob: { size: 5 } }));
+    await repo.labels.put({ shot_id: s.shot_id, events: {}, labelled_at: s.created_at, source: 'owner', revision: 0, fps: 60 });
+  }
+  await repo.shots.softDelete(shots[0].shot_id, { at: '2026-11-01T00:00:00.000Z' });
+  await repo.shots.softDelete(shots[1].shot_id, { at: '2026-11-05T00:00:00.000Z' });
+  await rejectsStore(repo.shots.purgeDeleted({ olderThanMs: 1000 }), 'BAD_QUERY'); // no clock in the mem backend
+  const r1 = await repo.shots.purgeDeleted({ olderThanMs: 2 * 86400000, now: '2026-11-05T12:00:00.000Z' });
+  assert.deepEqual(r1, { purged: 1, clips: 1 });
+  assert.equal(await repo.poses.get(shots[0].shot_id), null);
+  assert.equal(await repo.labels.get(shots[0].shot_id), null);
+  assert.equal(await repo.clips.get(`clip-${shots[0].shot_id}`), null);
+  assert.ok(await repo.poses.get(shots[1].shot_id), 'recent trash keeps its pose');
+  const r2 = await repo.shots.purgeDeleted();
+  assert.deepEqual(r2, { purged: 1, clips: 1 });
+  assert.equal(await repo.trash.count(), 0);
+  assert.ok(await repo.shots.get(shots[2].shot_id), 'live shots are never purged');
+  assert.ok(await repo.clips.get(`clip-${shots[2].shot_id}`));
+});
+
+test('setStar flags the shot (revision + 1) and its clips; labels.unlabelledWithClips lists the teach queue', async () => {
+  const repo = await openMem();
+  const a = makeShot({ id: 'a', created_at: '2026-11-01T00:00:00.000Z' });
+  const b = makeShot({ id: 'b', created_at: '2026-11-02T00:00:00.000Z' });
+  const c = makeShot({ id: 'c', created_at: '2026-11-03T00:00:00.000Z' });
+  for (const s of [a, b, c]) await repo.shots.put(s);
+  for (const s of [a, b]) await repo.put('clips', makeClipRecord({ clip_id: `clip-${s.shot_id}`, shot_id: s.shot_id, session_id: s.session_id, created_at: s.created_at, blob: { size: 5 } }));
+  assert.deepEqual(await repo.shots.setStar(a.shot_id, true), { ok: true, starred: true });
+  const sa = await repo.shots.get(a.shot_id);
+  assert.equal(sa.starred, true);
+  assert.equal(sa.revision, (a.revision ?? 0) + 1);
+  assert.equal((await repo.clips.get(`clip-${a.shot_id}`)).starred, true);
+  assert.deepEqual(await repo.shots.setStar('nope', true), { ok: false, starred: null });
+  assert.deepEqual((await repo.labels.unlabelledWithClips()).map((s) => s.shot_id), [b.shot_id, a.shot_id], 'newest first, only shots with a clip');
+  await repo.labels.put({ shot_id: b.shot_id, events: {}, labelled_at: b.created_at, source: 'owner', revision: 0, fps: 60 });
+  await repo.shots.softDelete(a.shot_id, { at: '2026-11-05T00:00:00.000Z' });
+  assert.deepEqual(await repo.labels.unlabelledWithClips(), [], 'labelled and trashed shots are not offered');
+});
+
+test('deleteAll empties every store and reports what was there', async () => {
+  const repo = await openMem();
+  await fillRepo(repo);
+  const before = {};
+  for (const n of STORE_NAMES) before[n] = await repo.count(n);
+  assert.deepEqual(await repo.deleteAll(), before);
+  for (const n of STORE_NAMES) assert.equal(await repo.count(n), 0, n);
+});
+
+test('isoFromMs / msFromIso are exact inverses (pure UTC arithmetic, no clock)', async () => {
+  const { isoFromMs, msFromIso } = await import('../../app/src/store/core.js');
+  for (const ms of [0, 951782400000, 1709210096789, 1730851200123, -1e10, 4102444800000]) {
+    assert.equal(isoFromMs(ms), new Date(ms).toISOString());
+    assert.equal(msFromIso(isoFromMs(ms)), ms);
+  }
+  assert.equal(msFromIso('2026-11-05T07:30:00+08:00'), Date.parse('2026-11-04T23:30:00Z'));
+  assert.ok(Number.isNaN(msFromIso('yesterday')));
 });

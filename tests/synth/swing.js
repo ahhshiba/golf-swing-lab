@@ -639,3 +639,243 @@ export function synthLiveSession(opts = {}) {
   samples.sort((a, b) => a.t_s - b.t_s || (a.type === 'audio' ? 1 : -1));
   return { samples, truth, duration_s: t };
 }
+
+// ------------------------------------------------------------------------------------------------ stress modes
+// PRODUCT-SPEC §7.3: the synthetic stress suite of the rule-based events (3 views × 8 modes × 40 seeds, 60 / 240 Hz).
+// Each mode models one pre-shot routine or capture artefact on top of synthSwing; the ground truth stays the swing's
+// own event times (mapped to media time for slowmo_x8).
+
+export const STRESS_MODES = Object.freeze(['baseline', 'waggle', 'forward_press', 'short_tail', 'finish_relax',
+  'impact_dropout', 'slowmo_x8', 'low_visibility']);
+/**
+ * Extra modes used only to fit and check the confidence calibration (§7.2 EV-4): clips where the rules are expected
+ * to fail sometimes, so the calibration sees negative examples. Not part of the §7.3 detection gates.
+ */
+export const CALIB_EXTRA_MODES = Object.freeze(['late_start', 'heavy_noise', 'occluded_hands', 'early_end']);
+const HANDS = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+/** Slow-motion factor baked into a slowmo_x8 export. */
+export const SLOWMO_FACTOR = 8;
+
+function torsoPx(img, i, W, H) {
+  const q = i * 132;
+  const sx = ((img[q + 44] + img[q + 48]) / 2) * W;
+  const sy = ((img[q + 45] + img[q + 49]) / 2) * H;
+  const hx = ((img[q + 92] + img[q + 96]) / 2) * W;
+  const hy = ((img[q + 93] + img[q + 97]) / 2) * H;
+  return Math.hypot(sx - hx, sy - hy);
+}
+
+function slicePose(p, keep) {
+  const n = keep.length;
+  const t_s = new Float64Array(n);
+  const img = new Float32Array(n * 132);
+  const world = new Float32Array(n * 99);
+  keep.forEach((i, m) => {
+    t_s[m] = p.t_s[i];
+    img.set(p.img.subarray(i * 132, (i + 1) * 132), m * 132);
+    world.set(p.world.subarray(i * 99, (i + 1) * 99), m * 99);
+  });
+  return { ...p, t_s, img, world };
+}
+
+/**
+ * stressSwing({ seed, view, fps = 60, mode, handedness? }) -> { poseSeq, truth: { events: {name: {t_s}} } (media
+ *   time), toReal(t_media) -> s, time_scale (1 | 8), container_fps, duration_s, audioOnset_t (media), swing }
+ * fps is the real (capture) rate. Modes:
+ *   baseline        synthSwing unchanged
+ *   waggle          2.0-2.6 s address hold; hands oscillate ±0.15 torso (image x) at 2 Hz for 1.0 s, ending 0.4 s
+ *                   before the takeaway
+ *   forward_press   hands drift 0.08 torso along image −x (mirrored for left-handed) over the 0.25 s before the takeaway, released
+ *                   over the first 0.2 s of the backswing
+ *   short_tail      the clip ends 0.4 s after the finish (no hold: the user stops recording / walks off)
+ *   finish_relax    0.3 s after the finish the hands drop 0.5 torso over 0.6 s (the golfer relaxes the pose)
+ *   impact_dropout  lead wrist / hand landmarks lost (vis 0.2, ±0.5 % jitter) for ±50 ms around impact
+ *   slowmo_x8       iPhone slow motion exported with the 1/8 speed baked in: the capture at fps, the container at
+ *                   fps / 8; real time is stretched ×8 from 0.3 s before the takeaway on (the start stays at normal
+ *                   speed, as in the Photos speed ramp)
+ *   low_visibility  every visibility ×0.6 and +3 px extra position noise (dim bay, baggy clothes)
+ */
+export function stressSwing({ seed = 1, view = 'face_on', fps = 60, mode = 'baseline', handedness = 'right' } = {}) {
+  if (!STRESS_MODES.includes(mode) && !CALIB_EXTRA_MODES.includes(mode)) throw new RangeError(`stressSwing: unknown mode ${mode}`);
+  const params = mode === 'waggle' ? { t_address: 2.0 + 0.6 * ((seed * 0.6180339887) % 1) } : undefined;
+  const s = synthSwing({ seed, view, fps, handedness, params });
+  const W = s.poseSeq.W;
+  const H = s.poseSeq.H;
+  const p = { ...s.poseSeq, t_s: Float64Array.from(s.poseSeq.t_s), img: Float32Array.from(s.poseSeq.img), world: Float32Array.from(s.poseSeq.world) };
+  const tA = s.truth.events.address.t_s;
+  const tI = s.truth.events.impact.t_s;
+  const tF = s.truth.events.finish.t_s;
+  const L = torsoPx(p.img, 0, W, H);
+  const N = p.t_s.length;
+  const sgn = handedness === 'left' ? -1 : 1;
+  let out = p;
+  let toReal = (t) => t;
+  let toMedia = (t) => t;
+  let scale = 1;
+  let container = fps;
+  switch (mode) {
+    case 'waggle':
+      for (let i = 0; i < N; i++) {
+        const t = p.t_s[i];
+        if (t > tA - 1.4 && t < tA - 0.4) {
+          const d = (0.15 * L * Math.sin(2 * Math.PI * 2 * (t - (tA - 1.4)))) / W;
+          for (const j of HANDS) p.img[i * 132 + j * 4] += d;
+        }
+      }
+      break;
+    case 'forward_press':
+      for (let i = 0; i < N; i++) {
+        const t = p.t_s[i];
+        const w = t < tA - 0.25 ? 0 : t < tA ? (t - (tA - 0.25)) / 0.25 : Math.max(0, 1 - (t - tA) / 0.2);
+        for (const j of HANDS) p.img[i * 132 + j * 4] -= (sgn * 0.08 * L * w) / W;
+      }
+      break;
+    case 'short_tail': {
+      const n = Array.prototype.findIndex.call(p.t_s, (t) => t > tF + 0.4);
+      if (n > 0) out = slicePose(p, Array.from({ length: n }, (_, i) => i));
+      break;
+    }
+    case 'finish_relax':
+      for (let i = 0; i < N; i++) {
+        const t = p.t_s[i];
+        const w = t < tF + 0.3 ? 0 : Math.min(1, (t - tF - 0.3) / 0.6);
+        for (const j of HANDS) p.img[i * 132 + j * 4 + 1] += (0.5 * L * w) / H;
+      }
+      break;
+    case 'impact_dropout': {
+      const lead = handedness === 'left' ? [16, 18, 20, 22] : [15, 17, 19, 21];
+      for (let i = 0; i < N; i++) {
+        if (Math.abs(p.t_s[i] - tI) > 0.05) continue;
+        for (const j of lead) {
+          p.img[i * 132 + j * 4 + 3] = 0.2;
+          p.img[i * 132 + j * 4] += Math.sin(i * 12.9898) * 0.5 * 0.01;
+          p.img[i * 132 + j * 4 + 1] += Math.cos(i * 78.233) * 0.5 * 0.01;
+        }
+      }
+      break;
+    }
+    case 'low_visibility': {
+      const rng = mulberry32(seed * 31337 + 11);
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < 33; j++) {
+          const q = i * 132 + j * 4;
+          p.img[q] += gauss(rng, 0, 3) / W;
+          p.img[q + 1] += gauss(rng, 0, 3) / H;
+          p.img[q + 3] *= 0.6;
+        }
+      }
+      break;
+    }
+    case 'late_start': {
+      // recording started 0.05–0.35 s before the takeaway: no address hold in the clip
+      const lead = 0.05 + 0.3 * ((seed * 0.7548776662) % 1);
+      const keep = [];
+      for (let i = 0; i < N; i++) if (p.t_s[i] >= tA - lead) keep.push(i);
+      out = slicePose(p, keep);
+      break;
+    }
+    case 'early_end': {
+      // recording stopped 0.0–0.25 s after the finish (or just before it)
+      const tail = -0.1 + 0.35 * ((seed * 0.5698402910) % 1);
+      const n = Array.prototype.findIndex.call(p.t_s, (t) => t > tF + tail);
+      if (n > 0) out = slicePose(p, Array.from({ length: n }, (_, i) => i));
+      break;
+    }
+    case 'heavy_noise': {
+      const rng = mulberry32(seed * 7331 + 5);
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < 33; j++) {
+          const q = i * 132 + j * 4;
+          p.img[q] += gauss(rng, 0, 9) / W;
+          p.img[q + 1] += gauss(rng, 0, 9) / H;
+          p.img[q + 3] *= 0.45;
+        }
+      }
+      break;
+    }
+    case 'occluded_hands': {
+      // the lead arm hidden behind the body from address to top (vis 0.15, ±1.5 % jitter)
+      const lead = handedness === 'left' ? [14, 16, 18, 20, 22] : [13, 15, 17, 19, 21];
+      const tT = s.truth.events.top.t_s;
+      for (let i = 0; i < N; i++) {
+        if (p.t_s[i] < tA - 0.2 || p.t_s[i] > tT + 0.1) continue;
+        for (const j of lead) {
+          p.img[i * 132 + j * 4 + 3] = 0.15;
+          p.img[i * 132 + j * 4] += Math.sin(i * 4.1 + j) * 0.015;
+          p.img[i * 132 + j * 4 + 1] += Math.cos(i * 3.3 + j) * 0.015;
+        }
+      }
+      break;
+    }
+    case 'slowmo_x8': {
+      const k = SLOWMO_FACTOR;
+      const t0 = tA - 0.3;
+      scale = k;
+      container = fps / k;
+      // before t0 the export runs at normal speed: every k-th capture frame; after t0 every frame, stretched ×k
+      const keep = [];
+      for (let i = 0; i < N; i++) if (p.t_s[i] > t0 || i % k === 0) keep.push(i);
+      out = slicePose(p, keep);
+      toMedia = (t) => (t > t0 ? t0 + k * (t - t0) : t);
+      toReal = (t) => (t > t0 ? t0 + (t - t0) / k : t);
+      for (let m = 0; m < out.t_s.length; m++) out.t_s[m] = toMedia(out.t_s[m]);
+      break;
+    }
+    default: break;
+  }
+  const events = {};
+  for (const name of EVENT_NAMES) {
+    const e = s.truth.events[name];
+    events[name] = e ? { t_s: toMedia(e.t_s) } : null;
+  }
+  const ts = out.t_s;
+  return {
+    poseSeq: out, truth: { events, metrics: s.truth.metrics }, toReal, time_scale: scale, container_fps: container,
+    duration_s: ts.length ? ts[ts.length - 1] - ts[0] : 0, audioOnset_t: toMedia(s.audioOnset_t), swing: s, mode,
+  };
+}
+
+/** §7.3 tolerances in real seconds: 2 frames at 60 Hz for address / top / impact, 4 frames for finish. */
+export const STRESS_TOL = Object.freeze({ address: 2 / 60, top: 2 / 60, impact: 2 / 60, finish: 4 / 60, tempo: 0.3 });
+const STRESS_KEY = ['address', 'top', 'impact', 'finish'];
+
+/**
+ * scoreStress(detect, { views, modes, rates, seeds = 40 }) -> rows [{ view, mode, fps, n, found, address, top,
+ *   impact, finish, tempo }] (rates are shares of all seeds; errors in real seconds after toReal()).
+ * detect(stress) -> EventSet in media time (the caller adds time-scale handling, audio, ...).
+ */
+export function scoreStress(detect, { views = ['face_on', 'dtl', 'high_behind'], modes = STRESS_MODES, rates = [60, 240], seeds = 40 } = {}) {
+  const rows = [];
+  for (const view of views) for (const mode of modes) for (const fps of rates) {
+    const ok = { found: 0, address: 0, top: 0, impact: 0, finish: 0, tempo: 0 };
+    const err = Object.fromEntries(STRESS_KEY.map((e) => [e, []]));
+    for (let seed = 1; seed <= seeds; seed++) {
+      const st = stressSwing({ seed, view, fps, mode, handedness: seed % 4 === 0 ? 'left' : 'right' });
+      const ev = detect(st);
+      if (!ev || !ev.impact || !Number.isFinite(ev.impact.t_s)) continue;
+      ok.found++;
+      const T = st.truth.events;
+      for (const e of STRESS_KEY) {
+        const d = st.toReal(ev[e].t_s) - st.toReal(T[e].t_s);
+        err[e].push(d);
+        if (Math.abs(d) <= STRESS_TOL[e] + 1e-9) ok[e]++;
+      }
+      const r = (x) => st.toReal(x);
+      const tt = (r(T.top.t_s) - r(T.address.t_s)) / (r(T.impact.t_s) - r(T.top.t_s));
+      const tp = (r(ev.top.t_s) - r(ev.address.t_s)) / (r(ev.impact.t_s) - r(ev.top.t_s));
+      if (Math.abs(tp - tt) <= STRESS_TOL.tempo) ok.tempo++;
+    }
+    const med = (a) => { const b = [...a].sort((x, y) => x - y); return b.length ? b[b.length >> 1] : NaN; };
+    const row = { view, mode, fps, n: seeds };
+    for (const [k, v] of Object.entries(ok)) row[k] = v / seeds;
+    row.median_ms = Object.fromEntries(STRESS_KEY.map((e) => [e, Math.round(1000 * med(err[e]))]));
+    rows.push(row);
+  }
+  return rows;
+}
+
+export function formatStressRow(r) {
+  const pct = (x) => `${(100 * x).toFixed(0)}%`.padStart(4);
+  return `${r.view.padEnd(11)} ${r.mode.padEnd(14)} ${String(r.fps).padStart(3)} Hz  found ${pct(r.found)}  address ${pct(r.address)}  `
+    + `top ${pct(r.top)}  impact ${pct(r.impact)}  finish ${pct(r.finish)}  tempo ${pct(r.tempo)}  med ms ${JSON.stringify(r.median_ms)}`;
+}

@@ -1,0 +1,17 @@
+{
+  "today": "今天",
+  "yesterday": "昨天",
+  "seconds": {
+    "other": "{n} 秒"
+  },
+  "minutes": {
+    "other": "{n} 分鐘"
+  },
+  "shots": {
+    "other": "{n} 球"
+  },
+  "elapsed": "已 {m} 分鐘",
+  "clock._context": "mm:ss duration",
+  "clock": "{m}:{ss}",
+  "hours_minutes": "{h} 小時 {m} 分"
+}

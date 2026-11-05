@@ -1,0 +1,30 @@
+{
+  "title": "標註揮桿時間點",
+  "list": "8 個揮桿時間點",
+  "frame": "第 {f} 幀",
+  "row_done": "{event}：第 {f} 幀，已確認",
+  "row_todo": "{event}：第 {f} 幀，尚未確認",
+  "count": "已確認 {n} / 8",
+  "left": {
+    "other": "還有 {n} 個時間點沒有確認"
+  },
+  "save": "儲存標註",
+  "saved": "已儲存標註（第 {n} 次）",
+  "hint_export": "標註只用來訓練與評估偵測器，不會改這一球的數字。可在「歷史 › 教偵測器認揮桿」匯出訓練集。",
+  "list_sep": "、",
+  "missing_events_n": {
+    "other": "還有 {n} 個時間點沒有設定：{names}"
+  },
+  "invalid": "標註格式不正確",
+  "not_object": "標註格式不正確",
+  "unknown_field": "標註裡有不認得的欄位",
+  "missing_shot_id": "標註沒有對應的一球",
+  "bad_source": "標註來源不正確",
+  "bad_time": "標註時間格式不正確",
+  "bad_revision": "標註版本不正確",
+  "bad_fps": "標註的幀率不正確",
+  "missing_events": "標註沒有揮桿時間點",
+  "unknown_event": "標註裡有不認得的時間點",
+  "bad_event": "有一個時間點缺少或格式不正確",
+  "order": "時間點順序不對"
+}

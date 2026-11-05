@@ -12,6 +12,8 @@ candidates that were ever scored on split 1).
 """
 from __future__ import annotations
 
+import os
+
 import argparse
 import datetime as dt
 import json
@@ -150,6 +152,10 @@ def main(argv=None) -> int:
     ap.add_argument("--rules-only", action="store_true")
     ap.add_argument("--device", default="cpu")
     args = ap.parse_args(argv)
+    if os.environ.get("RESEARCH") != "1":
+        print("GolfDB research script (CC BY-NC, dev only, ADR 0004): set RESEARCH=1 to run it; its outputs are a "
+              "benchmark report, never a ship gate or a source of constants.", file=sys.stderr)
+        return 2
 
     if args.rules_only:
         _, test = D.split_ids(args.split)

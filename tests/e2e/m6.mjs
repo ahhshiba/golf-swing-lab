@@ -6,7 +6,7 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
-import { watchPage, need, ROOT, testidOrFail } from './lib.mjs';
+import { watchPage, need, ROOT, testidOrFail, waitFor } from './lib.mjs';
 
 const SHOT_FILES = ['valid_face_on_240.json', 'valid_dtl_30.json', 'valid_high_behind_240.json'];
 const loadShots = () => SHOT_FILES.map((f) => JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/fixtures/shots', f), 'utf8')));
@@ -66,11 +66,12 @@ export const ui = {
       const w = watchPage(page);
       await page.goto(ctx.baseUrl);
       await page.locator('#app-ready').waitFor({ state: 'attached', timeout: 30000 });
-      await (await testidOrFail(page, 'nav-history', 'navigation to the history screen', 15000, ['[data-go="history"]', 'button:has-text("歷史")'])).click();
+      await (await testidOrFail(page, 'tabbar-history', 'navigation to the history screen (tab bar)', 15000, ['[data-go="history"]'])).click();
       await page.locator('[data-screen="history"]').waitFor({ state: 'visible', timeout: 10000 });
       const input = await testidOrFail(page, 'history-import-input', '<input type=file> that imports an export JSON', 15000, ['#hist-import']);
       await input.setInputFiles(file);
-      await page.waitForFunction(() => document.querySelectorAll('[data-testid="shot-row"], [data-screen="history"] button.linklike').length === 3, null, { timeout: 20000 })
+      // polled with page.evaluate: page.waitForFunction evaluates a string, which the app's CSP (no unsafe-eval) refuses
+      await waitFor(() => page.evaluate(() => document.querySelectorAll('[data-testid="shot-row"], [data-screen="history"] button.linklike').length === 3), { timeout: 20000, interval: 100, what: '3 rows' })
         .catch(() => { throw new Error('history did not show exactly 3 [data-testid="shot-row"] after the import'); });
       const btn = await testidOrFail(page, 'history-export-json', 'button exporting all shots as JSON', 15000, ['button:has-text("匯出 JSON")']);
       await btn.click();

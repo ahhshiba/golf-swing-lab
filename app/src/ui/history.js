@@ -1,128 +1,371 @@
-// ui/history.js — P7 history: filters (view / preset / club), compare with the PRESET_MISMATCH badge,
-// export JSON / CSV through store/export.js (download link), import JSON with the Chinese ImportError message.
-
-import { h, clear, card, toast, screenHeader, select, field, downloadLink, badge } from './dom.js';
-import { VIEW_LABELS, formatMetric, fmtNum } from './format.js';
-import { CLUBS } from '../session/settings.js';
+// ui/history.js — history (package C; PRODUCT-SPEC §2.3 History, V12 / UX-11 / PF history virtualisation / A11Y-7).
+// Shots grouped by practice session with a sticky header (date · venue · angle · N shots · averages); only the
+// latest groups are expanded and each renders 50 rows at a time ("顯示更多"), so 1000 shots stay ≤ 1,500 nodes.
+// Row: club chip, headline numbers, time · angle, 已修正 tag, star toggle, delete (soft, 10 s undo toast).
+// Filters are ChipRows; Compare is a header toggle that adds A / B pickers (named with the shot time) and opens the
+// plain-language diff sheet (ui/compare.js). Data card: back up everything (poses + labels always, videos optional
+// with a size estimate), spreadsheet (CSV), restore; navigator.share({ files }) when available, else a download link.
+//
+// Exports for other screens: buildFilter, shotOps(app), shareOrDownload(blob, name, outEl, opts), fileStamp(iso),
+// groupShots(shots, venues).
+import { h, clear, downloadLink } from './dom.js';
+import * as C from './components.js';
+import { t, plural, fmtDate, fmtTime, fmtNum } from '../i18n/index.js';
+import { fmtMetric } from '../i18n/units.js';
 import { exportJSON, exportCSV, importJSON } from '../store/export.js';
-import { compareShots, compareSets } from '../store/compare.js';
 import { validateShot } from '../contract/validate.js';
-import { REGISTRY } from '../metrics/registry.js';
-import { RC, describe } from '../contract/reason-codes.js';
+import { clubName, viewName } from './glossary.js';
+import { openCompare } from './compare.js';
+
+const PAGE_ROWS = 50;
+const PAGE_GROUPS = 20;
+const OPEN_GROUPS = 2;
+const OPEN_SHOTS = 20; // further groups open while the opened rows stay at or under this
+export const UNDO_MS = 10000;
 
 /** Compact filter object for queryShots / exportJSON (empty values dropped). */
-export function buildFilter({ view, preset_id, club_type }) {
+export function buildFilter({ view, preset_id, club_type, starred } = {}) {
   const f = {};
   if (view) f.view = view;
   if (preset_id) f.preset_id = preset_id;
   if (club_type) f.club_type = club_type;
+  if (starred) f.starred = true;
   return f;
+}
+
+/** Local-date file stamp "2026-11-04-0930" (PRODUCT-SPEC §6.3: file names from local date parts only). */
+export function fileStamp(iso = new Date()) {
+  const d = iso instanceof Date ? iso : new Date(iso);
+  const ok = Number.isFinite(d.getTime()) ? d : new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${ok.getFullYear()}-${p(ok.getMonth() + 1)}-${p(ok.getDate())}-${p(ok.getHours())}${p(ok.getMinutes())}`;
+}
+
+// ------------------------------------------------------------------ star / soft delete (D's repo API when present)
+const pendingDeletes = new Map(); // shot_id -> timer (fallback when repo.shots.softDelete is missing)
+
+/** Star and soft delete through the repository (PRODUCT-SPEC §8.0.8), with a fallback for older repositories. */
+export function shotOps(app) {
+  const repo = () => app.repo;
+  return {
+    async setStar(shot, on) {
+      const r = repo();
+      if (!r) throw Object.assign(new Error('no repository'), { code: 'REPO_UNAVAILABLE' });
+      if (typeof r.shots.setStar === 'function') await r.shots.setStar(shot.shot_id, Boolean(on));
+      else { const cur = (await r.shots.get(shot.shot_id)) ?? shot; await r.shots.put({ ...cur, starred: Boolean(on) }); }
+      return { ...((await r.shots.get(shot.shot_id)) ?? shot), starred: Boolean(on) };
+    },
+    async softDelete(id) {
+      const r = repo();
+      if (!r) throw Object.assign(new Error('no repository'), { code: 'REPO_UNAVAILABLE' });
+      if (typeof r.shots.softDelete === 'function') return r.shots.softDelete(id);
+      clearTimeout(pendingDeletes.get(id));
+      pendingDeletes.set(id, setTimeout(() => { pendingDeletes.delete(id); r.deleteShot?.(id).catch(() => {}); }, UNDO_MS + 1000));
+      return true;
+    },
+    async restore(id) {
+      const r = repo();
+      if (r && typeof r.shots.restore === 'function') return r.shots.restore(id);
+      clearTimeout(pendingDeletes.get(id));
+      pendingDeletes.delete(id);
+      return true;
+    },
+    isDeleted: (shot) => Boolean(shot?.deleted_at || shot?.deleted) || pendingDeletes.has(shot?.shot_id),
+  };
+}
+
+/**
+ * Share a file (navigator.share({ files })) or put a download link into outEl. Resolves to 'shared' | 'link' |
+ * 'cancelled'.
+ */
+export async function shareOrDownload(blob, name, outEl, { title } = {}) {
+  try {
+    const file = typeof File === 'function' ? new File([blob], name, { type: blob.type }) : null;
+    if (file && navigator.canShare?.({ files: [file] }) && typeof navigator.share === 'function') {
+      await navigator.share({ files: [file], title: title ?? name });
+      return 'shared';
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') return 'cancelled';
+    /* fall through to the link */
+  }
+  if (outEl) {
+    const a = downloadLink(blob, name, t('history.data.download', { name, size: fmtSize(blob.size) }));
+    a.classList.add('btn', 'btn-tinted', 'btn-lg', 'download-link');
+    clear(outEl, a);
+  }
+  return 'link';
+}
+
+export function fmtSize(bytes) {
+  if (!Number.isFinite(bytes)) return t('common.unknown');
+  if (bytes >= 1e9) return t('history.size.gb', { n: fmtNum(bytes / 1e9, { digits: 1 }) });
+  if (bytes >= 1e6) return t('history.size.mb', { n: fmtNum(bytes / 1e6, { digits: bytes >= 1e8 ? 0 : 1 }) });
+  return t('history.size.kb', { n: fmtNum(Math.max(1, Math.round(bytes / 1e3))) });
+}
+
+/** Group shots (newest first) by session: [{ key, session_id, shots, first, view, venue }]. Pure. */
+export function groupShots(shots, venues = new Map()) {
+  const groups = new Map();
+  for (const s of shots) {
+    const key = s.session_id || `day-${String(s.created_at ?? '').slice(0, 10)}`;
+    let g = groups.get(key);
+    if (!g) { g = { key, session_id: s.session_id ?? null, shots: [], venue: venues.get(s.venue_id) ?? null, views: new Set() }; groups.set(key, g); }
+    g.shots.push(s);
+    if (s.capture?.view) g.views.add(s.capture.view);
+  }
+  const out = [...groups.values()];
+  for (const g of out) {
+    g.shots.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    g.latest = g.shots[0]?.created_at ?? '';
+  }
+  out.sort((a, b) => String(b.latest).localeCompare(String(a.latest)));
+  return out;
+}
+
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const val = (m) => (m && Number.isFinite(m.value) ? m.value : null);
+
+/** Headline numbers of a shot row: carry · ball speed when measured, else tempo · club speed. */
+function headline(shot, units) {
+  const m = shot.metrics ?? {};
+  const pick = val(m.carry_m) !== null ? ['carry_m', 'ball_speed_mps'] : ['tempo_ratio', 'club_speed_mps'];
+  const parts = [];
+  for (const id of pick) {
+    if (val(m[id]) === null) continue;
+    const f = fmtMetric({ ...m[id], ci95: null, sigma: null }, units, { id });
+    parts.push(id === 'tempo_ratio' ? t('history.row.tempo', { v: f.value }) : f.text);
+  }
+  if (!parts.length) return t('history.row.no_numbers');
+  const out = [];
+  parts.forEach((x, i) => { if (i) out.push(' · '); out.push(h('span.nowrap', x)); });
+  return out;
 }
 
 export function mountHistory(root, app) {
   let shots = [];
-  let presets = [];
-  let groups = new Map(); // shot_id -> 'A' | 'B'
-  let filt = {};
+  let venues = new Map();
+  let clipBytes = 0;
+  let filt = { view: '', club_type: '', starred: false };
+  let compareMode = false;
+  const picks = new Map(); // shot_id -> 'A' | 'B'
+  const openGroups = new Set();
+  const closedGroups = new Set();
+  const rowsShown = new Map();
+  let groupsShown = PAGE_GROUPS;
+  let status = null; // { kind:'ok'|'error', text }
+  let teach = null;
+  const ops = shotOps(app);
+
+  let cacheSig = null; // signature of the shots last rendered (stale-while-revalidate: reopening renders at once)
+  const sig = () => shots.map((s) => `${s.shot_id}:${s.revision ?? 0}:${s.starred ? 1 : 0}`).join('|');
 
   async function load() {
-    if (!app.repo) return;
-    presets = await app.repo.presets.list();
-    shots = await app.repo.queryShots({ ...buildFilter(filt), reverse: true });
+    if (!app.repo) { shots = []; return; }
+    const all = await app.repo.queryShots({ reverse: true });
+    shots = all.filter((s) => !ops.isDeleted(s));
+    try { venues = new Map((await app.repo.venues.list()).map((v) => [v.venue_id, v])); } catch (_) { venues = new Map(); }
+    try { clipBytes = (await app.repo.clips.list()).reduce((a, c) => a + (Number(c.bytes) || Number(c.blob?.size) || 0), 0); } catch (_) { clipBytes = 0; }
   }
 
-  function compareView() {
-    const A = shots.filter((s) => groups.get(s.shot_id) === 'A');
-    const B = shots.filter((s) => groups.get(s.shot_id) === 'B');
-    if (!A.length || !B.length) return h('p.hint', '在清單裡把球標成 A 或 B 就能比較（各一球＝單球比較，多球＝組比較）。');
-    const r = A.length === 1 && B.length === 1 ? compareShots(A[0], B[0]) : compareSets(A, B);
-    const mismatch = r.warnings.includes(RC.PRESET_MISMATCH);
-    const rows = Object.values(r.metrics).filter((m) => m.status === 'compared');
-    return h('div.compare', {},
-      mismatch ? h('p', {}, badge('不同機位預設', 'warn'), ' ', describe(RC.PRESET_MISMATCH)) : h('p', {}, badge('同一機位預設', 'ok')),
-      r.notes.length ? h('ul', {}, r.notes.map((n) => h('li.hint', n.text))) : null,
-      h('table.cmp', {},
-        h('thead', {}, h('tr', {}, h('th', '指標'), h('th', 'A'), h('th', 'B'), h('th', 'B − A'))),
-        h('tbody', {}, rows.map((m) => {
-          const a = r.kind === 'shots' ? formatMetric({ ...m.a, unit: m.unit }) : `${fmtNum(m.a.mean)}（n=${m.a.n}）`;
-          const b = r.kind === 'shots' ? formatMetric({ ...m.b, unit: m.unit }) : `${fmtNum(m.b.mean)}（n=${m.b.n}）`;
-          const d = Number.isFinite(m.delta) ? `${fmtNum(m.delta)}${m.delta_ci95 ? `（${fmtNum(m.delta_ci95[0])}～${fmtNum(m.delta_ci95[1])}）` : ''}${m.significant ? ' *' : ''}` : '—';
-          return h('tr', {}, h('td', REGISTRY[m.id]?.label_zh ?? m.id), h('td', a), h('td', b), h('td', d));
-        }))),
-      h('p.hint', '* = 95% 信賴區間不含 0。'));
+  const visible = () => shots.filter((s) => (!filt.view || s.capture?.view === filt.view) && (!filt.club_type || s.club?.type === filt.club_type) && (!filt.starred || s.starred));
+
+  function filters() {
+    const viewItems = [['', t('history.filter.all')], ...['face_on', 'dtl', 'high_behind'].filter((v) => shots.some((s) => s.capture?.view === v)).map((v) => [v, viewName(v)]), ['*', t('history.filter.starred')]];
+    const viewRow = C.chipRow({ items: viewItems, value: filt.starred ? '*' : filt.view, label: t('history.filter.view_label'), testid: 'history-filter-view',
+      onChange: (v) => { filt = { ...filt, view: v === '*' ? '' : v, starred: v === '*' }; render(); } });
+    const clubs = [...new Set(shots.map((s) => s.club?.type).filter(Boolean))];
+    const clubRow = clubs.length > 1 ? C.chipRow({ items: [['', t('history.filter.all_clubs')], ...clubs.map((c) => [c, clubName(c)])], value: filt.club_type, label: t('history.filter.club_label'), testid: 'history-filter-club',
+      onChange: (v) => { filt = { ...filt, club_type: v }; render(); } }) : null;
+    return h('div.history-filters', {}, viewRow, clubRow);
+  }
+
+  function groupHeader(g, open, units) {
+    const d = g.shots[g.shots.length - 1]?.created_at ?? g.latest;
+    const views = [...g.views].map(viewName).join(' / ');
+    const tempo = mean(g.shots.map((s) => val(s.metrics?.tempo_ratio)).filter((x) => x !== null));
+    const carry = mean(g.shots.map((s) => val(s.metrics?.carry_m)).filter((x) => x !== null));
+    const avg = [];
+    if (carry !== null) avg.push(t('history.group.avg_carry', { v: fmtMetric({ value: carry, unit: 'm' }, units, { id: 'carry_m' }).text }));
+    if (tempo !== null) avg.push(t('history.group.avg_tempo', { v: fmtNum(tempo, { digits: 1 }) }));
+    const title = [fmtDate(d), g.venue?.name ? String(g.venue.name).slice(0, 60) : null, views].filter(Boolean).join(' · ');
+    const sub = [plural('history.group.shots', g.shots.length), ...avg].join(' · ');
+    const b = h('button.hg-head', { type: 'button', 'aria-expanded': String(open), 'data-testid': 'history-session', 'data-session': g.key },
+      h('span.hg-text', {}, h('span.hg-title', title), h('span.hg-sub', sub)),
+      h('span.hg-chev', {}, C.icon('chevron-down')));
+    b.addEventListener('click', () => { if (open) { openGroups.delete(g.key); closedGroups.add(g.key); } else { openGroups.add(g.key); closedGroups.delete(g.key); } render(); });
+    return b;
+  }
+
+  function row(s, units) {
+    const time = fmtTime(s.created_at);
+    const primary = headline(s, units);
+    const tag = s.revision > 0 ? h('span.tag-corrected', t('shot.corrected')) : null;
+    const open = h('button.shot-row', { type: 'button', 'data-testid': 'shot-row', 'data-shot': s.shot_id },
+      h('span.club-chip', { 'aria-hidden': 'true' }, clubName(s.club?.type)),
+      h('span.sr-main', {}, h('span.sr-primary', primary), h('span.sr-secondary', h('span.sr-club', `${clubName(s.club?.type)} · `), [time, viewName(s.capture?.view)].join(' · '), tag ? ' ' : null, tag)),
+      h('span.lr-chevron', {}, C.icon('chevron-right')));
+    open.addEventListener('click', () => app.nav.go('shot', { shot_id: s.shot_id }, { opener: open }));
+    const star = h('button.icon-btn.star-btn', { type: 'button', 'data-testid': 'shot-star', 'aria-pressed': String(Boolean(s.starred)), 'aria-label': t(s.starred ? 'history.row.unstar' : 'history.row.star', { time }) }, C.icon(s.starred ? 'star-filled' : 'star'));
+    star.addEventListener('click', async () => {
+      try { const next = await ops.setStar(s, !s.starred); Object.assign(s, { starred: next.starred }); render(); } catch (e) { app.errors?.report?.(e, { where: 'history.star' }); }
+    });
+    const del = h('button.icon-btn.del-btn', { type: 'button', 'data-testid': 'shot-delete', 'aria-label': t('history.row.delete', { time }) }, C.icon('trash'));
+    del.addEventListener('click', () => remove(s));
+    let pick = null;
+    if (compareMode) {
+      const p = picks.get(s.shot_id);
+      const ab = (k) => {
+        const b = h('button.ab-btn', { type: 'button', 'aria-pressed': String(p === k), 'data-testid': `history-pick-${k.toLowerCase()}`, 'aria-label': t(`history.compare.pick_${k.toLowerCase()}`, { time, club: clubName(s.club?.type) }) }, k);
+        b.addEventListener('click', () => { if (picks.get(s.shot_id) === k) picks.delete(s.shot_id); else picks.set(s.shot_id, k); render(); });
+        return b;
+      };
+      pick = h('span.ab', {}, ab('A'), ab('B'));
+    }
+    return h('li.history-row', { 'data-shot': s.shot_id }, pick, open, compareMode ? null : star, compareMode ? null : del);
+  }
+
+  async function remove(s) {
+    try {
+      await ops.softDelete(s.shot_id);
+      shots = shots.filter((x) => x.shot_id !== s.shot_id);
+      picks.delete(s.shot_id);
+      render();
+      C.toast.info(t('history.deleted', { time: fmtTime(s.created_at) }), {
+        testid: 'undo-toast', ms: UNDO_MS,
+        action: { label: t('common.undo'), testid: 'undo-toast-undo', onClick: async () => {
+          try { await ops.restore(s.shot_id); await load(); render(); C.toast.info(t('shot.restored')); } catch (e) { app.errors?.report?.(e, { where: 'history.restore' }); }
+        } },
+      });
+    } catch (e) { app.errors?.report?.(e, { where: 'history.delete' }); }
+  }
+
+  function list(units) {
+    const vs = visible();
+    if (!shots.length) {
+      return C.emptyState({ icon: 'history', title: t('history.empty.title'), body: t('history.empty.body'), action: { label: t('history.empty.action'), onClick: () => app.nav.go('home'), testid: 'history-empty-start' }, testid: 'history-empty' });
+    }
+    if (!vs.length) return C.emptyState({ icon: 'info', title: t('history.empty.filtered'), action: { label: t('history.filter.clear'), onClick: () => { filt = { view: '', club_type: '', starred: false }; render(); } } });
+    const groups = groupShots(vs, venues);
+    let opened = 0;
+    const out = h('div.history-groups', {});
+    groups.slice(0, groupsShown).forEach((g, i) => {
+      let open;
+      if (openGroups.has(g.key)) open = true;
+      else if (closedGroups.has(g.key)) open = false;
+      else open = i < OPEN_GROUPS || opened + g.shots.length <= OPEN_SHOTS;
+      if (open) opened += g.shots.length;
+      const sec = h('section.history-group', { 'data-session': g.key }, groupHeader(g, open, units));
+      if (open) {
+        const n = rowsShown.get(g.key) ?? PAGE_ROWS;
+        sec.append(h('ul.history-rows', {}, g.shots.slice(0, n).map((s) => row(s, units))));
+        if (g.shots.length > n) {
+          sec.append(C.button({ label: t('history.more_rows', { n: Math.min(PAGE_ROWS, g.shots.length - n), left: g.shots.length - n }), variant: 'plain', size: 'md', block: true, testid: 'history-more-rows',
+            onClick: () => { rowsShown.set(g.key, n + PAGE_ROWS); render(); } }));
+        }
+      }
+      out.append(sec);
+    });
+    if (groups.length > groupsShown) {
+      out.append(C.button({ label: t('history.more_groups', { n: groups.length - groupsShown }), variant: 'tinted', size: 'lg', block: true, testid: 'history-more-groups', onClick: () => { groupsShown += PAGE_GROUPS; render(); } }));
+    }
+    return out;
+  }
+
+  function compareBar() {
+    if (!compareMode) return null;
+    const A = shots.filter((s) => picks.get(s.shot_id) === 'A');
+    const B = shots.filter((s) => picks.get(s.shot_id) === 'B');
+    const go = C.button({ label: t('history.compare.open'), variant: 'primary', size: 'lg', testid: 'history-compare-open',
+      reason: A.length && B.length ? null : t('history.compare.need'),
+      onClick: () => openCompare({ A, B, units: app.units?.() }) });
+    return h('div.compare-bar', { role: 'region', 'aria-label': t('history.compare.title') },
+      h('p.cb-text', t('history.compare.count', { a: A.length, b: B.length })), go);
+  }
+
+  function dataCard() {
+    const out = h('div.export-out', { 'aria-live': 'polite' });
+    const withClips = C.switchRow({ label: t('history.data.with_videos'), hint: clipBytes > 0 ? t('history.data.videos_size', { size: fmtSize(clipBytes) }) : t('history.data.no_videos'), testid: 'history-include-clips' });
+    const backup = C.button({ label: t('history.data.backup'), icon: 'download', variant: 'secondary', size: 'lg', block: true, testid: 'history-export-json',
+      reason: app.repo ? null : t('error.REPO_UNAVAILABLE'),
+      onClick: async () => {
+        try {
+          backup.setDisabled(true);
+          const data = await exportJSON(app.repo, { includePoses: true, includeLabels: true, includeClips: withClips.checked, app_version: app.version?.() });
+          const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+          await shareOrDownload(blob, `golf-swing-lab-backup-${fileStamp()}.json`, out, { title: t('history.data.backup') });
+        } catch (e) { app.errors?.report?.(e, { where: 'history.backup', slot: out }); } finally { backup.setDisabled(false); }
+      } });
+    const csv = C.button({ label: t('history.data.csv'), icon: 'download', variant: 'secondary', size: 'lg', block: true, testid: 'history-export-csv',
+      reason: shots.length ? null : t('history.data.nothing'),
+      onClick: async () => {
+        const blob = new Blob([exportCSV(visible(), { bom: true })], { type: 'text/csv;charset=utf-8' });
+        await shareOrDownload(blob, `golf-swing-lab-${fileStamp()}.csv`, out, { title: t('history.data.csv') });
+      } });
+    const restore = C.filePicker({ accept: '.json,application/json', label: t('history.data.restore'), testid: 'history-import-input', id: 'hist-import', onFiles: (files) => restoreFrom(files[0]) });
+    const st = status ? h(`p.data-status.${status.kind}`, { role: status.kind === 'error' ? 'alert' : 'status', 'data-testid': 'history-restore-status' }, status.text) : null;
+    return h('section.card.data-card', {}, h('h2', t('history.data.title')),
+      h('p.hint', t('history.data.hint')), withClips, backup, csv, restore, st, out);
+  }
+
+  async function restoreFrom(f) {
+    if (!f) return;
+    if (!app.repo) { status = { kind: 'error', text: t('error.REPO_UNAVAILABLE') }; render(); return; }
+    if (f.size > 2e9) { status = { kind: 'error', text: t('history.restore.error.too_big') }; render(); return; }
+    try {
+      const text = await f.text();
+      const r = await importJSON(app.repo, text, { validate: validateShot });
+      // green only when something changed: a restore that added and updated nothing is neutral information
+      status = { kind: r.total.added + r.total.updated > 0 ? 'ok' : 'info', text: t('history.restore.done', { added: r.total.added, updated: r.total.updated, kept: r.total.kept }) };
+      await load();
+    } catch (e) {
+      app.errors?.report?.(e, { where: 'history.restore', silent: true });
+      const reason = e?.reason ?? 'invalid';
+      status = { kind: 'error', text: `${t(`history.restore.error.${reason}`, e?.params ?? {})} ${t('history.restore.error.nothing_written')}` };
+    }
+    render();
   }
 
   function render() {
-    const viewSel = select([['', '全部角度'], ...Object.entries(VIEW_LABELS)], filt.view ?? '', { id: 'hist-view' });
-    const presetSel = select([['', '全部預設'], ...presets.map((p) => [p.preset_id, `${VIEW_LABELS[p.view] ?? p.view} ${String(p.created_at).slice(0, 10)}`])], filt.preset_id ?? '', { id: 'hist-preset' });
-    const clubSel = select([['', '全部球桿'], ...CLUBS.map(([t, l]) => [t, l])], filt.club_type ?? '', { id: 'hist-club' });
-    const apply = async () => { filt = { view: viewSel.value, preset_id: presetSel.value, club_type: clubSel.value }; groups = new Map(); await load(); render(); };
-    for (const s of [viewSel, presetSel, clubSel]) s.addEventListener('change', apply);
-
-    const exportOut = h('div.export-out', {});
-    const withPoses = h('input', { type: 'checkbox', id: 'hist-poses' });
-    const withClips = h('input', { type: 'checkbox', id: 'hist-clips' });
-    const withLabels = h('input', { type: 'checkbox', id: 'hist-labels', checked: true, 'data-testid': 'history-include-labels' });
-    const exportJsonBtn = h('button', { type: 'button', 'data-testid': 'history-export-json' }, '匯出 JSON（完整備份）');
-    exportJsonBtn.addEventListener('click', async () => {
-      try {
-        const data = await exportJSON(app.repo, { ...buildFilter(filt), includePoses: withPoses.checked, includeClips: withClips.checked, includeLabels: withLabels.checked, app_version: app.version() });
-        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-        const name = `golf-swing-lab-${new Date().toISOString().slice(0, 10)}.json`;
-        clear(exportOut, downloadLink(blob, name, `下載 ${name}（${data.shots.length} 球${data.labels ? `、${data.labels.length} 個標註` : ''}）`));
-      } catch (e) { toast(`匯出失敗：${e.message}`); }
-    });
-    const exportCsvBtn = h('button', { type: 'button' }, '匯出 CSV（試算表）');
-    exportCsvBtn.addEventListener('click', () => {
-      const blob = new Blob([exportCSV(shots, { bom: true })], { type: 'text/csv;charset=utf-8' });
-      const name = `golf-swing-lab-${new Date().toISOString().slice(0, 10)}.csv`;
-      clear(exportOut, downloadLink(blob, name, `下載 ${name}（${shots.length} 球）`));
-    });
-    const importOut = h('p.status', '');
-    const importInput = h('input', { type: 'file', accept: '.json,application/json', id: 'hist-import', 'data-testid': 'history-import-input' });
-    importInput.addEventListener('change', async () => {
-      const f = importInput.files?.[0];
-      if (!f) return;
-      try {
-        const text = await f.text();
-        const r = await importJSON(app.repo, text, { validate: validateShot });
-        importOut.className = 'status ok';
-        importOut.textContent = r.message || `已匯入 ${r.total} 筆`;
-        await load();
-        render();
-      } catch (e) {
-        importOut.className = 'status bad';
-        importOut.textContent = `匯入失敗：${e.message}`; // ImportError messages are Traditional Chinese
-      }
-    });
-
-    const list = h('ul.shot-list', {}, shots.map((s) => {
-      const g = groups.get(s.shot_id);
-      const tog = (k) => () => { if (groups.get(s.shot_id) === k) groups.delete(s.shot_id); else groups.set(s.shot_id, k); render(); };
-      const m = s.metrics ?? {};
-      return h('li', {},
-        h('button.linklike', { type: 'button', 'data-testid': 'shot-row', onclick: () => app.nav.go('shot', { shot_id: s.shot_id }) },
-          `${String(s.created_at).slice(5, 16).replace('T', ' ')} · ${VIEW_LABELS[s.capture?.view] ?? ''} · ${s.club?.type ?? ''} · tempo ${formatMetric(m.tempo_ratio)}`),
-        h('span.ab', {},
-          h('button', { type: 'button', class: g === 'A' ? 'on' : '', 'aria-pressed': String(g === 'A'), onclick: tog('A') }, 'A'),
-          h('button', { type: 'button', class: g === 'B' ? 'on' : '', 'aria-pressed': String(g === 'B'), onclick: tog('B') }, 'B')));
-    }));
-
+    if (teach) return;
+    cacheSig = sig();
+    const units = app.units?.() ?? undefined;
+    const toggle = h('button.btn.btn-plain.btn-md', { type: 'button', 'aria-pressed': String(compareMode), 'data-testid': 'history-compare-toggle' }, t(compareMode ? 'history.compare.done' : 'history.compare.toggle'));
+    toggle.addEventListener('click', () => { compareMode = !compareMode; if (!compareMode) picks.clear(); render(); });
+    const teachRow = C.listRow({ icon: 'target', title: t('history.teach.title'), subtitle: t('history.teach.subtitle'), onClick: () => openTeach(), testid: 'history-teach' });
     clear(root,
-      screenHeader('歷史', () => app.nav.back()),
-      app.repo ? null : h('p.warn', '資料庫無法使用'),
-      card('篩選', h('div.grid3', {}, field('角度', viewSel), field('預設', presetSel), field('球桿', clubSel))),
-      card(`球（${shots.length}）`, shots.length ? list : h('p', '還沒有資料。')),
-      card('比較', compareView()),
-      card('匯出／匯入',
-        h('label.check-row', {}, withPoses, ' 包含姿勢資料'), h('label.check-row', {}, withClips, ' 包含原始影片（檔案很大）'),
-        h('label.check-row', {}, withLabels, ' 包含標註（P14，給 eval_owner_set.mjs）'),
-        h('div.row', {}, exportJsonBtn, exportCsvBtn), exportOut,
-        field('匯入 JSON 備份', importInput), importOut));
+      C.screenHeader({ title: t('screen.history.title'), actions: shots.length ? toggle : null }), // tab root: no Back
+      app.repo ? null : C.notice({ variant: 'error', title: t('error.REPO_UNAVAILABLE'), body: t('error.REPO_UNAVAILABLE.fix') }),
+      shots.length ? filters() : null,
+      compareMode ? h('p.hint', t('history.compare.hint')) : null,
+      list(units),
+      compareBar(),
+      h('div.list-group', {}, teachRow),
+      dataCard());
+  }
+
+  async function openTeach() {
+    if (document.querySelector('[data-screen="teach"]')) { app.nav.go('teach'); return; }
+    const { mountTeach } = await import('./teach.js');
+    teach = mountTeach(root, app, { onBack: () => { teach?.hide(); teach = null; render(); } });
+    await teach.show({});
   }
 
   return {
-    async show() { render(); try { await load(); } catch (e) { toast(`讀取失敗：${e.message}`); } render(); },
-    hide() {},
+    async show(params = {}) {
+      teach?.hide(); teach = null;
+      if (params.view === 'teach') { await openTeach(); return; }
+      if (cacheSig !== null) {
+        // shown before: render the last known list now, then refresh from the store and re-render only on a change
+        render();
+        load().then(() => { const s2 = sig(); if (s2 !== cacheSig) { cacheSig = s2; render(); } }, (e) => app.errors?.report?.(e, { where: 'history.load' }));
+        return;
+      }
+      clear(root, C.screenHeader({ title: t('screen.history.title') }), h('p.hint', t('common.loading')));
+      try { await load(); } catch (e) { app.errors?.report?.(e, { where: 'history.load' }); }
+      cacheSig = sig();
+      render();
+    },
+    hide() { teach?.hide(); teach = null; },
   };
 }

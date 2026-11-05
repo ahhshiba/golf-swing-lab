@@ -83,3 +83,41 @@ across versions: wasm, .task models). Precache budget ≤ 35 MB, shell ≤ 1 MB 
 New version → in-app banner 「有新版本，點此更新」; never reload during a practice session.
 `scripts/check-sw.mjs` (devtools) re-computes the hash from `dist/`, checks every precached file exists, and
 FAILs if precache contents changed but the semver did not (compares with `deploy/last-deploy.json` when present).
+
+## 8. Product round 2026-11 (PRODUCT-SPEC.md; foundation drop 1)
+
+- Ownership for this round is PRODUCT-SPEC §8 (packages A–F), which supersedes §1 above where they differ.
+- i18n + units: docs/i18n.md. Design system, components, icons, focus/title rules: docs/design-system.md.
+- main.js boot order: settings (gsl-settings-v2, v1 migrated) → theme → `initI18n` → icon sprite → static
+  `data-i18n` text → store/navigator → optional modules → repository → screens. App object additions (§8.0.4):
+  `app.t`, `app.toast`, `app.units()`, `app.locale()`, `app.screenTitle(id)`, `app.applyTheme(theme)`,
+  `app.errors.report(err, ctx)` / `app.errors.log()` / `app.errors.onReport(fn)`, `app.offline` (placeholder until platform provides it).
+  Global `error` / `unhandledrejection` handlers report through `app.errors`.
+- Build: catalogs merged into `dist/i18n/<locale>.json`; comments stripped from `src/**/*.js` and `styles/**/*.css`
+  (line numbers kept; `--keep-comments` turns it off). Package semver 0.2.0.
+
+### 8.1 Shell after WP-A (2026-11-05)
+- Boot order: `boot-watchdog.js` (classic, parser-blocking, first in `<head>`: pre-boot error capture, 8 s watchdog →
+  start-up error state from `<template id="boot-fallback">`, catalog preload for the user's locale in a build) →
+  `main.js`: global `error`/`unhandledrejection` handlers → settings/theme → i18n → sprite → repository (5 s timeout,
+  `REPO_UNAVAILABLE` → `#repo-banner`; sessionStorage `gsl.boot.unsaved=1` = "continue without saving") → first screen
+  (home; home hosts onboarding and marks its root `.is-onboarding`, which hides the tab bar) → `#app-ready` → then the
+  media/devtools layers (`OPTIONAL`), the session controller (`app.controller` is a proxy that queues early calls),
+  `requestPersist`, service-worker registration.
+- Screens are imported and mounted on first show (`SCREEN_MODULES` in main.js, mount gets `(root, app, { header: true,
+  onBack })`); setup, live, import, diag, teach, developer wait for `app.ready()` first. Sub-screens (state.js
+  `SUB_SCREENS`): venues (ui/venues.js `mountVenues`), teach (ui/teach.js `mountTeach`), privacy/help/licences/developer
+  (ui/settings.js `mountPrivacy|mountHelp|mountLicences|mountDeveloper`). A module missing from the build
+  (`version.js PRESENT_MODULES`) renders a "not part of this version" state instead of a 404.
+- Tab bar (Practice · History · Settings) = `nav.root(screen)` (fresh stack `[home]`). `--topbar-h` / `--tabbar-h` are
+  written by main.js (ResizeObserver); screen CSS pins bottom actions at `calc(… + var(--tabbar-h))`.
+- Errors: `app.errors.report(err, ctx)` → diag `logEvent()` (D's 200-entry ring, `gsl.diag/2`) + `errors.last` +
+  `onReport` sinks + `toast.error` (into the screen's `[data-error-slot]` when it has one) unless `ctx.silent`.
+- Build: default has no event model; `--include-golfdb-model` = dev research (`dev_research: true`, deploy refuses it).
+  Generated `src/version.js` (`APP_VERSION` = precache VERSION, outside the hash). `<link rel=modulepreload>` for the
+  static graph of `BOOT_ENTRIES`. Comments and indentation are stripped from JS/CSS (line numbers kept).
+- Integration (2026-11-05, §8.7 step 3): the `dom.js` `toast()` alias is gone (components `toast.info` / `toast.error`);
+  verify.sh runs `check_i18n --strict` and `check_tokens --strict` (0 CJK literals in app/src); `app.offline` is the
+  updater's precache tracker; History and Settings are reached through the tab bar only. The build squeezes shipped
+  JS/CSS whitespace (line numbers kept) and never copies source-only files (`events/calib-conf.json`,
+  `vendor/manifest.json`).

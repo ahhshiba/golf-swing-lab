@@ -325,31 +325,52 @@ def evfeat1(t_s, img, W, H, handedness='right', hz=30.0):
 GolfDB carries no handedness label; the training side must pass `handedness` per clip (or assume right and accept
 the left-handed clips as noise).
 
-## 8. Rule-based events (`events/rules.js`, the K9 baseline)
+## 8. Rule-based events (`events/rules.js`, `events/timescale.js`; the shipped detector, PRODUCT-SPEC §7.2)
 
 Runs on the canonical image landmarks resampled at `clamp(native fps, 30, 60)` Hz; time constants in seconds, speeds
 in torso lengths per second (0.3 ≈ 0.15 m/s for a 0.5 m torso). Output `t_s` is the sub-frame estimate, `frame` the
-nearest PoseSeq frame; both non-decreasing (a violation is clamped and its conf capped at 0.2).
+nearest PoseSeq frame; both non-decreasing (a violation is clamped and flagged to the confidence map). Tuned only on
+the synthetic generator (`tests/synth/swing.js`, synthetic-v2) and the owner tune split — never on GolfDB (ADR 0004).
+A landmark sample counts as seen at visibility ≥ `vt` = min(0.5, 0.75 × the clip's median in-frame visibility,
+≥ 0.25), so a uniformly dim clip keeps its landmarks.
 
-| event | rule | conf |
-|---|---|---|
-| (swing) | fastest smoothed (0.1 s) wrist sample; none above 3 L/s -> no swing, all events null, conf 0 | |
-| top | back from that sample past the descent (< −1 L/s) to the last rising -> falling zero crossing of the wrist height velocity; refined by a shared-apex fit of wrist x and y with separate deceleration / acceleration parabolas (`c + a·min(0,t−t_a)² + b·max(0,t−t_a)²`, ±0.2 s, grid dt/10) | 0.85 (0.4 if no crossing: height max) |
-| impact | audio onset in `[top + 0.08, top + 0.8] s` if given; else lowest raw wrist height in `(top, top + 0.8]` with a parabolic sub-frame vertex | 0.95 audio, 0.75 (0.35 at a window edge) |
-| address | still run before the backswing (whole-body speed < 0.3 L/s, 0.2 s smoothing, landmarks with vis >= 0.5 per frame), then the motion onset: every visible landmark of {11–16, 23–26} and image axis fitted with `c + A·max(0, t − t0)²` over the still run + up to 0.3 s / 0.1 L of motion; `t0` = grid point (dt/10) with the smallest total residual | 0.85 (0.45 if the still run < 0.3 s, 0.35 fallback) |
-| finish | first hold >= 0.7 s after impact + 0.15 s (P4 FINISH); the stop time is fitted the same way backwards (landmarks + head 0/7/8 + trail foot 28/30/32) | 0.8 (0.4 / 0.25 if no 0.7 s hold) |
-| mid_backswing / mid_downswing | lead arm horizontal: lead wrist crosses the lead shoulder height (image) going up / down | 0.6 (0.3 fallback: 55 % / 60 % of the phase) |
-| toe_up | face_on: lead forearm direction turned 45° from address (shaft-horizontal proxy); other views: 62 % of address -> mid_backswing | 0.4 / 0.3 |
-| mid_follow_through | 10 % of impact -> finish (the forearm proxy was late on synthetic data) | 0.3 |
+| event | rule |
+|---|---|
+| (swing) | fastest smoothed (0.1 s) wrist sample; none above 3 L/s -> no swing, all events null, conf 0 |
+| top | back from that sample past the descent (< −1 L/s) to the last rising -> falling zero crossing of the wrist height velocity; refined by a shared-apex fit of wrist x and y (`c + a·min(0,t−t_a)² + b·max(0,t−t_a)²`, ±0.2 s, grid dt/10) |
+| impact | audio onset in `[top + 0.08, top + 0.8] s` if given; else lowest raw wrist height in `(top, top + 0.8]` with a parabolic sub-frame vertex |
+| address (EV-1) | the last still run before the backswing (whole-body speed < 0.3 L/s), then the takeaway onset from a start-from-rest fit `c + A·τ^p` of every seen landmark of {11–16, 23–26} (p = 2 face_on, 2.2 dtl, 2.4 high_behind: from behind the first hand motion runs along the camera axis, EV-5). Takeaway crossing = start of the run of wrist speed ≥ 0.6 × (still + backswing peak) / 2 holding the peak; if the still-run onset lies > 0.36 s before it (forward press, waggle, drift) the onset is refitted on [crossing − 0.55 s, crossing − 0.2 s] + motion up to 0.15 L with a pre-onset linear drift term |
+| finish (EV-2) | the first hold ≥ 0.25 s (was 0.7 s) starting ≥ 0.15 s after impact (the first qualifying run, so relaxing afterwards cannot move it later); the stop time is fitted backwards the same way (landmarks + head 0/7/8 + trail foot 28/30/32). Clip ends inside the hold: the hold start; no hold at all: the slowest body frame of the last 0.5 s |
+| mid_backswing / mid_downswing | lead arm horizontal: lead wrist crosses the lead shoulder height (image) going up / down (fallback 55 % / 60 % of the phase) |
+| toe_up | face_on and dtl with the lead hand seen: the lead hand vector (wrist 15 -> fingers 17/19, along the grip) turns from pointing down to horizontal (its image vertical component crosses 0); else face_on: forearm turned 45° from address; else 62 % of address -> mid_backswing |
+| mid_follow_through | 10 % of impact -> finish |
 
-All confidences except an audio impact are multiplied by `clamp(vis_mean / 0.8, 0.3, 1)`. Consumers treat
-`conf < 0.5` (`EVENT_CONF_MIN`) as `EVENTS_UNCERTAIN`.
+**Slow motion (EV-3, `events/timescale.js`).** When the native run finds no swing or a downswing outside 0.15–0.6 s,
+the container runs at ≤ 60 fps and the clip lasts ≥ 4 s, the rules are rerun on the time line divided by 4 and by 8
+(a capture-rate hint, `probe.captureFpsHint`, is tried first); the plausible candidate whose downswing / backswing are
+closest to 0.3 s / 0.85 s (log scale) wins. `meta.time_scale` (non-enumerable) records it; `pipeline/clip.js` then
+adds `SLOWMO_CORRECTED`, sets the capture rates to container × k and computes every metric in real time, keeping the
+event `t_s` on the clip's media time line for replay.
 
-`events/detect.js`: `detect(poseSeq, { useTcn, tcn })` uses the TCN only when `useTcn` is true and a predictor
-`{ predict(features) -> probs[T][9] }` (classes 0–7 = events, 8 = background, SwingNet convention) is supplied; an
-output of the wrong shape or with non-finite values falls back to the rules. Decoding maximises
-`Σ log(p[f_e][e] + 1e-9)` subject to `f_0 <= … <= f_7` (dynamic programming, O(8·T)). An audio onset between the
-decoded top and finish replaces the TCN impact (conf 0.95). high_behind has no GolfDB data: rules only (R1).
+**Confidence (EV-4).** `conf = clip(σ(w_e · x), 0.02, 0.98)` with the 11 features of `confFeatures` (the rule's own
+score, visibility at the event, view, order clamp, dim clip, event-specific values, pose jitter) and per-event weights
+from `events/calib-conf.json` (`fitted_on: ["synthetic-v2", "owner-tune"]`). `scripts/check_event_conf.mjs`: every
+conf bin with n ≥ 20 within ±0.15 of its within-tolerance rate (2 frames @60 Hz for address / top / impact, 4 for the
+others). Consumers still treat `conf < 0.5` (`EVENT_CONF_MIN`) as `EVENTS_UNCERTAIN`.
+
+**Stress suite (§7.3, `tests/unit/events.rules.test.mjs`).** 3 views × 8 modes (baseline, waggle, forward_press,
+short_tail, finish_relax, impact_dropout, slowmo_x8, low_visibility; `stressSwing`) × 40 seeds at 60 and 240 Hz,
+gated per view (high_behind −10 pp): found ≥ 98 %, address / top / impact ±2 frames @60 Hz ≥ 95 %, finish ±4 frames
+≥ 90 %, tempo ±0.3 ≥ 95 %. The test prints every cell and the before -> now numbers of the modes that failed before
+(slowmo_x8 found 0 %, short_tail / finish_relax finish 0–8 % face-on and down the line, forward press address 0–23 %,
+high_behind address 53–78 %).
+
+`events/detect.js`: `detect(poseSeq, { useTcn, tcn })` uses a TCN only when `useTcn` is true and a predictor
+`{ predict(features) -> probs[T][9] }` (classes 0–7 = events, 8 = background) is supplied; an output of the wrong
+shape or with non-finite values falls back to the rules. Decoding maximises `Σ log(p[f_e][e] + 1e-9)` subject to
+`f_0 <= … <= f_7` (dynamic programming, O(8·T)). An audio onset between the decoded top and finish replaces the TCN
+impact (conf 0.95). `pipeline/clip.js` passes a TCN only for an owner-imported model whose card passed its holdout
+gate and covers the view (`events/card.js`).
 
 ## 9. Live state machine (`events/live.js`, CAFCR P4)
 

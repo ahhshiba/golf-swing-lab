@@ -6,7 +6,7 @@ import { computeFeatures, FEATURE_HZ } from './features.js';
 import { detectEvents } from './rules.js';
 import { nearestIndex } from './signal.js';
 
-/** Class index of "no event" in a TCN output row (GolfDB SwingNet convention: 0..7 = events, 8 = background). */
+/** Class index of "no event" in a TCN output row (0..7 = the 8 swing events in order, 8 = background). */
 export const BACKGROUND_CLASS = 8;
 
 /**

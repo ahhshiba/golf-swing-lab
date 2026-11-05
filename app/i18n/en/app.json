@@ -1,0 +1,21 @@
+{
+  "name": "Golf Swing Lab",
+  "tagline": "Offline swing and ball-flight analysis. Everything stays on this phone.",
+  "loading": "Loading…",
+  "noscript": "This app needs JavaScript turned on.",
+  "boot.failed.title": "The app could not start",
+  "boot.failed.body": "Reloading usually fixes this. You can also continue without saving results.",
+  "boot.reload": "Reload",
+  "boot.continue_unsaved": "Continue without saving",
+  "boot.copy_diag": "Copy diagnostics",
+  "repo.unsaved": "Results will not be saved",
+  "update.available": "A new version is ready. Tap to update.",
+  "update.deferred": "New version ready: it updates after this session",
+  "session.active": "Practice in progress",
+  "camera.reopen": "Reopen camera",
+  "health.dismiss": "Got it",
+  "session.practising": "Practising · {view} · {elapsed}",
+  "session.practising_n": "Practising · {view} · shot {n} · {elapsed}",
+  "screen.unavailable": "This screen is not part of this version yet.",
+  "boot.copied": "Copied"
+}

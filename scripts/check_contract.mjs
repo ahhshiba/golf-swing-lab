@@ -5,7 +5,8 @@
 //      "_expect" substring (and, unless "_expect_errors" says otherwise, with exactly one error);
 //   2. every RC.<NAME> in app/src/**/*.js exists in REASON_CODES;
 //   3. no file in app/src other than reason-codes.js contains a quoted string equal to a reason code name;
-//   4. every reason code has a non-empty Traditional Chinese description;
+//   4. every reason code has a non-empty Traditional Chinese description: the zh-Hant catalog value
+//      reason.<CODE>.long in app/i18n/zh-Hant/reason.json (PRODUCT-SPEC §3.4: reason-codes.js holds codes only);
 //   5. schema/shot-v1.schema.json is valid JSON, mentions every metric id exactly once and agrees with the JS enums.
 //
 // Run:  node scripts/check_contract.mjs [--quiet]
@@ -164,23 +165,29 @@ export async function runChecks({ root = ROOT } = {}) {
   const url = (p) => pathToFileURL(join(root, p)).href;
 
   const rcMod = await import(url('app/src/contract/reason-codes.js'));
-  const { REASON_CODES, RC, describe } = rcMod;
+  const { REASON_CODES, RC } = rcMod;
   const codeNames = Object.keys(REASON_CODES);
   const contract = await import(url('app/src/contract/index.js'));
+  if ('describe' in rcMod) fail('reason-codes', 'describe() must not exist: descriptions come from t(\'reason.<CODE>.long\') (PRODUCT-SPEC §3.4)');
+  let zhReason = {};
+  try {
+    zhReason = JSON.parse(readFileSync(join(root, 'app/i18n/zh-Hant/reason.json'), 'utf8'));
+  } catch (e) {
+    fail('reason-codes', `app/i18n/zh-Hant/reason.json is missing or not valid JSON (${e.message})`);
+  }
 
   // (4) descriptions and RC shape
   for (const name of codeNames) {
-    const d = REASON_CODES[name];
     if (!/^[A-Z][A-Z0-9_]*$/.test(name)) fail('reason-codes', `code name ${name} must be UPPER_SNAKE_CASE`);
     if (RC[name] !== name) fail('reason-codes', `RC.${name} must equal '${name}'`);
-    if (typeof d !== 'string' || d.trim() === '') { fail('reason-codes', `${name} has no description`); continue; }
+    if (REASON_CODES[name] !== name) fail('reason-codes', `REASON_CODES.${name} must equal '${name}' (codes only, no prose in reason-codes.js)`);
+    const d = zhReason[`${name}.long`];
+    if (typeof d !== 'string' || d.trim() === '') { fail('reason-codes', `${name} has no description (zh-Hant reason.json key ${name}.long)`); continue; }
     if (!CJK_RE.test(d)) fail('reason-codes', `${name} description is not Chinese: ${d}`);
     const bad = [...d].filter((ch) => SIMPLIFIED_ONLY.includes(ch));
     if (bad.length) fail('reason-codes', `${name} description has Simplified-only characters (${bad.join('')}); use Traditional Chinese`);
-    if (describe(name) !== d) fail('reason-codes', `describe('${name}') does not return its description`);
   }
   for (const k of Object.keys(RC)) if (!(k in REASON_CODES)) fail('reason-codes', `RC.${k} has no entry in REASON_CODES`);
-  if (describe('NO_SUCH_CODE') !== null) fail('reason-codes', 'describe() of an unknown code must return null');
   info.push(`${codeNames.length} reason codes`);
 
   // (2) RC.<NAME> references and (3) quoted literals equal to a code name

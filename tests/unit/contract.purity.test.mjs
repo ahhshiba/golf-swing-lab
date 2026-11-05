@@ -40,7 +40,7 @@ test('index.js starts with an API summary and re-exports every public name', asy
     const mod = await import(`../../app/src/contract/${f}`);
     for (const name of Object.keys(mod).filter((k) => k !== 'default')) assert.ok(name in idx, `${name} from ${f} missing in index.js`);
   }
-  for (const name of ['RC', 'REASON_CODES', 'describe', 'metricValue', 'metricNull', 'downgrade', 'validateShot', 'validate',
+  for (const name of ['RC', 'REASON_CODES', 'REASON_CODE_LIST', 'metricValue', 'metricNull', 'downgrade', 'validateShot', 'validate',
     'validateMetric', 'assertValid', 'newShot', 'bumpRevision', 'METRIC_IDS', 'EVENTS', 'ContractError']) {
     assert.ok(name in idx, name);
   }
@@ -49,8 +49,10 @@ test('index.js starts with an API summary and re-exports every public name', asy
   }
 });
 
-test('reason-codes.js still defines every code the F3 contract names, and the RC/describe exports', async () => {
-  const { REASON_CODES, RC, describe } = await import('../../app/src/contract/reason-codes.js');
+test('reason-codes.js still defines every code the F3 contract names; codes only, descriptions in the zh-Hant catalog', async () => {
+  const mod = await import('../../app/src/contract/reason-codes.js');
+  const { REASON_CODES, REASON_CODE_LIST, RC } = mod;
+  const zh = JSON.parse(readFileSync(join(DIR, '../../i18n/zh-Hant/reason.json'), 'utf8'));
   // the 26 codes that existed when the contract was written; adding codes is allowed, removing is not
   const original = ['VIEW_DEPTH_AXIS', 'VIEW_PLANE_MISMATCH', 'FPS_TOO_LOW', 'TRACK_TOO_SHORT', 'TRACK_MAY_BE_SHORT',
     'LAUNCH_DIR_UNOBSERVABLE', 'DEPENDS_ON_NULL', 'SPIN_ASSUMED', 'WIND_IGNORED', 'TIMESTAMPS_NOMINAL', 'TIMEBASE_SUSPECT',
@@ -60,8 +62,15 @@ test('reason-codes.js still defines every code the F3 contract names, and the RC
   for (const c of original) {
     assert.ok(c in REASON_CODES, c);
     assert.equal(RC[c], c);
-    assert.equal(describe(c), REASON_CODES[c]);
+    assert.ok(REASON_CODE_LIST.includes(c), c);
   }
-  assert.ok(Object.isFrozen(REASON_CODES) && Object.isFrozen(RC));
-  assert.equal(describe('NOPE'), null);
+  assert.deepEqual(Object.keys(REASON_CODES), [...REASON_CODE_LIST]);
+  assert.equal(new Set(REASON_CODE_LIST).size, REASON_CODE_LIST.length, 'duplicate code');
+  for (const c of REASON_CODE_LIST) {
+    assert.equal(REASON_CODES[c], c, `REASON_CODES.${c} is a code, not prose (PRODUCT-SPEC §3.4)`);
+    assert.match(zh[`${c}.long`] ?? '', /[\u4e00-\u9fff]/, `zh-Hant reason.${c}.long is the Chinese description`);
+  }
+  assert.ok(Object.isFrozen(REASON_CODES) && Object.isFrozen(RC) && Object.isFrozen(REASON_CODE_LIST));
+  assert.ok(!('describe' in mod), 'describe() is removed (PRODUCT-SPEC §3.4); use t(\'reason.<CODE>.long\')');
+  assert.ok(!/[\u4e00-\u9fff]/.test(readFileSync(join(DIR, 'reason-codes.js'), 'utf8')), 'reason-codes.js has no CJK text');
 });

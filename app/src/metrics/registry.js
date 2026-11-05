@@ -12,42 +12,42 @@ const LO = 'low_confidence';
 const N = 'not';
 const views = (face_on, dtl, high_behind) => Object.freeze({ face_on, dtl, high_behind });
 
-// [id, F2 row, label_zh, views, minFps, nullCode, extra]
+// [id, F2 row, views, minFps, nullCode, extra]   (labels: catalog keys metric.<id>.label / .term, PRODUCT-SPEC §3.4)
 const ROWS = [
-  ['backswing_s', 1, '上桿時間', views(V, V, V), 30, null],
-  ['downswing_s', 1, '下桿時間', views(V, V, V), 30, null],
-  ['tempo_ratio', 1, '節奏比（tempo，上桿／下桿）', views(V, V, V), 30, null],
-  ['head_sway_x_m', 2, '頭部位移：沿目標線', views(V, N, LO), 30, RC.VIEW_DEPTH_AXIS],
-  ['head_lift_z_m', 3, '頭部位移：垂直', views(V, V, N), 30, RC.VIEW_DEPTH_AXIS],
-  ['head_depth_y_m', 4, '頭部位移：朝球／離球', views(N, V, LO), 30, RC.VIEW_DEPTH_AXIS],
-  ['spine_forward_tilt_deg', 5, '脊椎前傾角', views(N, V, N), 30, RC.VIEW_PLANE_MISMATCH],
-  ['spine_side_tilt_deg', 6, '脊椎側傾角', views(V, N, N), 30, RC.VIEW_PLANE_MISMATCH],
-  ['shoulder_turn_deg', 7, '肩轉', views(LO, LO, LO), 30, null],
-  ['hip_turn_deg', 8, '髖轉', views(LO, LO, LO), 30, null],
-  ['x_factor_deg', 9, 'X-factor（肩轉減髖轉）', views(LO, LO, LO), 30, null],
-  ['hand_plane_dev_m', 10, '手部路徑 vs 桿身平面', views(N, V, N), 30, RC.VIEW_PLANE_MISMATCH],
-  ['top_shaft_angle_deg', 11, '上桿頂點桿身角', views(N, E, N), 120, RC.VIEW_PLANE_MISMATCH],
-  ['weight_shift_pct', 12, '重心轉移（骨盆側移％站寬，代理量）', views(E, N, N), 30, RC.VIEW_DEPTH_AXIS],
-  ['early_extension_m', 13, '早伸展（骨盆朝球位移）', views(N, V, N), 30, RC.VIEW_DEPTH_AXIS],
+  ['backswing_s', 1, views(V, V, V), 30, null],
+  ['downswing_s', 1, views(V, V, V), 30, null],
+  ['tempo_ratio', 1, views(V, V, V), 30, null],
+  ['head_sway_x_m', 2, views(V, N, LO), 30, RC.VIEW_DEPTH_AXIS],
+  ['head_lift_z_m', 3, views(V, V, N), 30, RC.VIEW_DEPTH_AXIS],
+  ['head_depth_y_m', 4, views(N, V, LO), 30, RC.VIEW_DEPTH_AXIS],
+  ['spine_forward_tilt_deg', 5, views(N, V, N), 30, RC.VIEW_PLANE_MISMATCH],
+  ['spine_side_tilt_deg', 6, views(V, N, N), 30, RC.VIEW_PLANE_MISMATCH],
+  ['shoulder_turn_deg', 7, views(LO, LO, LO), 30, null],
+  ['hip_turn_deg', 8, views(LO, LO, LO), 30, null],
+  ['x_factor_deg', 9, views(LO, LO, LO), 30, null],
+  ['hand_plane_dev_m', 10, views(N, V, N), 30, RC.VIEW_PLANE_MISMATCH],
+  ['top_shaft_angle_deg', 11, views(N, E, N), 120, RC.VIEW_PLANE_MISMATCH],
+  ['weight_shift_pct', 12, views(E, N, N), 30, RC.VIEW_DEPTH_AXIS],
+  ['early_extension_m', 13, views(N, V, N), 30, RC.VIEW_DEPTH_AXIS],
   // F2 row 14: face_on 30–60 fps 低（±25%）, 240 fps 估
-  ['club_speed_mps', 14, '桿頭速度', views(LO, N, N), 30, RC.VIEW_DEPTH_AXIS,
+  ['club_speed_mps', 14, views(LO, N, N), 30, RC.VIEW_DEPTH_AXIS,
     { fpsTiers: { face_on: [{ minFps: 240, validity: E }] } }],
-  ['club_path_deg', 15, '擊球桿頭路徑 in-to-out', views(N, N, LO), 240, RC.VIEW_PLANE_MISMATCH,
+  ['club_path_deg', 15, views(N, N, LO), 240, RC.VIEW_PLANE_MISMATCH,
     { runtimeCodes: [RC.TRACK_TOO_SHORT] }],
-  ['ball_speed_mps', 16, '球初速', views(E, N, N), 200, RC.VIEW_DEPTH_AXIS],
-  ['launch_v_deg', 17, '垂直發射角', views(E, N, N), 200, RC.VIEW_DEPTH_AXIS],
-  ['launch_h_deg', 18, '水平出球方向', views(N, N, LO), 200, RC.LAUNCH_DIR_UNOBSERVABLE],
-  ['carry_m', 19, 'carry（飛行距離）', views(E, N, N), 200, RC.DEPENDS_ON_NULL,
+  ['ball_speed_mps', 16, views(E, N, N), 200, RC.VIEW_DEPTH_AXIS],
+  ['launch_v_deg', 17, views(E, N, N), 200, RC.VIEW_DEPTH_AXIS],
+  ['launch_h_deg', 18, views(N, N, LO), 200, RC.LAUNCH_DIR_UNOBSERVABLE],
+  ['carry_m', 19, views(E, N, N), 200, RC.DEPENDS_ON_NULL,
     { depends: ['ball_speed_mps', 'launch_v_deg'] }],
-  ['smash_factor', 20, 'smash factor（球速／桿頭速）', views(E, N, N), 240, RC.DEPENDS_ON_NULL,
+  ['smash_factor', 20, views(E, N, N), 240, RC.DEPENDS_ON_NULL,
     { depends: ['club_speed_mps', 'ball_speed_mps'] }],
 ];
 
-/** Registry entry: { id, row, label_zh, unit, value_origin, views, minFps, nullCode, fpsTiers?, depends?, runtimeCodes? }. */
-export const REGISTRY = Object.freeze(Object.fromEntries(ROWS.map(([id, row, label_zh, vs, minFps, nullCode, extra]) => [
+/** Registry entry: { id, row, unit, value_origin, views, minFps, nullCode, fpsTiers?, depends?, runtimeCodes? }; the label is t('metric.<id>.label'). */
+export const REGISTRY = Object.freeze(Object.fromEntries(ROWS.map(([id, row, vs, minFps, nullCode, extra]) => [
   id,
   Object.freeze({
-    id, row, label_zh, unit: METRIC_UNITS[id], value_origin: METRIC_DEFAULT_ORIGIN[id], views: vs, minFps, nullCode,
+    id, row, unit: METRIC_UNITS[id], value_origin: METRIC_DEFAULT_ORIGIN[id], views: vs, minFps, nullCode,
     ...(extra ?? {}),
   }),
 ])));

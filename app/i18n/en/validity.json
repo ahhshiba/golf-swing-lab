@@ -1,0 +1,13 @@
+{
+  "valid": "Measured",
+  "estimated": "Estimated",
+  "low_confidence": "Low confidence",
+  "not_measurable": "Not measurable",
+  "occluded": "Hidden",
+  "ambiguous": "Unclear",
+  "dropped": "Discarded",
+  "stale": "Out of date",
+  "not_observable": "Not measurable",
+  "implausible": "Unrealistic",
+  "not_computed": "Not computed"
+}

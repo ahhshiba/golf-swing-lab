@@ -184,7 +184,8 @@ while (queue.length) {
     if (/\.m?js$/.test(r.path)) {
       queue.push(r.path);
       const ex = exportsOf(r.path);
-      for (const n of d.names) if (!ex.has(n)) problem(f, `uses '${n}' from import('${d.spec}'), which does not export it`);
+      // import(x).then / .catch / .finally are Promise methods, not module members
+      for (const n of d.names) if (!ex.has(n) && !['then', 'catch', 'finally'].includes(n)) problem(f, `uses '${n}' from import('${d.spec}'), which does not export it`);
     }
   }
   for (const u of info.urls) {

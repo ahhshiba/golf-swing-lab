@@ -6,6 +6,26 @@ tempo, club-head speed, ball speed, launch angle and carry; every number carries
 value that cannot be measured is shown as an honest null with a reason code. Personal practice use, no backend,
 no account, data stays on the phone.
 
+## Product
+
+**Golf Swing Lab** (揮桿實驗室) is for an amateur practising alone at a range bay with a phone on a tripod.
+
+- **Local only.** No account, no server, no analytics. After the first visit the app makes no network requests;
+  videos and results stay in the browser storage of the phone. See [docs/PRIVACY.md](docs/PRIVACY.md).
+- **Languages and units.** Traditional Chinese (default) and English; distance yd or m, speed mph, m/s or km/h,
+  body cm or in, height cm or ft/in (Settings › Units, Settings › Language).
+- **Honest numbers.** Estimates for practice, not a certified launch monitor: every number has a ± range and a
+  confidence tag, unmeasurable numbers show — with the reason, carry is a model (spin and wind not measured).
+- **Swing phases** are detected by rules. Nothing derived from GolfDB ships in the product; an owner can import a
+  model trained on their own labelled swings (Settings › Developer options, revealed by tapping the version in
+  About 7 times).
+- **Your data.** Settings › Storage & backup (usage, protect from deletion, clean up old videos), History › Back up,
+  Settings › Privacy › Delete all data.
+- **Support.** [GitHub issues](https://github.com/ahhshiba/golf-swing-lab/issues) (a plain link; the app sends
+  nothing). Licences of shipped components: [docs/LICENCES.md](docs/LICENCES.md).
+
+## Development
+
 The product spec is [docs/CAFCR.md](docs/CAFCR.md) (Traditional Chinese). The module contract that parallel
 work is built against is [docs/interfaces.md](docs/interfaces.md). Read it before touching any module.
 

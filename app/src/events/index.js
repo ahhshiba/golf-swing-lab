@@ -8,8 +8,15 @@
 //   computeFeatures(poseSeq, { handedness = 'right', hz = 30 }) -> { version, names, hz, K, F, t_s, data, torso_px, px }
 //   featureColumn(feat, name) -> Float64Array      gradient(y, hz)      unwrap(p)
 // rules.js
-//   EVENTS, EVENT_CONF_MIN, RULES, ruleHz(poseSeq)
-//   detectEvents(poseSeq, { view, audioOnset_t?, handedness = 'right', hz? }) -> EventSet (source 'rules')
+//   EVENTS, EVENT_CONF_MIN, RULES, ruleHz(poseSeq), CONF_FEATURES, confFeatures(...), calibratedConf(event, x, audio)
+//   detectEvents(poseSeq, { view, audioOnset_t?, handedness = 'right', hz? }) -> EventSet (source 'rules'; conf from
+//     the calibration in calib-conf.js, fitted by training/node/fit_event_conf.mjs)
+// timescale.js (slow motion with the speed baked in, PRODUCT-SPEC §7.2 EV-3)
+//   SLOWMO, scalePoseTime(poseSeq, k), swingDurations(ev)
+//   detectTimeScaled(poseSeq, opts, { container_fps, duration_s, captureFpsHint?, detect? }) -> EventSet + meta.time_scale
+// calib-conf.js: CONF_CALIB (generated mirror of calib-conf.json)
+// card.js (owner model card gate, §7.4)
+//   ownerGatePassed(card), cardViews(card), tcnRejection(meta, view, { research })
 // detect.js
 //   BACKGROUND_CLASS = 8, decodeOrdered(probs, C = 9) -> { frames, probs, score }
 //   detect(poseSeq, { view, handedness, audioOnset_t?, useTcn = false, tcn?: { predict(features) -> probs[T][9] } })
@@ -28,3 +35,6 @@ export * from './detect.js';
 export * from './tcn.js';
 export * from './live.js';
 export * from './signal.js';
+export * from './timescale.js';
+export * from './card.js';
+export * from './calib-conf.js';

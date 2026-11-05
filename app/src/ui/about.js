@@ -1,26 +1,104 @@
-// ui/about.js — licences, data attribution and the honest-data statement.
+// ui/about.js — About (PRODUCT-SPEC §6.4): name, version "0.1.0 · build bc56e95" (never "dev"), what the app is,
+// how swing phases are detected, support link, disclaimer (catalog `legal`), links to Privacy / Licences / Help.
+// Tapping the version row 7 times turns on developer options (settings.dev). Catalog namespace `about`.
+//
+//   splitVersion(v) -> { semver, build } | null      '0.1.0+bc56e95160' → { semver: '0.1.0', build: 'bc56e95' }
+//   formatVersion(v, t) -> string | null              t('about.version.format', …); null for '', 'dev', junk
+//   readVersion(app, fetchImpl) -> Promise<string|null>   app.version() unless 'dev', else precache-manifest.json
+//   renderAbout(ctx) -> { title, nodes }              mountAbout(root, app) -> { show, hide }
 
-import { h, clear, card, screenHeader } from './dom.js';
+import { t as tr } from '../i18n/index.js';
+import * as models from '../session/models.js';
+import { createDevTapCounter, DEV_TAPS } from './developer.js';
+import { supportLink } from './help.js';
+import { openTrustPage, mountTrustPage } from './settings.js';
 
-export function mountAbout(root, app) {
+export function splitVersion(v) {
+  const s = String(v ?? '').trim();
+  const m = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+([0-9a-f]{4,}))?$/i.exec(s);
+  if (!m) return null;
+  return { semver: m[1], build: m[2] ? m[2].slice(0, 7) : null };
+}
+
+export function formatVersion(v, t = tr) {
+  const p = splitVersion(v);
+  if (!p) return null;
+  return p.build ? t('about.version.format', { semver: p.semver, build: p.build }) : p.semver;
+}
+
+export async function readVersion(app, fetchImpl = globalThis.fetch?.bind(globalThis)) {
+  const v = app?.version?.();
+  if (splitVersion(v)) return v;
+  if (typeof fetchImpl !== 'function') return null;
+  try {
+    const r = await fetchImpl('precache-manifest.json', { cache: 'no-store' });
+    if (!r?.ok) return null;
+    const m = await r.json();
+    return splitVersion(m?.version) ? m.version : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+const LEGAL = ['estimates', 'carry', 'ranges', 'views'];
+
+export function renderAbout(ctx) {
+  const { C, app, t } = ctx;
+  const { h } = C;
+  const versionValue = h('span', { class: 'lr-value', 'data-testid': 'about-version', text: t('settings.storage.calculating') });
+  const tapNote = h('p', { class: 'visually-hidden', role: 'status', 'aria-live': 'polite' });
+  const tap = ctx.tapCounter ?? createDevTapCounter({ taps: DEV_TAPS });
+  const versionRow = h('button', { type: 'button', class: 'list-row', 'data-testid': 'about-version-row' },
+    h('span', { class: 'lr-icon' }, C.icon('info')),
+    h('span', { class: 'lr-text' }, h('span', { class: 'lr-title', text: t('about.version') })),
+    versionValue);
+  versionRow.addEventListener('click', () => {
+    if (ctx.loadSettings().dev) { tapNote.textContent = t('settings.dev.already'); C.toast.info(t('settings.dev.already')); return; }
+    const r = tap();
+    if (r.unlocked) {
+      app.updateSettings?.(ctx.saveSettings({ dev: true }));
+      tapNote.textContent = t('settings.dev.enabled');
+      C.toast.info(t('settings.dev.enabled'), { testid: 'dev-enabled-toast' });
+    } else if (r.remaining <= 3) {
+      tapNote.textContent = t('settings.dev.taps', { n: r.remaining });
+      C.toast.info(t('settings.dev.taps', { n: r.remaining }), { ms: 1500 });
+    }
+  });
+  Promise.resolve(ctx.readVersion ? ctx.readVersion() : readVersion(app)).then((v) => {
+    versionValue.textContent = formatVersion(v, t) ?? t('about.version.unknown');
+  });
+
+  const eventsLine = h('p', { 'data-testid': 'about-events', text: t('about.events.rules') });
+  Promise.resolve(app.repo ? models.activeEventModel?.(app.repo) : null).then((m) => {
+    if (m && m.source === 'imported') eventsLine.textContent = t('about.events.owner');
+  }, () => {});
+
   return {
-    show() {
-      clear(root,
-        screenHeader('關於', () => app.nav.back()),
-        card('揮桿實驗室',
-          h('p', `版本 ${app.version()}`),
-          h('p', '離線的高爾夫揮桿與球飛行分析，個人練習用。所有資料只存在這支手機上，沒有帳號、沒有伺服器。')),
-        card('誠實數據聲明',
-          h('p', '每一個數字都附 95% 信賴區間或標準差與可信度標記；量不到的數字會顯示空值並說明原因，不會用猜的補上。'),
-          h('p', 'carry（飛行距離）一律是估計值：旋轉量沒有量測，用球桿的典型值估計，也沒有考慮風。'),
-          h('p', '跨不同機位預設的比較一定會標示「不同機位預設」。')),
-        card('授權與出處',
-          h('ul', {},
-            h('li', {}, h('strong', 'MediaPipe Tasks Vision 1.2.2'), ' — Apache License 2.0（Google LLC）。姿勢偵測模型 pose_landmarker lite／full／heavy。全文：vendor/mediapipe/LICENSE'),
-            h('li', {}, h('strong', 'mp4box.js'), ' — BSD 3-Clause License（GPAC / Telecom Paris）。全文：vendor/mp4box/LICENSE'),
-            h('li', {}, h('strong', 'GolfDB'), ' — McNally et al., “GolfDB: A Video Database for Golf Swing Sequencing”（CVPR Workshops 2019）。程式碼 CC BY-NC 4.0；揮桿事件模型以 GolfDB 訓練，僅供個人、非商業用途。')),
-          h('p.hint', '本 App 不使用 OpenCV.js 與 Ultralytics。')));
-    },
-    hide() {},
+    title: t('screen.about.title'),
+    nodes: [
+      h('section', { class: 'card about-hero' },
+        h('p', { class: 'about-name', text: t('app.name') }),
+        h('p', { text: t('about.tagline') }),
+        h('p', { class: 'hint', text: t('about.local') }),
+        eventsLine),
+      h('div', { class: 'list-group' }, versionRow,
+        C.listRow({ icon: 'shield', title: t('about.privacy.row'), testid: 'about-privacy', onClick: (e) => openTrustPage(app, 'privacy', e.currentTarget) }),
+        C.listRow({ icon: 'help', title: t('about.help.row'), testid: 'about-help', onClick: (e) => openTrustPage(app, 'help', e.currentTarget) }),
+        C.listRow({ icon: 'info', title: t('about.licences.row'), testid: 'about-licences', onClick: (e) => openTrustPage(app, 'licences', e.currentTarget) })),
+      tapNote,
+      h('section', { class: 'card' },
+        h('h2', { text: t('legal.title') }),
+        h('ul', { class: 'trust-list' }, LEGAL.map((k) => h('li', { text: t(`legal.${k}`) }))),
+        h('h2', { class: 'trust-sub', text: t('legal.safety.title') }),
+        h('ul', { class: 'trust-list' }, h('li', { text: t('legal.safety.tripod') }), h('li', { text: t('legal.safety.people') }))),
+      h('section', { class: 'card' },
+        h('h2', { text: t('about.support') }), h('p', { class: 'hint', text: t('about.support.body') }), supportLink(C, t, t('about.support.link'))),
+    ],
   };
 }
+
+export function mountAbout(root, app) {
+  const tapCounter = createDevTapCounter({ taps: DEV_TAPS });
+  return mountTrustPage(root, app, (ctx) => renderAbout({ ...ctx, tapCounter }), { id: 'about' });
+}
+

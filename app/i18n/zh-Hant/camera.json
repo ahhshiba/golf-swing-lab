@@ -1,0 +1,17 @@
+{
+  "denied.title": "相機關閉中",
+  "denied.body": "這個 App 沒有相機權限，所以不能即時拍攝。打開權限後按「再試一次」，或改用慢動作影片匯入。",
+  "denied.how": "怎麼打開相機權限",
+  "denied.ios1": "打開 iPhone「設定」",
+  "denied.ios2": "選「Safari」›「相機」（主畫面 App：選「揮桿實驗室」）",
+  "denied.ios3": "改成「允許」，回到這裡按「再試一次」",
+  "denied.other1": "點網址列旁的鎖頭或相機圖示",
+  "denied.other2": "把「相機」改成「允許」",
+  "denied.other3": "回到這裡按「再試一次」",
+  "busy.title": "相機被其他 App 使用中",
+  "busy.body": "另一個 App（例如視訊通話或相機）正在用相機。關掉它後按「再試一次」。",
+  "missing.title": "找不到相機",
+  "missing.body": "這台裝置或瀏覽器沒有可用的相機。可以改用匯入在其他手機錄的慢動作影片。",
+  "retry": "再試一次",
+  "import_instead": "改用匯入慢動作影片"
+}

@@ -1,11 +1,84 @@
-# Event TCN training (CAFCR K9 / R2 / P13 / P9)
+# Event detection and owner training (PRODUCT-SPEC §7; ADR 0004)
 
-A small temporal convolutional network that labels GolfDB's 8 swing events from MediaPipe pose keypoints, trained
-offline on GolfDB and run in plain JS in the app (`app/src/events/tcn.js`). The rule-based detector
-(`app/src/events/rules.js`) stays the default; K9 says the TCN may only replace it where it wins, and on GolfDB
-split 1 it wins by 0.37 PCE.
+The shipped app detects the 8 swing events with **rules** (`app/src/events/rules.js`) plus a slow-motion time-scale
+search (`app/src/events/timescale.js`). Nothing GolfDB-derived ships (ADR 0004). An event model trained on **your
+own labelled swings** can replace the rules once it beats them on swings it never saw.
 
-## Results (GolfDB, PCE with the GolfDB tolerance, ordered decode)
+## 1. Owner flow (the only shippable model)
+
+1. **Label.** In teach mode (結果 › 標註) accept or adjust each detected event; 20+ swings over several sessions.
+2. **Export.** 「匯出訓練集」 writes one `golf-swing-lab-labels/1` file (format below; pose + labels, no video).
+3. **Score the rules on your labels** (optional, any time):
+   `node scripts/eval_owner_set.mjs labels.json --split session` — session-wise tune / holdout split; once the
+   holdout has ≥ 20 swings it is gated: Impact ±1 frame @60 Hz ≥ 0.90, address ±3 frames ≥ 0.80, tempo ±0.3 ≥ 0.80,
+   no regression against the baseline file on common swings.
+4. **Train.** `bash scripts/train_owner.sh labels.json [more.json …]` (venv: `training/requirements.in`):
+   synthetic pre-training → owner fine-tuning (holdout sessions never seen) → model card with the holdout metrics
+   computed by the app's own JS inference, compared with the rules → `scripts/check_model_card.mjs`.
+   Output `training/runs/owner-<date>/event-tcn-owner-<date>.{json,bin}`. `--init scratch` skips the pre-training;
+   `--dry-run` runs every step in seconds on CPU (pipeline check, verify stage `training`).
+5. **Import.** Settings › Developer › event model: pick the `.json` and `.bin`. The app checks the format, feature
+   version, size, fingerprint, tensor shapes, the model card (`golfdb: false`, training data, holdout metrics) and the
+   embedded golden (≤ 1e-4). It is used only if the card's gate passed and only for the views the holdout covered
+   (high_behind only when listed); otherwise the rules keep detecting. One tap rolls back.
+
+### Model card (`json.model_card`, `gsl-model-card/1`)
+
+| field | meaning |
+|---|---|
+| `training_data` | `["owner"]` or `["owner", "synthetic"]` (pre-trained on synthetic swings) |
+| `golfdb` | must be `false` |
+| `init` | `scratch` or `synthetic-pretrain` |
+| `labels_files` | name + sha256 of every labels file used |
+| `split` | `{ by: "session", holdout_frac, train: [shot ids], holdout: [shot ids] }` |
+| `views` | views present in the holdout (the app uses the model only there) |
+| `owner_holdout` | `{ n, impact_within_1_rate, address_within_3_rate, tempo_within_rate, per_event, rules: {…}, gate: { passed, reasons } }` |
+
+Gate (§7.3): holdout ≥ 20 swings, Impact ±1 ≥ 0.90, address ±3 ≥ 0.80, tempo ±0.3 ≥ 0.80, and not below the rules
+on any of the three.
+
+### `golf-swing-lab-labels/1` (teach-mode export; read by `eval_owner_set.mjs`, `train_owner.py`)
+
+```json
+{ "format": "golf-swing-lab-labels/1", "exported_at": "ISO-8601", "app_version": "0.2.0+…",
+  "swings": [{
+    "shot_id": "…", "session_id": "…", "view": "face_on|dtl|high_behind", "handedness": "right|left",
+    "fps": 240, "container_fps": 240, "time_scale": 1, "audio_onset_t": 1.234,
+    "detected": { "<event>": { "frame": 0, "t_s": 0.0, "conf": 0.9, "source": "rules" } },
+    "label": { "shot_id": "…", "events": { "<event>": { "frame": 0, "t_s": 0.0 } }, "labelled_at": "ISO-8601",
+               "source": "owner", "revision": 0, "fps": 240 },
+    "pose": { "hz": 60, "W": 1920, "H": 1080, "model": "full", "t_s": [0.0, 0.0167],
+              "img_f32": "<base64 little-endian Float32, N × 33 × [x, y, z, visibility]>" } }] }
+```
+`detected` = the events the app produced before any correction (from the shot history). Times are clip (media)
+seconds; `time_scale` > 1 for a slow-motion export (`SLOWMO_CORRECTED`). `pose.img_u16` + `pose.q: [lo, hi]` is an
+accepted 16-bit alternative to `img_f32` (used by the fixture). No video is exported.
+
+The fixture `tests/fixtures/owner/labels-fixture.json` (24 synthetic swings in 6 sessions,
+`training/node/make_owner_fixture.mjs`) is synthetic-derived: it exercises the pipeline, it is not owner data.
+
+## 2. Rules: tuning and validation (§7.2, §7.3)
+
+Tuning data: the synthetic generator only (`tests/synth/swing.js`, "synthetic-v2", stress modes in `stressSwing`) and,
+once it exists, the owner tune split. `tests/unit/events.rules.test.mjs` runs the stress suite (3 views × 8 modes ×
+40 seeds at 60 and 240 Hz, the same time-scale search as the clip pipeline) against the per-view gates; the numbers
+are in `docs/metrics-by-view.md` §8.
+
+Confidence (EV-4): `conf` is a per-event logistic map of detector features (`rules.js confFeatures`), fitted by
+`node training/node/fit_event_conf.mjs` on synthetic seeds 41–80 (the 8 stress modes + 4 failure-prone calibration
+modes) + the owner tune split, written to `app/src/events/calib-conf.json` (and its ES-module mirror
+`calib-conf.js`) with `fitted_on`. `node scripts/check_event_conf.mjs` checks the reliability on seeds 1–40: in every
+conf bin (width 0.1) with n ≥ 20 the within-tolerance rate is within ±0.15 of the bin's mean conf, per event and
+pooled. Until real owner labels exist the calibration describes synthetic swings: refit after labelling.
+
+## 3. GolfDB — research only, not shippable
+
+Everything below is a **dev-only benchmark** (CC BY-NC 4.0). It is never bundled, never imported by the app (an
+uncarded model is rejected), never read by a ship gate and never used to choose a constant. Research outputs go to
+the git-ignored `training/runs/`. `scripts/check_model_card.mjs` reports the legacy research model's recorded M3
+numbers when it is present locally and labels it "not shippable".
+
+### Results (GolfDB, PCE with the GolfDB tolerance, ordered decode)
 
 Split 1 (350 test clips; the model was trained on splits 2–4 and early-stopped on a validation subset carved from them):
 
@@ -66,7 +139,7 @@ evaluation; the repeated rows are the same checkpoint run again by `--folds` and
 c3 vs c6 (same recipe, different seed) shows ±0.015 seed noise; the larger receptive field (5.4 s instead of 2 s) is
 the only change that stood out.
 
-## Model
+### Model
 
 `training/model.py` `EventTCN`: input = evfeat-1 (12 features, 30 Hz grid, `docs/metrics-by-view.md` §7) normalised
 with the training-set mean / std (non-finite → 0). Conv1d 12→64, then 3 residual Conv1d 64→64
@@ -87,7 +160,7 @@ Mirror augmentation is not used: mirroring the frame (x → 1 − x, left/right 
 label a mirrored video) and flipping the handedness gives exactly the same canonical features (test
 `test_mirror_with_handedness_swap_is_identity`), so it adds nothing.
 
-## Data decisions
+### Data decisions
 
 - **Input = PoseSeq-equivalent.** The keypoint cache (`training/cache/keypoints/{full,lite}/<id>.npz`,
   MediaPipe 1.2.2) already stores `img` as `x_norm, y_norm, z, visibility`; W = H = 160 and `t_s` = frame / 29.97.
@@ -113,7 +186,7 @@ label a mirrored video) and flipping the handedness gives exactly the same canon
   PoseSeqs (view: face-on → `face_on`, down-the-line and other → `dtl`; handedness as above, no audio). A missing
   event counts as wrong.
 
-## Reproduce
+### Reproduce
 
 All commands from the repository root with `PY=~/.local/share/golf-swing-lab-venv/bin/python` (always `-I`).
 Prerequisites: `training/data` and the keypoint cache (see `training/data/README.md`, `training/extract_keypoints.py`;
@@ -132,7 +205,7 @@ $PY -I -m pytest -q training/tests
 (`--run c5` was trained with explicit `--dilations 1 3 9 27 --sigma 0`; those are now the defaults.)
 Checkpoints, logs and the ONNX copy live in `training/runs/` (git-ignored).
 
-## Exported files
+### Exported files
 
 - `app/models/event-tcn-v1.bin`: 264,484 bytes, little-endian float32, the tensors of `json.tensors` concatenated in
   order (`convs.0.weight [64,12,5]`, `convs.0.bias [64]`, …, `convs.3.*`, `head.weight [9,64,1]`, `head.bias [9]`),
@@ -149,14 +222,14 @@ JS use: `loadTcn(json, arrayBuffer)` → `{ predict(features) -> Float32Array(K�
 `detect(poseSeq, { useTcn: true, tcn })`. Parity (`scripts/check_model_parity.mjs`, verify.sh `model-parity`): worst
 max |Δprob| 6.9e-7 (limit 1e-4), identical argmax on every frame, sha256 and feature version checked.
 
-## Licence
+### Licence
 
 GolfDB (McNally et al., CVPR-W 2019) is CC BY-NC 4.0: personal, non-commercial use only
 (`training/vendor/golfdb/LICENSE-NOTICE.txt`). The weights are derived from it and carry the same restriction; the
 json says so. Whether they may be served by the public site is the open CAFCR R2 question (alternative: import from
 the phone's Files app).
 
-## Known gaps
+### Known gaps
 
 - **Domain gap.** GolfDB = broadcast clips of tour players, 160×160, ~29.97 fps, 45 % slow-motion replays, camera
   angles face-on / down-the-line / other. The app sees a selfie setup at 1080p, 30–240 fps, an amateur swing, and a
@@ -172,7 +245,7 @@ the phone's Files app).
 - The rules collapse on slow-motion clips; the rules-vs-TCN margin on real-time clips (0.29) is the fairer
   comparison.
 
-## What the P14 owner labels add
+### What the P14 owner labels add
 
 20+ owner swings labelled frame by frame (CAFCR P14) give: (1) the first in-domain measurement (Impact ±1 frame at
 60 Hz ≥ 90 %, M3 owner column), which decides per event whether the TCN or the rules are used; (2) fine-tuning data

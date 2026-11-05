@@ -1,0 +1,17 @@
+{
+  "close": "關閉",
+  "dismiss": "關閉通知",
+  "sheet": "面板",
+  "grabber": "拖曳把手",
+  "selected": "已選取",
+  "step_done": "已完成",
+  "step_active": "進行中",
+  "step_pending": "尚未開始",
+  "step_error": "失敗",
+  "validity": "可信度：{label}",
+  "state": "狀態：{text}",
+  "ci": "誤差範圍 ±{ci}",
+  "expand": "展開",
+  "collapse": "收合",
+  "new_window": "在新視窗開啟"
+}

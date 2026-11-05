@@ -1,0 +1,23 @@
+{
+  "check.abs_yaw_deg": "The phone is turned left or right",
+  "check.abs_pitch_deg": "The lens tilts up or down",
+  "check.abs_roll_deg": "The phone is rotated",
+  "check.abs_Y_m": "The tripod is too far off the ball line (stay within {limit})",
+  "check.min_D_m": "Too close to the ball: keep at least {limit} so the club cannot hit it",
+  "check.preset_view": "The camera spot is for another angle",
+  "check.rel_yaw_deg": "Turned differently from your saved spot",
+  "check.rel_pitch_deg": "Tilted differently from your saved spot",
+  "check.rel_roll_deg": "Rotated differently from your saved spot",
+  "check.rel_D_m": "Distance differs from your saved spot",
+  "check.rel_X_m": "Position along the target line differs from your saved spot",
+  "check.rel_Y_m": "Sideways position differs from your saved spot",
+  "check.rel_h_m": "Height differs from your saved spot",
+  "check.rmse_px": "The corners are not precise enough",
+  "check.edge_residual_px": "The mat edges do not line up",
+  "check.f_format": "The lens differs from the calibrated one",
+  "check.ghost_px": "The mat is off the dashed frame",
+  "check.corners_in_frame": "The mat is too close to the picture edge",
+  "check.ball_width": "The ball size differs from what we expect",
+  "check.ball_min_px": "The ball is too small in the picture",
+  "check.frames_budget": "The ball crosses the picture quickly (note)"
+}

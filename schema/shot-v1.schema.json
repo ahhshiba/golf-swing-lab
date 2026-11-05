@@ -143,7 +143,10 @@
         "EVENTS_UNCERTAIN",
         "OUT_OF_FRAME",
         "IMPLAUSIBLE_VALUE",
-        "NOT_IMPLEMENTED"
+        "NOT_IMPLEMENTED",
+        "NO_CALIBRATION",
+        "CLIP_NOT_SAVED",
+        "SLOWMO_CORRECTED"
       ],
       "description": "Every code is defined, with a Traditional Chinese description, in app/src/contract/reason-codes.js"
     },

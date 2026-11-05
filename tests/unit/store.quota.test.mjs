@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mulberry32 } from '../../app/src/geom/rng.js';
-import { planCleanup, requestPersist, estimateStorage, policyClips, isDeletableClip, DEFAULT_POLICY } from '../../app/src/store/quota.js';
-import { makeClipRecord } from '../../app/src/store/core.js';
+import { planCleanup, requestPersist, estimateStorage, policyClips, isDeletableClip, DEFAULT_POLICY, clipSpaceCheck, freeBytes } from '../../app/src/store/quota.js';
+import { makeClipRecord, openRepository, isQuotaError, StoreError } from '../../app/src/store/core.js';
+import { MemBackend } from '../../app/src/store/mem.js';
 import { hasChinese } from './store.fixtures.mjs';
 
 const MB = 1024 * 1024;
@@ -17,7 +18,8 @@ test('under the limit: nothing to do', () => {
   assert.deepEqual(p.deleteIds, []);
   assert.equal(p.bytesToFree, 0);
   assert.equal(p.lowSpace, false);
-  assert.ok(hasChinese(p.message));
+  assert.deepEqual(p.msg, { code: 'storage.ok', params: {} });
+  assert.equal('message' in p, false, 'no prose: the UI renders t(msg.code, msg.params)');
   assert.equal(DEFAULT_POLICY.highWater, 0.8);
 });
 
@@ -33,7 +35,7 @@ test('over the limit: oldest unstarred raw clips go first, just enough to get be
   assert.equal(p.freedBytes, 2600 * MB);
   assert.equal(p.satisfied, true);
   assert.equal(p.warnOnly, false);
-  assert.ok(hasChinese(p.message) && /匯出/.test(p.message) && /不會刪任何一球的數據或姿勢/.test(p.message));
+  assert.deepEqual(p.msg, { code: 'storage.over_limit', params: { usedMb: Math.round(8.5 * 1024), n: 3, freedMb: 2600 } });
   // input is not modified
   assert.deepEqual(clips.map((c) => c.clip_id), ['c5', 'c1', 'c3', 'c2', 'c4']);
 });
@@ -54,7 +56,8 @@ test('starred clips are never selected, even when they are the oldest or the onl
   assert.deepEqual(p.deleteIds, ['b', 'c']);
   assert.equal(p.satisfied, false, 'not enough without the starred clip');
   assert.equal(p.freedBytes, 200 * MB);
-  assert.ok(/仍不夠/.test(p.message) && hasChinese(p.message));
+  assert.equal(p.msg.code, 'storage.over_limit_unsatisfied');
+  assert.deepEqual(p.msg.params, { usedMb: 9 * 1024, n: 2, freedMb: 200 });
   // clips of protected (starred) shots are kept too, via protectShotIds
   const p2 = planCleanup({ usage: 9 * GB, quota: 10 * GB, clips: [clip('b', 100, 2), clip('c', 100, 3)], protectShotIds: ['shot-b'] });
   assert.deepEqual(p2.deleteIds, ['c']);
@@ -144,7 +147,7 @@ test('during a practice: warn only, delete nothing', () => {
   assert.equal(p.status, 'over');
   assert.equal(p.warnOnly, true);
   assert.deepEqual(p.deleteIds, []);
-  assert.ok(/練習中/.test(p.message));
+  assert.deepEqual(p.msg, { code: 'storage.over_limit_practice', params: { usedMb: 9 * 1024 } });
 });
 
 test('unknown or invalid numbers: no plan, no deletion', () => {
@@ -152,7 +155,7 @@ test('unknown or invalid numbers: no plan, no deletion', () => {
     const p = planCleanup(input);
     assert.equal(p.status, 'unknown');
     assert.deepEqual(p.deleteIds, []);
-    assert.ok(hasChinese(p.message));
+    assert.equal(p.msg.code, 'storage.unknown');
   }
 });
 
@@ -162,7 +165,7 @@ test('lowSpace flag: less than 500 MiB free', () => {
   const p = planCleanup({ usage: 100 * MB, quota: 400 * MB, clips: [] });
   assert.equal(p.status, 'ok');
   assert.equal(p.lowSpace, true);
-  assert.ok(/停止錄製/.test(p.message));
+  assert.deepEqual(p.msg, { code: 'storage.low_free', params: { freeMb: 300, minMb: 500 } });
   assert.equal(planCleanup({ usage: 100 * MB, quota: 400 * MB, clips: [], minFreeBytes: 100 * MB }).lowSpace, false);
 });
 
@@ -237,4 +240,75 @@ test('requestPersist never throws, whatever the browser does', async () => {
   const r = await requestPersist(fakeNav({ persistThrows: true }).nav);
   assert.equal(r.usage, 5);
   assert.equal(r.quota, 100);
+});
+
+// ------------------------------------------------------------------------- R2 / R7: full disk keeps the shot
+
+const shotRec = (id) => ({ shot_id: id, session_id: 'sess', created_at: '2026-11-05T00:00:00.000Z', quality: { warnings: [] } });
+const poseRec = (id, n = 100) => ({ shot_id: id, session_id: 'sess', created_at: '2026-11-05T00:00:00.000Z', img: new Float32Array(n) });
+const clipRec = (id, bytes) => makeClipRecord({ clip_id: `clip-${id}`, shot_id: id, session_id: 'sess', created_at: '2026-11-05T00:00:00.000Z', blob: { size: bytes, type: 'video/mp4' } });
+
+test('mem backend simulates a quota: an oversized readwrite transaction rolls back with QuotaExceededError', async () => {
+  const backend = new MemBackend({ quotaBytes: 64 * 1024 });
+  const repo = await openRepository(backend);
+  await repo.put('shots', shotRec('a'));
+  const used = backend.usageBytes();
+  await assert.rejects(repo.batch([{ op: 'put', store: 'shots', record: shotRec('b') }, { op: 'put', store: 'clips', record: clipRec('b', 1e6) }]),
+    (e) => e.name === 'QuotaExceededError' && isQuotaError(e));
+  assert.equal(await repo.shots.get('b'), null, 'all-or-nothing');
+  assert.equal(backend.usageBytes(), used);
+});
+
+test('saveShot: QuotaExceededError on a batch with a clip -> retried without clip, { ok, clipSaved:false, reason:CLIP_NOT_SAVED }, lowSpace', async () => {
+  const backend = new MemBackend({ quotaBytes: 200 * 1024 });
+  const repo = await openRepository(backend);
+  let dropped = 0;
+  const r = await repo.saveShot({
+    shot: shotRec('s1'), pose: poseRec('s1'), clip: clipRec('s1', 5 * MB),
+    onClipDropped: (s) => { dropped++; return { ...s, quality: { warnings: [...s.quality.warnings, 'CLIP_NOT_SAVED'] } }; },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.clipSaved, false);
+  assert.equal(r.poseSaved, true);
+  assert.equal(r.reason, 'CLIP_NOT_SAVED');
+  assert.equal(r.lowSpace, true);
+  assert.equal(dropped, 1);
+  assert.deepEqual((await repo.shots.get('s1')).quality.warnings, ['CLIP_NOT_SAVED']);
+  assert.ok(await repo.poses.get('s1'), 'the pose sequence is kept');
+  assert.equal(await repo.clips.count(), 0);
+  // with room, everything is saved
+  const big = await openRepository(new MemBackend({ quotaBytes: 50 * MB }));
+  const ok = await big.saveShot({ shot: shotRec('s2'), pose: poseRec('s2'), clip: clipRec('s2', 5 * MB) });
+  assert.deepEqual({ ok: ok.ok, clipSaved: ok.clipSaved, poseSaved: ok.poseSaved, lowSpace: ok.lowSpace, reason: ok.reason }, { ok: true, clipSaved: true, poseSaved: true, lowSpace: false, reason: undefined });
+});
+
+test('saveShot: no room for the pose either -> the shot alone; no room at all -> ok:false QUOTA_EXCEEDED, nothing written', async () => {
+  const repo = await openRepository(new MemBackend({ quotaBytes: 6 * 1024 }));
+  const r = await repo.saveShot({ shot: shotRec('s1'), pose: poseRec('s1', 4000), clip: clipRec('s1', MB) });
+  assert.deepEqual({ ok: r.ok, clipSaved: r.clipSaved, poseSaved: r.poseSaved, reason: r.reason }, { ok: true, clipSaved: false, poseSaved: false, reason: 'CLIP_NOT_SAVED' });
+  assert.ok(await repo.shots.get('s1'));
+  const none = await openRepository(new MemBackend({ quotaBytes: 10 }));
+  const r2 = await none.saveShot({ shot: shotRec('s1'), pose: poseRec('s1'), clip: clipRec('s1', MB) });
+  assert.equal(r2.ok, false);
+  assert.equal(r2.error, 'QUOTA_EXCEEDED');
+  assert.equal(await none.shots.count(), 0);
+  // a non-quota failure is not swallowed
+  await assert.rejects(repo.saveShot({ shot: { note: 'no id' } }), StoreError);
+});
+
+test('clipSpaceCheck / freeBytes (R7: check before each clip save)', () => {
+  assert.equal(freeBytes({ usage: 1 * GB, quota: 3 * GB }), 2 * GB);
+  assert.equal(freeBytes({ usage: null, quota: 3 * GB }), null);
+  assert.deepEqual(clipSpaceCheck({ usage: 0, quota: 4 * MB }), { free: 4 * MB, lowSpace: true });
+  assert.deepEqual(clipSpaceCheck({ usage: 1 * GB, quota: 10 * GB }), { free: 9 * GB, lowSpace: false });
+  assert.equal(clipSpaceCheck({ usage: 1 * GB, quota: 1 * GB + 600 * MB }, { clipBytes: 200 * MB }).lowSpace, true);
+  assert.deepEqual(clipSpaceCheck({ usage: null, quota: null }), { free: null, lowSpace: false }, 'unknown: keep saving');
+});
+
+test('estimateStorage resolves as unknown when estimate() hangs', async () => {
+  const nav = { storage: { estimate: () => new Promise(() => {}) } };
+  const t0 = Date.now();
+  const r = await estimateStorage(nav, { timeoutMs: 50 });
+  assert.deepEqual(r, { supported: true, usage: null, quota: null });
+  assert.ok(Date.now() - t0 < 1000);
 });

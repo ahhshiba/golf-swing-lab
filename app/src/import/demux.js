@@ -5,7 +5,10 @@
 //   Demuxer = { info, track, codec, width, height, matrix, timescale, duration_s, nominal_fps,
 //               samples: [{ index, cts, dts, timescale, duration, offset, size, is_sync }]  (decode order),
 //               description: Uint8Array | null   (avcC / hvcC payload for VideoDecoder.configure),
+//               file_bytes, table_end_bytes   (max offset + size over the sample table; > file_bytes = truncated copy, R9)
+//               edits: [{ segment_s, media_s, media_time_s, rate }] | []   (edit list; slow-motion originals)
 //               readSamples(d0, d1) -> AsyncGenerator<{ index, data: Uint8Array, sample }> }
+//   A sample read that runs past the end of the file throws DemuxError FILE_TRUNCATED (never a RangeError).
 //   codecFamily(codec) -> 'avc'|'hevc'|'vp9'|'av1'|'other'
 //
 // Only the moov box is parsed (mdat is skipped by file position, so a 1 GB clip is not read into memory; fragmented
@@ -42,6 +45,30 @@ function descriptionOf(trak) {
   box.write(s);
   const len = s.byteLength ?? s.position;
   return new Uint8Array(s.buffer.slice(8, len)); // drop the 8-byte box header
+}
+
+// Edit list -> [{ segment_s (movie time), media_s (media time span, NaN for the last one), media_time_s, rate }].
+function editsOf(trak, info, mediaTimescale) {
+  try {
+    const entries = trak && trak.edts && trak.edts.elst && trak.edts.elst.entries;
+    const movieTs = info && info.timescale;
+    if (!Array.isArray(entries) || !entries.length || !(movieTs > 0) || !(mediaTimescale > 0)) return [];
+    const out = [];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const mt = Number(e.media_time);
+      const next = entries.slice(i + 1).find((x) => Number(x.media_time) >= 0);
+      out.push({
+        segment_s: Number(e.segment_duration) / movieTs,
+        media_s: mt >= 0 && next ? (Number(next.media_time) - mt) / mediaTimescale : NaN,
+        media_time_s: mt >= 0 ? mt / mediaTimescale : null,
+        rate: Number(e.media_rate_integer ?? 1) + Number(e.media_rate_fraction ?? 0) / 65536,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 export async function openDemuxer(file, opts = {}) {
@@ -90,9 +117,12 @@ export async function openDemuxer(file, opts = {}) {
   }
   const nominal_fps = duration_s > 0 ? samples.length / duration_s : NaN;
   const description = descriptionOf(trak);
+  let tableEnd = 0;
+  for (const s of samples) if (Number.isFinite(s.offset) && Number.isFinite(s.size)) tableEnd = Math.max(tableEnd, s.offset + s.size);
   return {
     info, track, codec: track.codec, width: entry.width || track.track_width, height: entry.height || track.track_height,
     matrix: Array.from(track.matrix || []), timescale, duration_s, nominal_fps, samples, description,
+    file_bytes: file.size, table_end_bytes: tableEnd, edits: editsOf(trak, info, timescale),
     async *readSamples(d0 = 0, d1 = samples.length - 1, maxBatch = 4 * 1024 * 1024) {
       let d = Math.max(0, d0);
       const last = Math.min(samples.length - 1, d1);
@@ -105,7 +135,9 @@ export async function openDemuxer(file, opts = {}) {
           e++;
           b += samples[e].size;
         }
+        if (b > file.size) throw new DemuxError('FILE_TRUNCATED', `sample ${d} ends at ${b} B, file has ${file.size} B`);
         const ab = await readBuf(file, a, b);
+        if (ab.byteLength < b - a) throw new DemuxError('FILE_TRUNCATED', `read ${ab.byteLength} of ${b - a} B at ${a}`);
         for (let k = d; k <= e; k++) {
           const s = samples[k];
           yield { index: k, data: new Uint8Array(ab, s.offset - a, s.size), sample: s };

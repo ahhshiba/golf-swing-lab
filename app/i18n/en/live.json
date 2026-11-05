@@ -1,0 +1,41 @@
+{
+  "preview": "Camera preview",
+  "hero": "Last shot numbers",
+  "state.starting": "Getting the camera ready…",
+  "state.idle": "Step up to the ball",
+  "state.ready": "Ready",
+  "state.swinging": "Swinging",
+  "state.analysing": "Analysing… about {s} s",
+  "state.practice": "Practice swing, not analysed",
+  "state.done": "Done: shot {n}",
+  "state.failed": "Live analysis could not start",
+  "state.no_module": "Live analysis is not available",
+  "state.too_slow": "The phone is too slow; live analysis paused",
+  "state.camera_lost": "The camera stopped",
+  "state.camera_still_off": "The camera still cannot start",
+  "problem.no_module": "This browser cannot analyse live. Record slow motion with the iPhone Camera and import it.",
+  "problem.too_slow": "The phone is too hot or slow to keep up. Record slow motion and import it instead.",
+  "problem.camera_lost": "The camera stops when you switch apps, get a call or lock the screen. Tap below to continue.",
+  "reopen": "Turn the camera back on",
+  "count": {
+    "one": "{n} shot",
+    "other": "{n} shots"
+  },
+  "club": "{club}",
+  "club_sheet": "Change club",
+  "club_hint": "The new club applies from the next shot.",
+  "last.none": "No shots yet. Hold your address for half a second to begin.",
+  "last.line": "Shot {n}: {items}",
+  "last.no_numbers": "no numbers measured",
+  "open_last": "See full result",
+  "speak.shot": "Shot {n}, {items}",
+  "speak.item": "{label} {value} {unit}",
+  "end": "End practice",
+  "end_title": "End this practice?",
+  "end_body": {
+    "one": "Your {n} shot is saved; the camera turns off.",
+    "other": "Your {n} shots are saved; the camera turns off."
+  },
+  "resetup": "Set up again",
+  "import": "Import videos instead"
+}

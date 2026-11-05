@@ -11,11 +11,11 @@
 #   bash scripts/verify.sh                      run every stage
 #   bash scripts/verify.sh --only unit,static   run only the named stages
 #   bash scripts/verify.sh --list               print the stage names
-# Opt-in stages: RUN_BROWSER_E2E=1 (browser-e2e), RUN_TRAINING=1 (training).
+# Opt-in stages: RUN_BROWSER_E2E=1 (browser-e2e), RUN_TRAINING=1 (training). The tokens and i18n lints always run --strict.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 70
 
-ALL_STAGES=(env static unit contract model-parity synthetic-calib synthetic-e2e build sw-version browser-e2e training)
+ALL_STAGES=(env static unit contract tokens i18n event-conf model-parity synthetic-calib synthetic-e2e build sw-version browser-e2e training)
 GSL_PY=${GSL_PY:-$HOME/.local/share/golf-swing-lab-venv/bin/python}
 
 usage() {
@@ -104,7 +104,8 @@ env_check() {
   return 0
 }
 
-# Forbidden in app/src (interfaces.md section 1). Vendored code lives in app/vendor, outside this scan.
+# Forbidden in app/src (interfaces.md section 1; HTML-string sinks: PRODUCT-SPEC 6.3). Vendored code lives in app/vendor,
+# outside this scan.
 FORBIDDEN_RE=(
   -e 'location\.hash'
   -e 'history\.pushState'
@@ -112,6 +113,10 @@ FORBIDDEN_RE=(
   -e 'https?://'
   -e '(^|[^[:alnum:]_$])eval[[:space:]]*\('
   -e 'new[[:space:]]+Function([^[:alnum:]_$]|$)'
+  -e 'innerHTML'
+  -e 'insertAdjacentHTML'
+  -e 'outerHTML[[:space:]]*='
+  -e 'document\.write'
 )
 
 static_files() {
@@ -128,6 +133,15 @@ static_check() {
   echo "node --check: ${#STATIC_FILES[@]} file(s)"
   if [ -d app/src ]; then
     hits=$(grep -rInE --exclude-dir=vendor "${FORBIDDEN_RE[@]}" app/src 2>&1); grc=$?
+    if [ "$grc" -eq 0 ]; then
+      # XML namespace names (createElementNS) are identifiers, never fetched: a hit that is only one of them is fine
+      hits=$(printf '%s\n' "$hits" | while IFS= read -r line; do
+        rest=${line#*:*:}
+        stripped=$(printf '%s' "$rest" | sed -E 's#http://www\.w3\.org/(2000/svg|1999/xlink|1998/Math/MathML)##g')
+        if printf '%s\n' "$stripped" | grep -qE "${FORBIDDEN_RE[@]}"; then printf '%s\n' "$line"; fi
+      done)
+      [ -z "$hits" ] && grc=1
+    fi
     if [ "$grc" -eq 0 ]; then
       echo "forbidden pattern(s) in app/src:"; printf '%s\n' "$hits"; rc=1
     elif [ "$grc" -ne 1 ]; then
@@ -167,6 +181,12 @@ else
 fi
 
 script_stage contract        scripts/check_contract.mjs
+# design tokens + i18n lints (PRODUCT-SPEC 1.1, 3.6), strict since the integration commit (8.7 step 3): 0 CJK literals
+# in app/src outside the catalogs, and every token/i18n finding in any package FAILS
+script_stage tokens          scripts/check_tokens.mjs --strict
+script_stage i18n            scripts/check_i18n.mjs --quiet --strict
+# event-confidence reliability (PRODUCT-SPEC 7.3, package E)
+script_stage event-conf      scripts/check_event_conf.mjs
 # model-parity = JS inference reproduces the torch golden + the recorded M3 gates of the model card (P9 / M3)
 if [ ! -f app/models/event-tcn-v1.json ] && [ ! -f app/models/event-tcn-v1.bin ]; then
   # The GolfDB-derived model (CC BY-NC) is not in the public repo; a clone has none until training/ rebuilds it.

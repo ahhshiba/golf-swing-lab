@@ -37,9 +37,13 @@ function probe(url) {
   });
 }
 
-/** Start scripts/devserve.py on a free 127.0.0.1 port. -> { baseUrl, stop() } */
-export async function startServer(distDir) {
-  const port = await freePort();
+/**
+ * Start scripts/devserve.py on 127.0.0.1. -> { baseUrl, port, stop() }
+ * Port: opts.port, else $GSL_E2E_PORT, else a free port (packages running their gates in parallel pass their own).
+ */
+export async function startServer(distDir, opts = {}) {
+  const want = Number(opts.port ?? process.env.GSL_E2E_PORT ?? 0);
+  const port = Number.isInteger(want) && want > 0 ? want : await freePort();
   const py = process.env.PYTHON || 'python3';
   const child = spawn(py, ['-I', path.join(ROOT, 'scripts', 'devserve.py'), '--bind', '127.0.0.1', '--port', String(port), '--root', distDir, '--prefix', PREFIX],
     { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -201,12 +205,54 @@ export async function launch(ctx = {}, opts = {}) {
   const o = { headless: true, ...opts };
   if (name !== 'chromium') delete o.args;
   try {
-    return await type.launch(o);
+    return withDefaultLocale(await type.launch(o));
   } catch (e) {
     if (name === 'chromium') throw e;
     const so = name === 'webkit' ? missingSharedLibs(type) : [];
     throw new Skip(`${name} does not launch here: ${launchProblem(e)}${so.length ? `; ldd: ${so.join(', ')} not found` : ''}`);
   }
+}
+
+/**
+ * Default browser locale for gates: zh-TW (the app's primary locale; Playwright would otherwise report en-US and the
+ * app would switch to English). A gate that tests another locale passes `locale` to newContext; $GSL_E2E_LOCALE
+ * overrides the default for a whole run.
+ */
+export const DEFAULT_LOCALE = process.env.GSL_E2E_LOCALE || 'zh-TW';
+export function withDefaultLocale(browser) {
+  const nc = browser.newContext.bind(browser);
+  const np = browser.newPage.bind(browser);
+  browser.newContext = async (o = {}) => cspSafeContext(await nc({ locale: DEFAULT_LOCALE, ...o }));
+  browser.newPage = async (o = {}) => cspSafePage(await np({ locale: DEFAULT_LOCALE, ...o }));
+  return browser;
+}
+
+/**
+ * The app ships a Content-Security-Policy without 'unsafe-eval' (PRODUCT-SPEC §6.1). Playwright's page.waitForFunction
+ * evaluates a polled predicate from a string, which that CSP refuses (EvalError). Gates keep CSP on (it is part of what
+ * they test), so waitForFunction is replaced by an equivalent loop over page.evaluate (no eval): same arguments, same
+ * truthy-value contract and timeout error; `polling` 'raf' or a number of ms (default 100).
+ */
+export function cspSafePage(page) {
+  if (!page || page.__gslCspSafe) return page;
+  page.__gslCspSafe = true;
+  page.waitForFunction = async (fn, arg, opts = {}) => {
+    const timeout = opts.timeout ?? 30000;
+    const every = typeof opts.polling === 'number' ? opts.polling : 100;
+    const t0 = Date.now();
+    for (;;) {
+      const v = typeof fn === 'function' ? await page.evaluate(fn, arg) : await page.evaluate(String(fn));
+      if (v) return page.evaluateHandle((x) => x, v).catch(() => v);
+      if (Date.now() - t0 > timeout) throw new Error(`page.waitForFunction: Timeout ${timeout}ms exceeded.`);
+      await new Promise((r) => setTimeout(r, every));
+    }
+  };
+  return page;
+}
+function cspSafeContext(context) {
+  const np = context.newPage.bind(context);
+  context.newPage = async () => cspSafePage(await np());
+  return context;
 }
 
 /** Does this page's WebCodecs decode H.264 (avc1 High 4.2)? Playwright's Chromium: no (no proprietary codecs). */

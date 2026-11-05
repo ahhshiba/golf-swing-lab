@@ -1,0 +1,17 @@
+{
+  "denied.title": "Camera is off",
+  "denied.body": "The app has no camera permission, so it cannot film live. Turn it on and tap “Try again”, or import a slow-motion video instead.",
+  "denied.how": "How to turn the camera on",
+  "denied.ios1": "Open the iPhone Settings app",
+  "denied.ios2": "Choose Safari › Camera (Home Screen app: choose Golf Swing Lab)",
+  "denied.ios3": "Set it to “Allow”, come back and tap “Try again”",
+  "denied.other1": "Tap the lock or camera icon next to the address bar",
+  "denied.other2": "Set Camera to “Allow”",
+  "denied.other3": "Come back and tap “Try again”",
+  "busy.title": "Camera is in use",
+  "busy.body": "Another app (for example a video call or the Camera app) is using the camera. Close it and tap “Try again”.",
+  "missing.title": "No camera found",
+  "missing.body": "This device or browser has no usable camera. You can import a slow-motion video recorded on another phone.",
+  "retry": "Try again",
+  "import_instead": "Import a slow-motion video instead"
+}

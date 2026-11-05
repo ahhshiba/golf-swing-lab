@@ -1,10 +1,10 @@
 // workers/protocol.js - vision worker message protocol (app-architecture.md section 5) and error codes. Pure.
 //
 //   TO_WORKER, TO_MAIN                  message type -> required fields { name: kind }
-//   ERROR_CODES { CODE: 'Traditional Chinese message' }      ERR { CODE: 'CODE' }
-//   errorMessage(code) -> string        (unknown code -> the INTERNAL message)
+//   ERROR_CODES = ERR = { CODE: 'CODE' }   code list (UI text: t('error.<CODE>'), never prose here)
+//   errorMessage(code) -> 'error.<CODE>' catalog key (unknown code -> 'error.INTERNAL')
 //   toErrorCode(err) -> CODE            err.code when it is a known code; AbortError -> CANCELLED; memory -> OUT_OF_MEMORY
-//   errorReply(id, err) -> { type: 'error', id, code, message }
+//   errorReply(id, err) -> { type: 'error', id, code, params, detail, message }   (detail/message: developer text)
 //   validateMessage(msg, direction: 'to_worker'|'to_main') -> { ok: true } | { ok: false, error }
 //   transferablesOf(msg) -> Transferable[]      bitmaps / frames / typed-array buffers to transfer
 //
@@ -18,34 +18,35 @@
 //   pose: optional crop { roi: {x,y,w,h}, W, H } so results are in full-frame coordinates, optional seq (new clip).
 //   main -> worker  { type: 'set_model', json: object|null, bin: ArrayBuffer|null }   P9 imported event model (null = default)
 //   worker -> main  { type: 'model_set', ok: boolean, version: string|null, message? }
+//   worker -> main  { type: 'job_info', id, frames }    sample count of an analyze_clip job once probed (client timeout)
+//   main -> worker  { type: 'e2e_crash' }               e2e only (init carried e2e: true): throw an uncaught error
+//   worker -> main  { type: 'e2e_pose_request', id, req, bitmap, t_s, crop }   e2e only (init carried e2e: true and
+//                   e2e_clip_pose: true): during analyze_clip the worker still runs its own pose on every frame (the
+//                   cost stays real) and asks the page's __GSL_E2E__.clipPose stand-in for the landmarks to use;
+//   main -> worker  { type: 'e2e_pose_reply', req, img?, world? }   the stand-in's rows (absent: keep the worker's own)
 
-export const ERROR_CODES = Object.freeze({
-  BAD_MESSAGE: '內部訊息格式錯誤，請重新整理 App。',
-  NOT_INITIALIZED: '分析引擎尚未啟動完成，請稍候再試。',
-  INIT_FAILED: '分析引擎啟動失敗，請重新開啟 App。',
-  WASM_LOAD_FAILED: '無法載入姿勢辨識引擎，請確認 App 已完整下載（連上網路開啟一次）。',
-  MODEL_LOAD_FAILED: '無法載入姿勢模型檔，請確認 App 已完整下載。',
-  POSE_FAILED: '姿勢辨識失敗。',
-  WEBCODECS_UNAVAILABLE: '此裝置無法在背景解碼影片，改用相容模式（較慢）。',
-  UNSUPPORTED_CODEC: '此影片的編碼無法在這台裝置解碼，請改錄 H.264（相容性最佳）。',
-  NO_VIDEO_TRACK: '檔案裡沒有影片軌。',
-  DEMUX_FAILED: '無法讀取影片檔：不是 MP4／MOV 或檔案已損壞。',
-  DECODE_FAILED: '影片解碼失敗。',
-  NO_DOCUMENT: '相容模式只能在主畫面執行。',
-  NO_SWING_FOUND: '影片中找不到完整的揮桿動作。',
-  ASSEMBLE_FAILED: '整理分析結果時發生錯誤。',
-  CANCELLED: '已取消。',
-  OUT_OF_MEMORY: '記憶體不足，請剪短影片後再試。',
-  INTERNAL: '發生未預期的錯誤。',
-});
+import { APP_ERROR_CODES } from '../contract/reason-codes.js';
 
-export const ERR = Object.freeze(Object.fromEntries(Object.keys(ERROR_CODES).map((k) => [k, k])));
+// Error codes only (PRODUCT-SPEC §3.4): the UI text is t('error.<CODE>') / t('error.<CODE>.fix') from the catalogs.
+// The codes added by drop 1 for the app shell, store and camera (contract/reason-codes.js APP_ERROR_CODES) are merged
+// in, so a worker or the client may reply with any of them (WORKER_CRASHED, ANALYSIS_TIMEOUT, FILE_TRUNCATED, ...).
+const WORKER_ERROR_CODES = Object.freeze([
+  'BAD_MESSAGE', 'NOT_INITIALIZED', 'INIT_FAILED', 'WASM_LOAD_FAILED', 'MODEL_LOAD_FAILED', 'POSE_FAILED',
+  'WEBCODECS_UNAVAILABLE', 'UNSUPPORTED_CODEC', 'NO_VIDEO_TRACK', 'DEMUX_FAILED', 'DECODE_FAILED', 'NO_DOCUMENT',
+  'NO_SWING_FOUND', 'ASSEMBLE_FAILED', 'CANCELLED', 'OUT_OF_MEMORY', 'INTERNAL',
+]);
+
+export const ERROR_CODES = Object.freeze(Object.fromEntries([...WORKER_ERROR_CODES, ...Object.keys(APP_ERROR_CODES)].map((k) => [k, k])));
+
+export const ERR = ERROR_CODES;
 
 const num = 'number', str = 'string', obj = 'object', any = 'any', bmp = 'bitmap', f32 = 'f32';
 
 export const TO_WORKER = Object.freeze({
   init: { delegate: str },
   pose: { id: any, bitmap: bmp, t_s: num, model: str },
+  e2e_crash: {},
+  e2e_pose_reply: { req: any },
   analyze_clip: { id: any, file: obj, options: obj },
   cancel: { id: any },
   decode_frame: { id: any, req: any, bitmap: bmp, t_s: num, index: num },
@@ -60,11 +61,13 @@ export const TO_MAIN = Object.freeze({
   progress: { id: any, stage: str, frac: num },
   clip_result: { id: any, shot: obj, timings_ms: obj },
   cancelled: { id: any },
-  error: { code: str, message: str },
+  error: { code: str },
   diag: { path: str },
   decode_request: { id: any, req: any, from_s: num, to_s: num, hz: num },
   decode_ack: { id: any, req: any },
   model_set: { ok: any },
+  job_info: { id: any, frames: num },
+  e2e_pose_request: { id: any, req: any, bitmap: bmp, t_s: num },
 });
 
 const MODELS = ['lite', 'full', 'heavy'];
@@ -93,6 +96,10 @@ export function validateMessage(msg, direction) {
   if (msg.type === 'init' && !['GPU', 'CPU'].includes(msg.delegate)) return { ok: false, error: 'init.delegate must be GPU or CPU' };
   if (msg.type === 'pose' && !MODELS.includes(msg.model)) return { ok: false, error: 'pose.model must be lite, full or heavy' };
   if (msg.type === 'pose_result' && (msg.img.length !== 132 || msg.world.length !== 99)) return { ok: false, error: 'pose_result arrays must be 132 / 99 long' };
+  if (msg.type === 'e2e_pose_reply' && (msg.img !== undefined || msg.world !== undefined) &&
+    !(msg.img instanceof Float32Array && msg.img.length === 132 && msg.world instanceof Float32Array && msg.world.length === 99)) {
+    return { ok: false, error: 'e2e_pose_reply img / world must be Float32Array 132 / 99 (or both absent)' };
+  }
   if (msg.type === 'progress' && !(msg.frac >= 0 && msg.frac <= 1)) return { ok: false, error: 'progress.frac must be in [0, 1]' };
   if (msg.type === 'error' && !Object.prototype.hasOwnProperty.call(ERROR_CODES, msg.code)) return { ok: false, error: `unknown error code '${msg.code}'` };
   if (msg.type === 'decode_error' && !Object.prototype.hasOwnProperty.call(ERROR_CODES, msg.code)) return { ok: false, error: `unknown error code '${msg.code}'` };
@@ -105,8 +112,9 @@ export function validateMessage(msg, direction) {
   return { ok: true };
 }
 
+/** The catalog key of an error code ('error.<CODE>'); unknown codes map to error.INTERNAL. */
 export function errorMessage(code) {
-  return Object.prototype.hasOwnProperty.call(ERROR_CODES, code) ? ERROR_CODES[code] : ERROR_CODES.INTERNAL;
+  return `error.${Object.prototype.hasOwnProperty.call(ERROR_CODES, code) ? code : 'INTERNAL'}`;
 }
 
 export function toErrorCode(err) {
@@ -118,10 +126,16 @@ export function toErrorCode(err) {
   return ERR.INTERNAL;
 }
 
+const detailOf = (err) => {
+  try { return err && err.message ? String(err.message).slice(0, 500) : ''; } catch { return ''; }
+};
+
+/** -> { type: 'error', id, code, params, detail, message }: message repeats the code (+ detail) for logs only. */
 export function errorReply(id, err) {
   const code = toErrorCode(err);
-  const detail = err && err.message ? String(err.message) : '';
-  return { type: 'error', id: id ?? null, code, message: errorMessage(code) + (detail && code === ERR.INTERNAL ? `（${detail}）` : '') , detail };
+  const detail = (err && typeof err.detail === 'string' && err.detail) || detailOf(err);
+  const params = err && err.params && typeof err.params === 'object' ? err.params : {};
+  return { type: 'error', id: id ?? null, code, params, detail, message: detail ? `${code}: ${detail}` : code };
 }
 
 export function transferablesOf(msg) {
@@ -132,7 +146,16 @@ export function transferablesOf(msg) {
   return out;
 }
 
-/** Error class for worker-side failures carrying a protocol code. */
+/**
+ * Error class for worker-side failures carrying a protocol code. `detail` is developer text (diag only, never shown);
+ * the UI renders t('error.' + code, params).
+ */
 export class WorkerError extends Error {
-  constructor(code, message) { super(message || errorMessage(code)); this.name = 'WorkerError'; this.code = code; }
+  constructor(code, detail, params) {
+    super(detail ? String(detail) : String(code));
+    this.name = 'WorkerError';
+    this.code = code;
+    this.detail = detail ? String(detail) : '';
+    this.params = params && typeof params === 'object' ? params : {};
+  }
 }

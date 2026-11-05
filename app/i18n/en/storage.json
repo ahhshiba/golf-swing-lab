@@ -1,0 +1,14 @@
+{
+  "unknown": "Storage use can’t be read, so nothing was cleaned up.",
+  "ok": "Plenty of storage space.",
+  "low_free": "Less than {minMb} MB free ({freeMb} MB left). Consider not keeping videos for now.",
+  "over_limit_practice": "Storage is over the limit ({usedMb} MB used). During practice this is only a warning; nothing is deleted.",
+  "over_limit": {
+    "one": "Storage is over the limit ({usedMb} MB used). Export a backup first. Clean-up only deletes raw videos (oldest unstarred first), never a shot’s numbers or pose: {n} video can go, about {freedMb} MB.",
+    "other": "Storage is over the limit ({usedMb} MB used). Export a backup first. Clean-up only deletes raw videos (oldest unstarred first), never a shot’s numbers or pose: {n} videos can go, about {freedMb} MB."
+  },
+  "over_limit_unsatisfied": {
+    "one": "Storage is over the limit ({usedMb} MB used). Deleting every video that can go ({n} video, about {freedMb} MB) is still not enough: export, then free space by hand.",
+    "other": "Storage is over the limit ({usedMb} MB used). Deleting every video that can go ({n} videos, about {freedMb} MB) is still not enough: export, then free space by hand."
+  }
+}

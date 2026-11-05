@@ -1,0 +1,20 @@
+{
+  "today": "Today",
+  "yesterday": "Yesterday",
+  "seconds": {
+    "one": "{n} second",
+    "other": "{n} seconds"
+  },
+  "minutes": {
+    "one": "{n} minute",
+    "other": "{n} minutes"
+  },
+  "shots": {
+    "one": "{n} shot",
+    "other": "{n} shots"
+  },
+  "elapsed": "{m} min",
+  "clock._context": "mm:ss duration",
+  "clock": "{m}:{ss}",
+  "hours_minutes": "{h} h {m} min"
+}

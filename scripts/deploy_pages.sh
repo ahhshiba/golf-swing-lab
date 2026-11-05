@@ -8,15 +8,15 @@
 # Real deploy (only with --i-have-approval, the owner's go-ahead, and a git remote named origin):
 #   1. RUN_BROWSER_E2E=1 bash scripts/verify.sh must report FAIL=0 (only the opt-in training stage may be SKIP)
 #   2. the work tree must be clean (git status --porcelain empty) and HEAD must exist
-#   3. build dist into a temp dir: node scripts/build.mjs --out <tmp> [--no-bundled-model]
+#   3. build dist into a temp dir: node scripts/build.mjs --out <tmp> (no event model: the default build)
 #   4. temp index: GIT_INDEX_FILE=<tmp>/index git --work-tree=<tmp dist> add -A && git write-tree
 #   5. git commit-tree <tree> -> git push --force origin <commit>:refs/heads/gh-pages (dist has .nojekyll)
 #   6. git prune --expire=3.days.ago (old deploy commits are unreferenced after the force push)
 #   7. deploy/last-deploy.json = { version, commit, deployed_at, bundled_event_model, source_head, url }
 #      (scripts/check-sw.mjs then insists on a semver bump when the precache contents change)
-# Licence switch: the event model (app/models/event-tcn-v1.*) is trained on GolfDB (CC BY-NC 4.0) and whether it may
-# ship on a public site is not decided (docs/ADR/0002-event-model-licence.md), so the deploy builds with
-# --no-bundled-model unless --include-golfdb-model is given.
+# No GolfDB in the product (PRODUCT-SPEC §7.1, EV-6): the event model app/models/event-tcn-v1.* is trained on GolfDB
+# (CC BY-NC 4.0) and never ships. The default build leaves it out; --include-golfdb-model makes a dev-research build
+# (precache-manifest dev_research: true), which a real deploy REFUSES (a dry run lists it and reports the refusal).
 # --dry-run: steps 3 + a listing of what would be pushed; no git writes, no push, no last-deploy.json, approval not
 # needed. It reports which preconditions a real deploy would fail. --verify also runs step 1.
 # Exit: 0 ok, 1 a check failed, 2 refused (no approval / no origin / dirty tree), 64 usage.
@@ -56,6 +56,7 @@ check "$in_git" "not a git repository"
 check "$has_origin" "no git remote named origin (git remote add origin <url> first)"
 check "$has_head" "the repository has no commit yet (deploy records the source HEAD)"
 if [ -n "$dirty" ]; then check 0 "work tree is not clean ($(printf '%s\n' "$dirty" | wc -l) changed/untracked path(s)); commit first"; fi
+if [ "$WITH_MODEL" -eq 1 ]; then check 0 "--include-golfdb-model makes a dev-research build (GolfDB event model, CC BY-NC): it is never deployed"; fi
 
 # ---- 1. full verification ----
 if [ "$DRY" -eq 0 ] || [ "$DRY_VERIFY" -eq 1 ]; then
@@ -79,12 +80,14 @@ TMPD=$(mktemp -d "${TMPDIR:-/tmp}/gsl-deploy.XXXXXX") || exit 1
 trap 'rm -rf "$TMPD"' EXIT
 OUT="$TMPD/dist"
 BUILD_ARGS=(--out "$OUT" --quiet)
-[ "$WITH_MODEL" -eq 1 ] || BUILD_ARGS+=(--no-bundled-model)
+[ "$WITH_MODEL" -eq 1 ] && BUILD_ARGS+=(--include-golfdb-model)
 node scripts/build.mjs "${BUILD_ARGS[@]}" || { echo "FAIL build" >&2; exit 1; }
 rm -f "$OUT/.gsl-build"   # build marker, not part of the site
 VERSION=$(node -e 'const m=require(process.argv[1]);process.stdout.write(m.version)' "$OUT/precache-manifest.json")
 BUNDLED=$(node -e 'const m=require(process.argv[1]);process.stdout.write(String(m.bundled_event_model!==false))' "$OUT/precache-manifest.json")
 [ -f "$OUT/.nojekyll" ] || { echo "FAIL build: .nojekyll missing" >&2; exit 1; }
+RESEARCH=$(node -e 'const m=require(process.argv[1]);process.stdout.write(String(m.dev_research===true))' "$OUT/precache-manifest.json")
+if [ "$DRY" -eq 0 ] && [ "$RESEARCH" = true ]; then refuse "the build is a dev-research build (dev_research: true); it is never deployed"; fi
 if [ "$WITH_MODEL" -eq 0 ] && [ -n "$(find "$OUT" -name 'event-tcn-v1.*' -print -quit)" ]; then
   echo "FAIL: event model files present in a --no-bundled-model build" >&2; exit 1
 fi
@@ -93,7 +96,7 @@ BYTES=$(find "$OUT" -type f -printf '%s\n' | awk '{s+=$1} END {print s+0}')
 
 if [ "$DRY" -eq 1 ]; then
   echo "DRY RUN: would push $NFILES files ($BYTES bytes) to gh-pages as one commit"
-  echo "  VERSION $VERSION, bundled event model: $BUNDLED$([ "$WITH_MODEL" -eq 1 ] || echo ' (--no-bundled-model; pass --include-golfdb-model to ship it)')"
+  echo "  VERSION $VERSION, bundled event model: $BUNDLED$([ "$WITH_MODEL" -eq 1 ] && echo ' (DEV RESEARCH build: never deployed)')"
   (cd "$OUT" && find . -type f -printf '%P\t%s\n' | LC_ALL=C sort) | awk -F'\t' '{printf "  %10d  %s\n", $2, $1}'
   echo "  then: GIT_INDEX_FILE=<tmp>/index git --work-tree=<dist> add -A; git write-tree; git commit-tree;"
   echo "        git push --force origin <commit>:refs/heads/gh-pages; git prune --expire=3.days.ago; write deploy/last-deploy.json"

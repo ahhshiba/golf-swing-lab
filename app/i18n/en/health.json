@@ -1,0 +1,7 @@
+{
+  "prompt.health_due": "{n} shots since the last check: go back to setup and make sure the mat corners and the phone have not moved.",
+  "prompt.mat_changed": "The mat may have changed: length differs by {dL}% and width by {dW}% (more than {lim}%). Measure the mat again and add a new venue.",
+  "prompt.brightness": "The light changed by {pct}% since setup (more than {lim}%): the background is re-learnt; if results look odd, set up again.",
+  "prompt.drop_test_never": "You have not done a ball-drop test yet: it takes about a minute and checks distance and timing accuracy.",
+  "prompt.drop_test": "Your last ball-drop test was {days} days ago: we suggest one a month."
+}

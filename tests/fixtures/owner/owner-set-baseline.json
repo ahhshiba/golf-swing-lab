@@ -1,0 +1,537 @@
+{
+  "schema": "gsl-owner-eval/2",
+  "input_format": "golf-swing-lab-labels/1",
+  "detector": "rules",
+  "hz": 60,
+  "tol_frames": 1,
+  "n_labels": 24,
+  "n_scored": 24,
+  "impact_within_1_rate": 0.9166666666666666,
+  "address_within_3_rate": 0.9166666666666666,
+  "tempo_within_rate": 0.9583333333333334,
+  "per_event": {
+    "address": {
+      "n": 24,
+      "mean_abs_frames": 0.9235016666666666,
+      "median_abs_frames": 0.5648699999999995,
+      "bias_frames": 0.11974833333333405,
+      "within_1_rate": 0.8333333333333334
+    },
+    "toe_up": {
+      "n": 24,
+      "mean_abs_frames": 0.7683495863705807,
+      "median_abs_frames": 0.517788166721378,
+      "bias_frames": 0.4839990009649324,
+      "within_1_rate": 0.7916666666666666
+    },
+    "mid_backswing": {
+      "n": 24,
+      "mean_abs_frames": 0.6838453809974349,
+      "median_abs_frames": 0.5294564590988138,
+      "bias_frames": 0.4806025594412395,
+      "within_1_rate": 0.875
+    },
+    "top": {
+      "n": 24,
+      "mean_abs_frames": 0.23924020164296234,
+      "median_abs_frames": 0.19103613724101853,
+      "bias_frames": 0.016127603984373295,
+      "within_1_rate": 1
+    },
+    "mid_downswing": {
+      "n": 24,
+      "mean_abs_frames": 0.41449083789420804,
+      "median_abs_frames": 0.41601509350414734,
+      "bias_frames": -0.38182517923491144,
+      "within_1_rate": 0.9583333333333334
+    },
+    "impact": {
+      "n": 24,
+      "mean_abs_frames": 0.3026067463801474,
+      "median_abs_frames": 0.08663748191547249,
+      "bias_frames": -0.06367318315124493,
+      "within_1_rate": 0.9166666666666666
+    },
+    "mid_follow_through": {
+      "n": 24,
+      "mean_abs_frames": 0.6514427763763314,
+      "median_abs_frames": 0.525087311943464,
+      "bias_frames": 0.6383689684972155,
+      "within_1_rate": 0.7083333333333334
+    },
+    "finish": {
+      "n": 24,
+      "mean_abs_frames": 1.122110833333333,
+      "median_abs_frames": 0.6580299999999983,
+      "bias_frames": 0.9544708333333375,
+      "within_1_rate": 0.7083333333333334
+    }
+  },
+  "detector_sources": {
+    "rules": 24
+  },
+  "shots": {
+    "fixture-1-1": {
+      "address": -0.5780800000000008,
+      "toe_up": 0.8961927713115214,
+      "mid_backswing": 0.8035278578483762,
+      "top": 0.0733104393269235,
+      "mid_downswing": -0.45973666934823854,
+      "impact": 0.010199999999986886,
+      "mid_follow_through": 0.1708659999999984,
+      "finish": -0.11654000000000941,
+      "tempo_err": 0.05522878593794234,
+      "session_id": "fixture-session-1"
+    },
+    "fixture-1-2": {
+      "address": -0.07157999999998665,
+      "toe_up": 0.4280093228986459,
+      "mid_backswing": 0.48641939200463113,
+      "top": 0.038701388562785155,
+      "mid_downswing": -0.28320046540357247,
+      "impact": 0.09749496383093081,
+      "mid_follow_through": 1.1610194674478524,
+      "finish": -0.10235999999999912,
+      "tempo_err": -0.005480715573263684,
+      "session_id": "fixture-session-1"
+    },
+    "fixture-1-3": {
+      "address": 0.6325400000000059,
+      "toe_up": -0.16443662079296928,
+      "mid_backswing": 0.49370218922309306,
+      "top": 0.22457576561987658,
+      "mid_downswing": -0.37229351766005614,
+      "impact": -0.03761999999998267,
+      "mid_follow_through": 0.6163320000000105,
+      "finish": 0.8850599999999975,
+      "tempo_err": 0.013059642225149659,
+      "session_id": "fixture-session-1"
+    },
+    "fixture-1-4": {
+      "address": 0.8062399999999981,
+      "toe_up": -0.5979028322434798,
+      "mid_backswing": 0.5653819823267803,
+      "top": 0.04175054537185474,
+      "mid_downswing": -0.5550026488625814,
+      "impact": 0.34645726976429536,
+      "mid_follow_through": 0.7283015427878592,
+      "finish": -0.2513400000000132,
+      "tempo_err": -0.09861283224156114,
+      "session_id": "fixture-session-1"
+    },
+    "fixture-2-1": {
+      "address": -0.7631400000000088,
+      "toe_up": -0.5119947227458965,
+      "mid_backswing": 0.7303706548010647,
+      "top": 0.18081152288448532,
+      "mid_downswing": -0.498908756896812,
+      "impact": -0.05358000000000196,
+      "mid_follow_through": 0.036796000000016704,
+      "finish": -0.10832000000000619,
+      "tempo_err": 0.08423497249450085,
+      "session_id": "fixture-session-2"
+    },
+    "fixture-2-2": {
+      "address": 0.3361800000000148,
+      "toe_up": -0.11537079782397264,
+      "mid_backswing": 0.41680799659848944,
+      "top": 0.07726901322574697,
+      "mid_downswing": -0.28922278463988427,
+      "impact": 0.3760891458640092,
+      "mid_follow_through": 0.607504231277618,
+      "finish": 2.8511600000000215,
+      "tempo_err": -0.0482026740904522,
+      "session_id": "fixture-session-2"
+    },
+    "fixture-2-3": {
+      "address": -0.3897999999999957,
+      "toe_up": 0.19686668598398516,
+      "mid_backswing": 0.9754551535865463,
+      "top": 0.07359500406797448,
+      "mid_downswing": -0.704714574543166,
+      "impact": 0.06827999999997836,
+      "mid_follow_through": 0.31861600000000045,
+      "finish": 0.14505999999999908,
+      "tempo_err": 0.029913730676490946,
+      "session_id": "fixture-session-2"
+    },
+    "fixture-2-4": {
+      "address": -0.24518000000000484,
+      "toe_up": -1.4250615961765423,
+      "mid_backswing": 0.37889271615855424,
+      "top": 0.3355342644033277,
+      "mid_downswing": -0.2690854741478166,
+      "impact": 0.9903126803212459,
+      "mid_follow_through": 1.1862654122891225,
+      "finish": 0.17639999999998324,
+      "tempo_err": -0.07080270659250054,
+      "session_id": "fixture-session-2"
+    },
+    "fixture-3-1": {
+      "address": -0.8803200000000011,
+      "toe_up": -0.10967527547571798,
+      "mid_backswing": -0.31695192081620416,
+      "top": -0.05637445514723005,
+      "mid_downswing": 0.11085108628901885,
+      "impact": -0.035280000000001976,
+      "mid_follow_through": 0.3196640000000084,
+      "finish": 0.8755400000000257,
+      "tempo_err": 0.043559897785877766,
+      "session_id": "fixture-session-3"
+    },
+    "fixture-3-2": {
+      "address": 0.4438999999999904,
+      "toe_up": -0.29727104199402277,
+      "mid_backswing": -0.5652107289745345,
+      "top": -0.21395402918686024,
+      "mid_downswing": 0.08545000447027107,
+      "impact": -0.04045118567918671,
+      "mid_follow_through": 0.8654139328887567,
+      "finish": 0.6546800000000097,
+      "tempo_err": -0.08612555950115475,
+      "session_id": "fixture-session-3"
+    },
+    "fixture-3-3": {
+      "address": -0.6663400000000008,
+      "toe_up": 0.5254375353264251,
+      "mid_backswing": -0.1757788493347201,
+      "top": 0.02576258278618848,
+      "mid_downswing": -0.09802066702564005,
+      "impact": 0.009660000000017988,
+      "mid_follow_through": 0.18244800000002392,
+      "finish": 0.31925999999999455,
+      "tempo_err": 0.042980453698553855,
+      "session_id": "fixture-session-3"
+    },
+    "fixture-3-4": {
+      "address": 0.07187999999999528,
+      "toe_up": 0.923352500708301,
+      "mid_backswing": -0.27501781740889797,
+      "top": 0.26757242103244483,
+      "mid_downswing": -0.061999407762374226,
+      "impact": -0.6725549039771206,
+      "mid_follow_through": 0.5503925864205783,
+      "finish": 0.12607999999998398,
+      "tempo_err": 0.1368353199632093,
+      "session_id": "fixture-session-3"
+    },
+    "fixture-4-1": {
+      "address": -0.7630999999999899,
+      "toe_up": 0.07728582803597117,
+      "mid_backswing": -0.39072280508551493,
+      "top": 0.5775669786812276,
+      "mid_downswing": 0.00045068363590416993,
+      "impact": 0.1960799999999896,
+      "mid_follow_through": 1.3276200000000005,
+      "finish": 0.661379999999987,
+      "tempo_err": 0.13509645845416918,
+      "session_id": "fixture-session-4"
+    },
+    "fixture-4-2": {
+      "address": 0.5516599999999983,
+      "toe_up": 1.2505501943929076,
+      "mid_backswing": -0.2643030121997292,
+      "top": 0.20126075159755175,
+      "mid_downswing": 0.06321722225275828,
+      "impact": 0.7306720560199143,
+      "mid_follow_through": 1.5593288504179181,
+      "finish": -0.25383999999993634,
+      "tempo_err": -0.08254292893134796,
+      "session_id": "fixture-session-4"
+    },
+    "fixture-4-3": {
+      "address": 0.3641400000000061,
+      "toe_up": 1.729694908572088,
+      "mid_backswing": -0.10132605390599014,
+      "top": 0.11511196310074467,
+      "mid_downswing": 0.13201890726360688,
+      "impact": -0.15011999999998693,
+      "mid_follow_through": -0.024721999999997024,
+      "finish": -0.2928200000000025,
+      "tempo_err": 0.03097994976848195,
+      "session_id": "fixture-session-4"
+    },
+    "fixture-4-4": {
+      "address": 0.1336999999999966,
+      "toe_up": 0.5235816106968594,
+      "mid_backswing": -0.3496026709487543,
+      "top": -0.2524579869744503,
+      "mid_downswing": -0.06610224749618254,
+      "impact": -0.05816398418972746,
+      "mid_follow_through": 0.458700414229245,
+      "finish": -0.7073599999999924,
+      "tempo_err": -0.07383035724352904,
+      "session_id": "fixture-session-4"
+    },
+    "fixture-5-1": {
+      "address": 1.6855799999999954,
+      "toe_up": 0.4434825324517533,
+      "mid_backswing": 0.9016795684705636,
+      "top": 0.010815878950785063,
+      "mid_downswing": -0.6255658648894435,
+      "impact": -0.07578000000001417,
+      "mid_follow_through": 0.4774199999999862,
+      "finish": 2.919660000000004,
+      "tempo_err": -0.06718034539509654,
+      "session_id": "fixture-session-5"
+    },
+    "fixture-5-2": {
+      "address": 6.859500000000001,
+      "toe_up": 4.188094540067713,
+      "mid_backswing": 1.5145505484962918,
+      "top": -0.11293635324503448,
+      "mid_downswing": -0.6725026316891025,
+      "impact": -1.0682539059939522,
+      "mid_follow_through": 0.35134148460542747,
+      "finish": -0.1790999999999876,
+      "tempo_err": -0.24488527971695762,
+      "session_id": "fixture-session-5"
+    },
+    "fixture-5-3": {
+      "address": 0.3268199999999988,
+      "toe_up": 1.728763419870023,
+      "mid_backswing": 1.3996145481774525,
+      "top": 0.8207751479161107,
+      "mid_downswing": -0.6161682415788938,
+      "impact": -0.19446000000000296,
+      "mid_follow_through": 0.43297399999999264,
+      "finish": 3.0915200000000187,
+      "tempo_err": 0.1895919487094706,
+      "session_id": "fixture-session-5"
+    },
+    "fixture-5-4": {
+      "address": -0.7181399999999938,
+      "toe_up": 0.7961154416634075,
+      "mid_backswing": 0.39294684139259406,
+      "top": -0.4690175267784902,
+      "mid_downswing": -0.5756872916889444,
+      "impact": 0.022996642946448986,
+      "mid_follow_through": 1.0477289786518007,
+      "finish": 0.8012400000000053,
+      "tempo_err": -0.050804749852132236,
+      "session_id": "fixture-session-5"
+    },
+    "fixture-6-1": {
+      "address": 0.30686000000000657,
+      "toe_up": 0.21269332646018047,
+      "mid_backswing": 0.9749924620325423,
+      "top": -0.42558168954726305,
+      "mid_downswing": -0.6721337839279418,
+      "impact": 0.0189600000000123,
+      "mid_follow_through": 1.2191300000000105,
+      "finish": 3.0272599999999894,
+      "tempo_err": -0.10445917629559842,
+      "session_id": "fixture-session-6"
+    },
+    "fixture-6-2": {
+      "address": -0.13274000000000896,
+      "toe_up": 0.1614235467184333,
+      "mid_backswing": 0.757097333416823,
+      "top": -0.8091340365041866,
+      "mid_downswing": -0.4976393329831197,
+      "impact": -0.48094884725961684,
+      "mid_follow_through": 0.49978203746634975,
+      "finish": 3.907940000000014,
+      "tempo_err": -0.11646245221545737,
+      "session_id": "fixture-session-6"
+    },
+    "fixture-6-3": {
+      "address": -1.0648999999999953,
+      "toe_up": -0.19049413761517808,
+      "mid_backswing": 0.9468430038465048,
+      "top": -0.26676604766223466,
+      "mid_downswing": -0.7242568905436109,
+      "impact": -0.021780000000006794,
+      "mid_follow_through": 1.3600959999999862,
+      "finish": 2.052100000000001,
+      "tempo_err": 0.0073477149446623535,
+      "session_id": "fixture-session-6"
+    },
+    "fixture-6-4": {
+      "address": -3.3717200000000025,
+      "toe_up": 0.9466388828679451,
+      "mid_backswing": 2.235093036883784,
+      "top": -0.07112904685731891,
+      "mid_downswing": -1.513550954462053,
+      "impact": -1.5063663272771066,
+      "mid_follow_through": -0.13216369454939425,
+      "finish": 2.424640000000009,
+      "tempo_err": 0.3330943756589604,
+      "session_id": "fixture-session-6"
+    }
+  },
+  "problems": [],
+  "split": {
+    "by": "session",
+    "tune_frac": 0.2,
+    "tune_sessions": [
+      "fixture-session-6"
+    ],
+    "holdout_sessions": [
+      "fixture-session-4",
+      "fixture-session-5",
+      "fixture-session-2",
+      "fixture-session-3",
+      "fixture-session-1"
+    ],
+    "tune": [
+      "fixture-6-1",
+      "fixture-6-2",
+      "fixture-6-3",
+      "fixture-6-4"
+    ],
+    "holdout": [
+      "fixture-4-1",
+      "fixture-4-2",
+      "fixture-4-3",
+      "fixture-4-4",
+      "fixture-5-1",
+      "fixture-5-2",
+      "fixture-5-3",
+      "fixture-5-4",
+      "fixture-2-1",
+      "fixture-2-2",
+      "fixture-2-3",
+      "fixture-2-4",
+      "fixture-3-1",
+      "fixture-3-2",
+      "fixture-3-3",
+      "fixture-3-4",
+      "fixture-1-1",
+      "fixture-1-2",
+      "fixture-1-3",
+      "fixture-1-4"
+    ]
+  },
+  "tune": {
+    "n_scored": 4,
+    "impact_within_1_rate": 0.75,
+    "address_within_3_rate": 0.75,
+    "tempo_within_rate": 0.75,
+    "per_event": {
+      "address": {
+        "n": 4,
+        "mean_abs_frames": 1.2190550000000033,
+        "median_abs_frames": 0.6858800000000009,
+        "bias_frames": -1.065625,
+        "within_1_rate": 0.5
+      },
+      "toe_up": {
+        "n": 4,
+        "mean_abs_frames": 0.3778124734154342,
+        "median_abs_frames": 0.20159373203767927,
+        "bias_frames": 0.2825654046078452,
+        "within_1_rate": 1
+      },
+      "mid_backswing": {
+        "n": 4,
+        "mean_abs_frames": 1.2285064590449135,
+        "median_abs_frames": 0.9609177329395235,
+        "bias_frames": 1.2285064590449135,
+        "within_1_rate": 0.75
+      },
+      "top": {
+        "n": 4,
+        "mean_abs_frames": 0.3931527051427508,
+        "median_abs_frames": 0.34617386860474886,
+        "bias_frames": -0.3931527051427508,
+        "within_1_rate": 1
+      },
+      "mid_downswing": {
+        "n": 4,
+        "mean_abs_frames": 0.8518952404791813,
+        "median_abs_frames": 0.6981953372357763,
+        "bias_frames": -0.8518952404791813,
+        "within_1_rate": 0.75
+      },
+      "impact": {
+        "n": 4,
+        "mean_abs_frames": 0.5070137936341856,
+        "median_abs_frames": 0.2513644236298118,
+        "bias_frames": -0.4975337936341795,
+        "within_1_rate": 0.75
+      },
+      "mid_follow_through": {
+        "n": 4,
+        "mean_abs_frames": 0.8027929330039352,
+        "median_abs_frames": 0.8594560187331801,
+        "bias_frames": 0.736711085729238,
+        "within_1_rate": 0.5
+      },
+      "finish": {
+        "n": 4,
+        "mean_abs_frames": 2.8529850000000034,
+        "median_abs_frames": 2.725949999999999,
+        "bias_frames": 2.8529850000000034,
+        "within_1_rate": 0
+      }
+    }
+  },
+  "holdout": {
+    "n_scored": 20,
+    "impact_within_1_rate": 0.95,
+    "address_within_3_rate": 0.95,
+    "tempo_within_rate": 1,
+    "per_event": {
+      "address": {
+        "n": 20,
+        "mean_abs_frames": 0.8643909999999991,
+        "median_abs_frames": 0.5648699999999995,
+        "bias_frames": 0.3568230000000009,
+        "within_1_rate": 0.9
+      },
+      "toe_up": {
+        "n": 20,
+        "mean_abs_frames": 0.8464570089616101,
+        "median_abs_frames": 0.5245095730116422,
+        "bias_frames": 0.5242857202363499,
+        "within_1_rate": 0.75
+      },
+      "mid_backswing": {
+        "n": 20,
+        "mean_abs_frames": 0.5749131653879391,
+        "median_abs_frames": 0.4516136943015603,
+        "bias_frames": 0.3310217795205046,
+        "within_1_rate": 0.9
+      },
+      "top": {
+        "n": 20,
+        "mean_abs_frames": 0.20845770094300464,
+        "median_abs_frames": 0.147961742992615,
+        "bias_frames": 0.09798366580979812,
+        "within_1_rate": 1
+      },
+      "mid_downswing": {
+        "n": 20,
+        "mean_abs_frames": 0.3270099573772134,
+        "median_abs_frames": 0.28621162502172837,
+        "bias_frames": -0.28781116698605747,
+        "within_1_rate": 1
+      },
+      "impact": {
+        "n": 20,
+        "mean_abs_frames": 0.26172533692933975,
+        "median_abs_frames": 0.08663748191547249,
+        "bias_frames": 0.023098938945341985,
+        "within_1_rate": 0.95
+      },
+      "mid_follow_through": {
+        "n": 20,
+        "mean_abs_frames": 0.6211727450508107,
+        "median_abs_frames": 0.5139062932102823,
+        "bias_frames": 0.618700545050811,
+        "within_1_rate": 0.75
+      },
+      "finish": {
+        "n": 20,
+        "mean_abs_frames": 0.7759359999999988,
+        "median_abs_frames": 0.30603999999999854,
+        "bias_frames": 0.5747680000000042,
+        "within_1_rate": 0.85
+      }
+    }
+  },
+  "input": "labels-fixture.json",
+  "exported_at": "2026-11-05T09:00:00.000Z",
+  "app_version": "fixture"
+}

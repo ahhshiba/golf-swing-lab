@@ -1,0 +1,15 @@
+{
+  "status.requesting": "Asking for permissions…",
+  "status.ready": "Permissions granted. Set up the camera.",
+  "status.camera_unavailable": "The camera can’t be used. You can import a video instead.",
+  "status.camera_lost": "The camera stopped (another app, a call or the lock screen). Tap Reopen camera to continue.",
+  "status.camera_reopened": "Camera reopened.",
+  "status.camera_still_lost": "The camera still can’t be used.",
+  "status.low_space": "Less than {freeMb} MB left: videos aren’t kept this session, your numbers still are.",
+  "status.clip_not_saved": "Not enough space: this shot’s video wasn’t kept. Its numbers and pose were saved.",
+  "status.storage_full": "Your phone is full: this shot wasn’t saved. Free up some space first.",
+  "status.camera_released": "The camera is free for the Camera app: record in slow motion, then come back and import the video.",
+  "status.thermal_degraded": "The phone is hot or slow: analysis detail was lowered automatically.",
+  "status.thermal_stop_live": "Live analysis is still too slow. Try high-speed mode (record first, then import).",
+  "status.ended": "Practice ended."
+}

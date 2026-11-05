@@ -1,0 +1,16 @@
+{
+  "title": "Open-source licences",
+  "intro": "This app uses the open-source components below. The full licence texts are installed with the app, no network needed.",
+  "mediapipe.name": "MediaPipe Tasks Vision 1.2.2",
+  "mediapipe.what": "Pose detection, including the Pose Landmarker models (lite, full, heavy)",
+  "mediapipe.licence": "Apache License 2.0 · Google LLC",
+  "mp4box.name": "mp4box.js 2.4.1",
+  "mp4box.what": "Reads MP4 and MOV video files",
+  "mp4box.licence": "BSD 3-Clause License · Telecom Paris / GPAC",
+  "icons.name": "Lucide-style icons",
+  "icons.what": "Interface icons drawn in the Lucide line style",
+  "icons.licence": "ISC License · Lucide Contributors",
+  "show": "Full licence text",
+  "loading": "Loading…",
+  "missing": "This version does not include the licence file. Please report it (see About)."
+}

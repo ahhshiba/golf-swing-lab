@@ -1,6 +1,7 @@
 // metrics/registry.js against CAFCR F2, cell by cell. The expected table below is written independently from
 // docs/CAFCR.md (not derived from the registry), and is also cross-checked against the markdown table itself so a
 // later edit of the spec shows up here.
+import { mergeCatalogs } from '../../scripts/build.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -40,6 +41,8 @@ test('registry covers exactly the 22 contract metric ids', () => {
   assert.deepEqual(ids.sort(), [...METRIC_IDS].sort());
 });
 
+const CATALOGS = mergeCatalogs(fileURLToPath(new URL('../../app', import.meta.url)));
+
 test('registry equals F2 cell by cell (validity per view, min fps, row, null code, label)', () => {
   for (const [row, ids, fo, dtl, hb, minFps, codes] of F2) {
     for (const id of ids) {
@@ -51,7 +54,9 @@ test('registry equals F2 cell by cell (validity per view, min fps, row, null cod
       assert.equal(r.row, row === 7 ? { shoulder_turn_deg: 7, hip_turn_deg: 8, x_factor_deg: 9 }[id] : row, `${id} row`);
       if (codes.length === 0) assert.equal(r.nullCode, null, `${id} nullCode`);
       else assert.ok(codes.includes(r.nullCode), `${id} nullCode ${r.nullCode} not in F2 ${codes}`);
-      assert.ok(typeof r.label_zh === 'string' && /[一-鿿]/.test(r.label_zh), `${id} label_zh`);
+      assert.equal(r.label_zh, undefined, `${id}: labels live in the catalogs`);
+      for (const [loc, c] of Object.entries(CATALOGS)) assert.ok(typeof c[`metric.${id}.label`] === 'string' && c[`metric.${id}.label`], `${loc} metric.${id}.label`);
+      assert.match(CATALOGS['zh-Hant'][`metric.${id}.label`], /[一-鿿]/, `${id}: zh-Hant label is Chinese first (V21)`);
     }
   }
 });

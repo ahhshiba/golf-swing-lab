@@ -4,7 +4,7 @@
 // API summary (signatures only; rules in docs/contract.md, schema in schema/shot-v1.schema.json):
 //
 // reason-codes.js
-//   REASON_CODES  { NAME: 'Traditional Chinese description' }     RC  { NAME: 'NAME' }      describe(code) -> string | null
+//   REASON_CODE_LIST  REASON_CODES = RC  { NAME: 'NAME' }   APP_ERROR_CODES   (codes only; text: t('reason.<CODE>.short|long|fix'))
 // enums.js
 //   SCHEMA_ID  VIEWS  EVENTS  EVENT_SOURCES  VALUE_VALIDITIES  NULL_VALIDITIES  VALIDITIES  VALUE_ORIGINS
 //   METRIC_IDS  METRIC_UNITS  METRIC_DEFAULT_ORIGIN  SETUP_LEVEL_CODES  BALL_CLUB_IDS  CALIBRATION_ORIGINS

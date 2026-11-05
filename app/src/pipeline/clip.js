@@ -1,19 +1,25 @@
 // pipeline/clip.js - one clip -> golf-shot/1 (CAFCR P5; also the live per-swing segment of P4). Runs in the worker.
 //
-//   analyzeClip(file, options, deps?) -> Promise<{ shot, timings_ms, debug, poseSeq, events, events_source, probe }>
+//   analyzeClip(file, options, deps?) -> Promise<{ shot, timings_ms, debug, poseSeq, events, events_source, probe,
+//                                                  time_scale, reasons }>
 //   options = { view, calibration, club, handedness = 'right', venue, ids: { shot_id, session_id, venue_id, preset_id,
 //               created_at, app_version, ... }, mode = 'highspeed'|'live', source = 'import'|'camera', orientation?,
 //               clip_ref = null, trim_s?: [from, to], pose_hz = 60, pose_model = 'full', pose_roi?, ball_roi?,
 //               restBall?: { u, v, w_px }, impact_pre = 30, impact_post = 60, audioOnset_t?, warnings = [], seed = 1,
-//               allowNoSwing = false (true: no golfer found -> a shot of honest nulls instead of NO_SWING_FOUND),
-//               use_tcn = true (false: rules only even when deps.tcn is given) }
-//   calibration null -> placeholderCalibration() + SETUP_UNVERIFIED, ball/club rows nulled (uncalibrated())
+//               use_tcn = true (false: rules only even when deps.tcn is given), research_model = false }
+//   No swing found (too few pose frames, no impact event, detection error) -> WorkerError NO_SWING_FOUND: a clip
+//   without a swing never becomes a shot (PRODUCT-SPEC UX-08; options.allowNoSwing is ignored).
+//   calibration null -> placeholderCalibration() + NO_CALIBRATION, ball/club rows nulled (uncalibrated())
+//   Slow motion with the speed baked in (EV-3): events/timescale.js picks a time scale k (1, 4, 8); with k > 1 the
+//   shot carries SLOWMO_CORRECTED, capture.{nominal,effective}_fps are the real rates (container × k) and every
+//   metric is computed in real time; event t_s stay in clip (media) seconds so replay seeks the right frame.
 //   deps (dependency injection; the worker passes the browser ones, Node tests pass fakes) = {
 //     probe(file) -> Probe,  decode(file, { onFrame, from_s, to_s, hz, signal, probe }) -> result,
 //     pose(frame, t_s, { rotation, roi }) -> { img: Float32Array(132), world: Float32Array(99) } (full-frame normalised),
 //     newPoseSequence?(), toGray(frame, { rotation, roi }) -> { data, W, H, origin: {u, v} },
 //     detect?(poseSeq, opts) -> EventSet (default events/detect.js), assembleShot?(args) (default ./assemble.js),
-//     tcn?: { predict(features) } (events/tcn.js loadTcn; the worker loads app/models/event-tcn-v1) - see detectWithTcn,
+//     tcn?: { predict(features), meta } (events/tcn.js loadTcn of an owner-imported model; used only when its model
+//           card passes events/card.js tcnRejection) - see detectWithTcn,
 //     onProgress?(stage, frac), signal?, now?() -> ms }
 //   captureFromProbe(probe, options) -> capture{}      orientationFromProbe(probe)
 //   ballRoiFor(W, H, options) -> {x,y,w,h}  (ball_roi, else frames.js suggestBallRoi around restBall / projected spot)
@@ -23,6 +29,8 @@
 // Progress stages: 'probe', 'pose', 'events', 'impact', 'assemble' (frac 0..1 each).
 
 import { detect as detectEvents } from '../events/detect.js';
+import { detectTimeScaled, scalePoseTime } from '../events/timescale.js';
+import { tcnRejection } from '../events/card.js';
 import { RC } from '../contract/reason-codes.js';
 import { impactWindow } from '../import/timebase.js';
 import { createPoseSeqBuilder } from '../pose/convert.js';
@@ -42,20 +50,17 @@ import { REGISTRY } from '../metrics/registry.js';
 /** Pose sigmas of the placeholder calibration: deliberately wide (nothing is measured). */
 const PLACEHOLDER_SIGMA = Object.freeze({ yaw_deg: 5, pitch_deg: 2, roll_deg: 2, X_m: 0.3, Y_m: 0.3, h_m: 0.1, D_m: 0.3 });
 
-/** Clips at most this many samples long get a whole-clip ball pass when no impact event was found. */
-const WHOLE_CLIP_BALL_PASS_MAX = 400;
-
 /**
- * Placeholder calibration for a clip analysed without one (import screen 「不使用校正」, live without lock). The shot
+ * Placeholder calibration for a clip analysed without one (import without a mat calibration, live without lock). The shot
  * contract and assembleShot require a Calibration; this one is the nominal C2 camera for the view and is never used
- * for numbers: ball/club rows are nulled with SETUP_UNVERIFIED afterwards (see uncalibrated()).
+ * for numbers: ball/club rows are nulled with NO_CALIBRATION afterwards (see uncalibrated()).
  */
 export function placeholderCalibration(view, W, H) {
   const cam = nominalCamera(view, { W, H, f: nominalF(W, H) });
   return makeCalibration({ method: 'ball_only', source: 'clip', cam, view, f_locked: false, sigma: PLACEHOLDER_SIGMA, readout_source: 'assumed' });
 }
 
-/** Ball / club rows of an uncalibrated shot -> honest nulls (SETUP_UNVERIFIED); registry nulls are kept. */
+/** Ball / club rows of an uncalibrated shot -> honest nulls (NO_CALIBRATION); registry nulls are kept. */
 export function uncalibrated(shot) {
   if (!shot || !shot.metrics || !shot.quality) return shot; // not a golf-shot/1 (injected assemble in tests)
   const metrics = { ...shot.metrics };
@@ -63,7 +68,7 @@ export function uncalibrated(shot) {
     const m = metrics[id];
     if (!m) continue;
     const registryNull = m.value === null && (m.validity === 'not_observable' || m.reason_codes.includes(RC.NOT_IMPLEMENTED));
-    if (!registryNull) metrics[id] = metricNull('not_computed', [RC.SETUP_UNVERIFIED], METRIC_UNITS[id], REGISTRY[id]?.value_origin ?? 'derived');
+    if (!registryNull) metrics[id] = metricNull('not_computed', [RC.NO_CALIBRATION], METRIC_UNITS[id], REGISTRY[id]?.value_origin ?? 'derived');
   }
   const out = attributeWarnings({ ...shot, metrics });
   validateShot(out);
@@ -140,8 +145,6 @@ export function defaultBallRoi(W, H, restBall) {
   return { x: 0, y: Math.round(H / 2), w: W, h: H - Math.round(H / 2) };
 }
 
-/** Views the event TCN was trained on (GolfDB face-on / down-the-line); high_behind stays rule-based (training.md). */
-export const TCN_VIEWS = Object.freeze(['face_on', 'dtl']);
 /** TCN guards: a person must be visible (vis_mean >= 0.5) in this share of the pose frames, and the ordered decode's
  * impact probability must reach TCN_MIN_IMPACT_P; otherwise the rules decide (a clip with no golfer stays "no swing"). */
 export const TCN_MIN_VISIBLE = 0.5;
@@ -162,31 +165,41 @@ export function visibleShare(poseSeq) {
 }
 
 /**
- * Event detection with the trained TCN when it is supplied and applicable (view in TCN_VIEWS, a visible golfer),
- * otherwise / on any TCN failure the rules (CAFCR K9: the TCN replaces the rules only where it wins - GolfDB split 1
- * PCE 0.795 vs 0.426, docs/training.md). -> { events, source: 'tcn'|'rules', fallback?, error? }
+ * Event detection (PRODUCT-SPEC §7.1): the rules, with the slow-motion time-scale search (events/timescale.js); an
+ * owner-imported TCN replaces them only when its model card passed the owner-set holdout gate and covers the view
+ * (events/card.js; ctx.research = a research build's bundled model), a golfer is visible and the TCN's impact is
+ * confident; on any TCN failure the rules decide. -> { events, source: 'tcn'|'rules', fallback?, error?, time_scale }
+ * ctx = { container_fps, duration_s, captureFpsHint, research }. Event times are in media seconds.
  * The source ends up in shot.events.*.source and shot.algorithms.events (assemble.js: 'tcn+evfeat-1' vs rules).
  */
-export function detectWithTcn(detect, poseSeq, opts, tcn) {
+export function detectWithTcn(detect, poseSeq, opts, tcn, ctx = {}) {
+  let k = 1;
   const rules = (fallback) => {
     try {
-      return { events: detect(poseSeq, opts), source: 'rules', fallback };
+      const events = detectTimeScaled(poseSeq, opts, { ...ctx, detect });
+      k = events?.meta?.time_scale ?? 1;
+      return { events, source: 'rules', fallback, time_scale: k };
     } catch (e) {
-      return { events: null, source: 'rules', fallback, error: e && e.message ? e.message : String(e) };
+      return { events: null, source: 'rules', fallback, error: e && e.message ? e.message : String(e), time_scale: 1 };
     }
   };
-  if (!tcn || typeof tcn.predict !== 'function') return rules(undefined);
-  if (!TCN_VIEWS.includes(opts.view)) return rules('tcn_view');
-  if (visibleShare(poseSeq) < TCN_MIN_VISIBLE) return rules('tcn_low_visibility');
+  const base = rules(undefined);
+  if (!tcn || typeof tcn.predict !== 'function') return base;
+  const rej = tcnRejection(tcn.meta, opts.view, { research: ctx.research === true });
+  if (rej) return { ...base, fallback: rej };
+  if (visibleShare(poseSeq) < TCN_MIN_VISIBLE) return { ...base, fallback: 'tcn_low_visibility' };
   let ev;
+  const scaled = scalePoseTime(poseSeq, k);
   try {
-    ev = detect(poseSeq, { ...opts, useTcn: true, tcn });
+    ev = detect(scaled, { ...opts, audioOnset_t: Number.isFinite(opts.audioOnset_t) ? opts.audioOnset_t / k : opts.audioOnset_t, useTcn: true, tcn });
   } catch (e) {
-    return rules(`tcn_error: ${e && e.message ? e.message : e}`);
+    return { ...base, fallback: `tcn_error: ${e && e.message ? e.message : e}` };
   }
-  if (!ev || !ev.impact || ev.impact.source !== 'tcn') return { events: ev, source: 'rules', fallback: (ev && ev.fallback) || 'tcn_not_used' };
-  if (!(ev.impact.conf >= TCN_MIN_IMPACT_P) && ev.impact.conf !== 0.95) return rules('tcn_low_impact_p');
-  return { events: ev, source: 'tcn' };
+  if (!ev || !ev.impact || ev.impact.source !== 'tcn') return { ...base, fallback: (ev && ev.fallback) || 'tcn_not_used' };
+  if (!(ev.impact.conf >= TCN_MIN_IMPACT_P) && ev.impact.conf !== 0.95) return { ...base, fallback: 'tcn_low_impact_p' };
+  if (k !== 1) for (const name of Object.keys(ev)) if (ev[name] && Number.isFinite(ev[name].t_s)) ev[name] = { ...ev[name], t_s: ev[name].t_s * k };
+  Object.defineProperty(ev, 'meta', { value: { ...(base.events?.meta ?? {}), time_scale: k }, enumerable: false });
+  return { events: ev, source: 'tcn', time_scale: k };
 }
 
 function checkAbort(signal) {
@@ -206,7 +219,8 @@ export async function analyzeClip(file, options = {}, deps = {}) {
   const warnings = Array.isArray(options.warnings) ? options.warnings.slice() : [];
   const addWarn = (c) => { if (c && !warnings.includes(c)) warnings.push(c); };
   const calibrated = Boolean(options.calibration && options.calibration.camera);
-  if (!calibrated) addWarn(RC.SETUP_UNVERIFIED);
+  // no mat calibration at all -> NO_CALIBRATION (a calibration object without a camera only nulls the rows below)
+  if (!options.calibration) addWarn(RC.NO_CALIBRATION);
 
   // 1. probe
   progress('probe', 0);
@@ -246,14 +260,11 @@ export async function analyzeClip(file, options = {}, deps = {}) {
   for (const c of (decPose && decPose.reason_codes) || []) addWarn(c);
   progress('pose', 1);
   checkAbort(signal);
-  // No golfer found (too few pose frames, or no impact event): the clip still becomes a shot whose pose / tempo rows
-  // are honest nulls (assembleShot's placeholder events) and whose ball rows come from a whole-clip ball pass when the
-  // clip is short and calibrated - only with options.allowNoSwing (the import screen); otherwise NO_SWING_FOUND.
+  // No golfer / no swing found (too few pose frames, no impact event, detection failed): NO_SWING_FOUND, never a shot
+  // of nulls (PRODUCT-SPEC UX-08).
   const noSwing = (why) => {
-    if (!options.allowNoSwing) throw new WorkerError(ERR.NO_SWING_FOUND, why);
-    addWarn(RC.EVENTS_UNCERTAIN);
-    addWarn(RC.POSE_LOW_VISIBILITY);
     diagRecord('import.last.no_swing', why);
+    throw new WorkerError(ERR.NO_SWING_FOUND, why);
   };
   const poseSeq = builder.size() > 0 ? builder.build() : null;
   if (builder.size() < 8) noSwing(`only ${builder.size()} pose frames`);
@@ -263,9 +274,17 @@ export async function analyzeClip(file, options = {}, deps = {}) {
   progress('events', 0);
   let events = null;
   let eventsSource = null;
+  let timeScale = 1;
   if (poseSeq && builder.size() >= 8) {
-    const ev = detectWithTcn(detect, poseSeq, { view, handedness, audioOnset_t: options.audioOnset_t }, options.use_tcn === false ? null : deps.tcn);
+    const ctx = {
+      container_fps: probe.nominal_fps > 0 ? probe.nominal_fps : probe.effective_fps,
+      duration_s: cts.length > 1 ? cts[cts.length - 1] - cts[0] : undefined,
+      captureFpsHint: Number.isFinite(probe.captureFpsHint) ? probe.captureFpsHint : null,
+      research: options.research_model === true,
+    };
+    const ev = detectWithTcn(detect, poseSeq, { view, handedness, audioOnset_t: options.audioOnset_t }, options.use_tcn === false ? null : deps.tcn, ctx);
     events = ev.events;
+    timeScale = ev.time_scale ?? 1;
     eventsSource = ev.fallback ? `${ev.source} (${ev.fallback})` : ev.source;
     diagRecord('import.last.events_source', eventsSource);
     if (ev.error) noSwing(`event detection failed: ${ev.error}`);
@@ -281,7 +300,6 @@ export async function analyzeClip(file, options = {}, deps = {}) {
   const tMax = cts.length ? Math.min(cts[cts.length - 1], to_s) : undefined;
   let win = null;
   if (events) win = impactWindow(events.impact.t_s, fps, { pre: options.impact_pre ?? 30, post: options.impact_post ?? 60, t_min: tMin, t_max: tMax });
-  else if (calibrated && cts.length && cts.length <= WHOLE_CLIP_BALL_PASS_MAX) win = { from_s: tMin, to_s: tMax };
   const restBall = options.restBall ?? null;
   const ballRoi = ballRoiFor(W, H, options);
   const frames = [];
@@ -313,18 +331,36 @@ export async function analyzeClip(file, options = {}, deps = {}) {
     : null;
   if (!ballFrames && calibrated) addWarn(RC.TRACK_TOO_SHORT);
 
-  // 5. assemble
+  // 5. assemble (in real time: a slow-motion clip's time line is divided by the time scale k, then the shot's event
+  //    times are mapped back to the clip's media time for replay)
   t = now();
   progress('assemble', 0);
-  const capture = captureFromProbe(probe, options);
+  const k = timeScale;
+  if (k !== 1) addWarn(RC.SLOWMO_CORRECTED);
+  let capture = captureFromProbe(probe, options);
   // container CTS of the whole clip let assembleShot re-index event frames into the clip (frames.js nearestFrame)
   if (probe.timestamps === 'container' && Array.isArray(probe.cts_s) && probe.cts_s.length) capture.timestamps = probe.cts_s;
+  const real = (x) => (Number.isFinite(x) ? x / k : x);
+  if (k !== 1) {
+    capture = {
+      ...capture, nominal_fps: capture.nominal_fps * k, effective_fps: capture.effective_fps * k,
+      timestamps: Array.isArray(capture.timestamps) ? capture.timestamps.map(real) : capture.timestamps,
+      trim_s: Array.isArray(capture.trim_s) ? capture.trim_s.map(real) : capture.trim_s,
+    };
+  }
+  const evReal = events && k !== 1
+    ? Object.fromEntries(Object.entries(events).map(([n, e]) => [n, e && Number.isFinite(e.t_s) ? { ...e, t_s: e.t_s / k } : e]))
+    : events;
+  const bfReal = ballFrames && k !== 1
+    ? { ...ballFrames, times: ballFrames.times.map(real), from_s: real(ballFrames.from_s), to_s: real(ballFrames.to_s), fps: ballFrames.fps * k }
+    : ballFrames;
   let out;
   try {
     out = await assemble({
       capture, calibration: calibrated ? options.calibration : placeholderCalibration(view, W, H), venue: options.venue,
-      club: options.club, handedness, poseSeq, events: events ?? {}, // {} = not detected: placeholder events, no re-detect
-      ballFrames, restBall, audioOnset_t: options.audioOnset_t, ids: options.ids ?? {}, warnings, seed: options.seed ?? 1,
+      club: options.club, handedness, poseSeq: k !== 1 && poseSeq ? scalePoseTime(poseSeq, k) : poseSeq,
+      events: evReal ?? {}, // {} = not detected: placeholder events, no re-detect
+      ballFrames: bfReal, restBall, audioOnset_t: real(options.audioOnset_t), ids: options.ids ?? {}, warnings, seed: options.seed ?? 1,
     });
   } catch (e) {
     if (e && e.code === ERR.CANCELLED) throw e;
@@ -333,6 +369,7 @@ export async function analyzeClip(file, options = {}, deps = {}) {
     throw err;
   }
   if (!calibrated) out = { ...out, shot: uncalibrated(out.shot) };
+  if (k !== 1) out = { ...out, shot: toMediaTime(out.shot, k) };
   timings.assemble = now() - t;
   progress('assemble', 1);
   timings.total = now() - T0;
@@ -350,5 +387,19 @@ export async function analyzeClip(file, options = {}, deps = {}) {
     events,
     events_source: eventsSource,
     probe,
+    time_scale: k,
+    reasons: out.shot?.quality?.warnings ? [...new Set([...out.shot.quality.warnings, ...warnings])] : warnings.slice(),
   };
+}
+
+/** A shot assembled in real time -> event times and the trim span back in the clip's media time (× k). */
+export function toMediaTime(shot, k) {
+  if (!shot || k === 1) return shot;
+  const out = { ...shot };
+  if (shot.events && typeof shot.events === 'object') {
+    out.events = Object.fromEntries(Object.entries(shot.events).map(([n, e]) => [n, e && Number.isFinite(e.t_s) ? { ...e, t_s: e.t_s * k } : e]));
+  }
+  if (shot.capture && Array.isArray(shot.capture.trim_s)) out.capture = { ...shot.capture, trim_s: shot.capture.trim_s.map((x) => x * k) };
+  if (shot.metrics && shot.quality) validateShot(out);
+  return out;
 }

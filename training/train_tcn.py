@@ -126,6 +126,10 @@ def main(argv=None) -> int:
         else:
             ap.add_argument(f"--{k}", type=type(v), default=v)
     args = ap.parse_args(argv)
+    if os.environ.get("RESEARCH") != "1":
+        print("GolfDB research script (CC BY-NC, dev only, ADR 0004): set RESEARCH=1 to run it; its outputs are a "
+              "benchmark report, never a ship gate or a source of constants.", file=sys.stderr)
+        return 2
     cfg = {k: getattr(args, k) for k in DEFAULTS}
     set_seed(cfg["seed"])
     out = RUNS / args.run / f"split{args.split}"

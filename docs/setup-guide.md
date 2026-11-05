@@ -154,3 +154,106 @@ App 會自動降級，`calibration.method` 會記錄用了哪一級：
 2. `club_line` 一支球桿平放沿目標線＋重力：偏航 σ ≈1.3–2°、球速 fit3d ±2–3%。
 3. `ball_only` 只有球＋重力＋目測：偏航 3–5°、fit3d ±3–4%、線性 ±4–7%；身體平面靠身高 ±3–5%。
 4. 選配升級：兩支對齊桿 T 形（σ 0.16°／0.5° @1px／3px）——只有草地或非矩形墊才需要買。
+
+---
+
+## App: practice-flow implementation and contracts (WP-B, for developers)
+
+What the practice screens do, where the numbers come from, and what other packages and the e2e gates can rely on.
+Spec: `docs/PRODUCT-SPEC.md` §2.2, §2.3 (Practice, Venue, Setup, Live), WP-B.
+
+### Screens and files
+
+| screen | file | notes |
+|---|---|---|
+| Onboarding (first launch) | `app/src/ui/onboarding.js` | rendered inside the home root; root gets class `is-onboarding` (main.js hides the tab bar on it) |
+| Practice (home) | `app/src/ui/home.js` | context rows open sheets; `開始練習` calls `controller.startPractice()` synchronously from the click |
+| Venue wizard / list | `app/src/ui/venue.js`, `app/src/ui/venues.js` | `nav.go('venue')` new, `{ venue_id }` edit, `{ list: true }` list |
+| Setup stepper | `app/src/ui/setup.js`, `magnifier.js`, `tripod-diagram.js` | six steps, camera-off state |
+| Live scoreboard | `app/src/ui/live.js` | forced dark (`data-live-theme="dark"` on its root unless the theme is sun) |
+| Pure helpers | `app/src/session/bay.js`, `app/src/calib/checks.js` | numbers and codes only, no prose |
+
+Styles: `app/styles/screens/practice.css` (tokens only). Catalogs: `app/i18n/{zh-Hant,en}/{onboarding,home,venue,setup,calib,live,bay,health,camera}.json`.
+
+### Where the tripod goes (step 1, UX-02)
+
+`tripodPlacement(venue, view)` in `session/bay.js` (world: ball at the origin, +x toward the target, mat near edge at
+y = −ball_edge_m):
+
+| view | phone | distance | height | sideways |
+|---|---|---|---|---|
+| face-on | landscape, 1× | D = B − 0.25 m capped at 2.7 m (CAFCR C2 bay table), else 2.7 m | min(0.84 m, bay limit) | 0.40 m toward the target (0.34 m in a bay < 2.45 m) |
+| DTL | portrait, 1× | 3.25 m behind the ball on the target line | 1.0 m | 0.35 m toward the golfer |
+| high behind | landscape, 1× | 2.875 m behind the ball | 1.7 m | 0 |
+
+The screen shows the distance from the nearest mat edge (what the user measures), the lens height, the sideways move,
+the orientation, and the distance in driver lengths (1.15 m each) as a tape alternative. The ghost frame in step 3 is
+projected from the same numbers, so diagram and ghost agree. Lengths use `settings.units.body` (cm, or ft/in above 0.9 m
+for imperial).
+
+### Setup steps
+
+1. **Tripod**: diagram + numbers, angle picker (segmented, labelled).
+2. **Level**: bubble; auto-advance after 1 s inside ±1.0° pitch / ±0.5° roll. No sensor after 3 s, or motion
+   denied: a notice and "continue without the level" (shots then carry `NO_GRAVITY_REF`).
+3. **Mat corners**: ghost frame on the preview; the picker freezes a frame, 2× loupe, fine adjust (corner 1–4, ±1 px
+   arrows, long-press repeat, ×10, next corner; arrow keys / Shift ×10 / 1–4 / Enter on the focused canvas). After the
+   first solve the focal length locks from 3 refined solves taken automatically 1 s apart (SD ≤ 1 %); otherwise the
+   user can tap again. High-speed mode adds the calibration-clip card.
+4. **Ball**: rest-ball detection, or skip.
+5. **Address**: hold 2 s (manual confirmation; no automatic framing check yet).
+6. **Done**: green → start; amber → start with the notes; red → one plain fix instruction from `fixInstruction()`
+   (most fundamental failing check, with direction and amount) + "start anyway" through a ConfirmSheet. The list of
+   failing checks is a disclosure with `calib.check.*` labels. Pose numbers, RMSE and the C0–C10 timer show only with
+   `settings.dev`. When the preview is very bright (mean luma > 200) the Sun display is suggested once.
+
+Camera denied / busy / missing (from `permissions.camera` and the getUserMedia error name) replaces the screen with a
+recovery state: `camera-retry` (same-click `controller.reopenCamera()`), `camera-import-instead` (ends the session,
+sets high-speed mode, opens Import). Microphone denied is a non-blocking notice.
+
+### Live (R1, V11, ux-m1)
+
+- `attachStream(stream?)`: main.js calls it after `controller.reopenCamera()`; the screen also subscribes to
+  `controller.onStreamChange` when the controller has it, and to `state.cameraInterrupted`. The preview and the whole
+  capture chain (frame tap, segment recorder, onset detector, live loop) move to the new stream; a start that was
+  overtaken tears itself down.
+- In-screen recovery: when the camera stops, the pill turns to error and `live-reopen` re-opens it (same click).
+- Club chip (`live-club`): a sheet of clubs; the choice is written into the live loop's `clipOptions.club`, which the
+  next analysis job reads, and to `controller.setClub()` when present. Diag: `live.next_club`, `live.job_club`.
+- Hero numbers: `settings.live.metrics` filtered to what the live mode measures (`LIVE_MEASURABLE`), `--t-hero`
+  (56 px at 100 % text) in portrait, `clamp(3.5rem, 15vh, 7rem)` in landscape.
+- Voice readout after each shot (`settings.live.voice`), zh-TW or en-US voice.
+- 結束練習 asks with a ConfirmSheet only when the session has shots.
+
+### Contracts other packages use
+
+- `mountVenues(root, app, { header })` from `ui/venues.js` → `{ show(), hide() }` (Settings › Venues).
+- Re-run onboarding (Settings › Help): `app.nav.go('home', { onboarding: true })`.
+- `calibHealth().prompts[]` = `{ id, level, code, params }`; render with `msg(p)` (`code` is `health.prompt.*`).
+- `bayAdvice(B)` = `{ ok, B_m, D_m, h_max_m, h_nominal_m, shift_m, verdict, row }` (`h_max` / `shift` kept as aliases);
+  words in `bay.verdict.<v>`, `bay.body.<v>` (`{D} {h} {shift}`), `bay.short.<v>`.
+- `calib.check.<check>` labels for every `evaluate()` failure; params `{ limit }` (and A's `{ value }`).
+
+### e2e
+
+Gates: `tests/e2e/gates/b-practice.mjs` (`b-onboarding`, `b-camera-denied`, `b-reopen`, `b-setup-steps`,
+`b-live-glance`, `b-home`, `b-checks`). Seams, all through `globalThis.__GSL_E2E__` set before boot:
+
+| seam | effect |
+|---|---|
+| object present | setup shows `btn-skip-setup`; the picker canvas carries `data-ghost` (ghost corners in image px) |
+| `onboarding: true` | an automated browser (`navigator.webdriver`) still shows onboarding; without it onboarding is skipped so the older gates start on the home form |
+| `pose(bitmap, t_s, model, o)` | replaces MediaPipe in live (gate m5's disc stand-in, or b-practice's scripted swing) |
+
+Test ids: `onb-next`, `onb-skip`, `onb-allow`, `onb-mode-live|highspeed`, `onb-no-tripod`, `setup-step[data-step]`,
+`setup-primary`, `setup-skip-level`, `setup-skip-ball`, `setup-tripod`, `setup-fix`, `camera-off[data-kind]`,
+`camera-retry`, `camera-import-instead`, `live-state`, `live-hero`, `live-club`, `live-club-sheet`, `live-end`,
+`live-reopen`, `live-last`, `live-count`, `btn-start-practice`, `nav-import|venue|history|settings|diag|about`,
+`home-venue|view|club|mode|preset`, `home-back-live`, `home-end`, `venue-step[data-step]`, `venue-primary`,
+`venue-row`, `venues-add`.
+
+### iPhone-only checks
+
+Real permission prompt order and the sticky-deny recovery text; tripod diagram against a real bay; hero number
+readable at 2.7 m in sun and in a dim bay; glove taps on the corner fine adjust; speechSynthesis voice in zh-TW and en;
+landscape on notch devices (safe areas); wake lock during live.

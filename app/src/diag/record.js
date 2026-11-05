@@ -3,12 +3,19 @@
 //   record(path, value)    set a dotted path ('gum.actual_fps'); intermediate objects are created; value is cloned
 //   increment(path, n=1)   counter helper (missing or non-number counts as 0); returns the new value
 //   get(path?)             deep copy of the whole tree, or of one path (undefined when absent)
-//   reset()                clear memory and the mirror
+//   reset()                clear memory and the mirror (and the event ring)
+//   logEvent({ kind = 'error', code, where, screen?, detail?, at? })   crash log (PRODUCT-SPEC §4.3): ring of the last
+//                          EVENTS_MAX = 200 entries { at, kind: 'error'|'warn'|'info', code, where, screen, detail },
+//                          persisted in localStorage 'gsl.diag/2' (try/catch); main.js app.errors.report() feeds it
+//   events() -> copy of the ring (oldest first)      clearEvents()
 //
 // The tree is hydrated once from localStorage on first use, so a report taken after a reload still has the
 // numbers measured before it. Everything works without localStorage (private window, Node, blocked storage).
 
 export const STORAGE_KEY = 'gsl.diag/1';
+export const EVENTS_KEY = 'gsl.diag/2';
+export const EVENTS_MAX = 200;
+const KINDS = new Set(['error', 'warn', 'info']);
 const FORBIDDEN = new Set(['__proto__', 'constructor', 'prototype']);
 
 let tree = null;
@@ -101,6 +108,68 @@ export function increment(path, n = 1) {
   return next;
 }
 
+let ring = null;
+
+function loadRing() {
+  if (ring) return ring;
+  ring = [];
+  try {
+    const s = storage();
+    const raw = s && s.getItem(EVENTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed)) ring = parsed.filter((e) => e && typeof e === 'object').slice(-EVENTS_MAX).map(clone);
+  } catch {
+    ring = [];
+  }
+  return ring;
+}
+
+function mirrorRing() {
+  try {
+    const s = storage();
+    if (s) s.setItem(EVENTS_KEY, JSON.stringify(ring));
+  } catch {
+    /* quota or blocked storage: memory copy is still correct */
+  }
+}
+
+const str = (v, n) => (v === null || v === undefined ? null : String(v).slice(0, n));
+
+/** Append one crash-log entry. Never throws. -> the stored entry (or null). */
+export function logEvent(e = {}) {
+  try {
+    const r = loadRing();
+    const entry = {
+      at: typeof e.at === 'string' ? e.at : new Date().toISOString(),
+      kind: KINDS.has(e.kind) ? e.kind : 'error',
+      code: str(e.code ?? 'INTERNAL', 64),
+      where: str(e.where ?? 'app', 80),
+      screen: str(e.screen, 40),
+      detail: str(e.detail ?? '', 500),
+    };
+    r.push(entry);
+    if (r.length > EVENTS_MAX) r.splice(0, r.length - EVENTS_MAX);
+    mirrorRing();
+    return { ...entry };
+  } catch {
+    return null;
+  }
+}
+
+export function events() {
+  return loadRing().map((e) => ({ ...e }));
+}
+
+export function clearEvents() {
+  ring = [];
+  try {
+    const s = storage();
+    if (s) s.removeItem(EVENTS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function reset() {
   tree = {};
   try {
@@ -109,4 +178,5 @@ export function reset() {
   } catch {
     /* ignore */
   }
+  clearEvents();
 }

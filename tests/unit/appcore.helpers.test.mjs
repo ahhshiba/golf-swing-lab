@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createThermalGuard } from '../../app/src/session/thermal.js';
 import { bayAdvice, twoMeasureCheck } from '../../app/src/session/bay.js';
-import { formatMetric, metricRows, failureTexts, CHECK_LABELS, errorText } from '../../app/src/ui/format.js';
+import { formatMetric, metricRows, failureTexts, errorText } from '../../app/src/ui/format.js';
 import { checkMonotonic, nearestIndex } from '../../app/src/ui/replay.js';
 import { recomputeShot } from '../../app/src/ui/shot.js';
 import { buildFilter } from '../../app/src/ui/history.js';
@@ -46,7 +46,10 @@ test('C2 narrow-bay table: B → D, height limit and verdict', () => {
   assert.equal(twoMeasureCheck(1.5, 1.5035).ok, false);
 });
 
-test('results card rows: every metric id, value ± ci95, nulls carry Chinese reasons', () => {
+test('results card rows: every metric id, value ± ci95 in display units, nulls carry localized reasons', async () => {
+  const { initI18n, setLocale } = await import('../../app/src/i18n/index.js');
+  const fsFetch = async (u) => { const p = new URL(String(u)); return fs.existsSync(p) ? { ok: true, status: 200, json: async () => JSON.parse(fs.readFileSync(p, 'utf8')) } : { ok: false, status: 404, json: async () => ({}) }; };
+  await initI18n({ locale: 'zh-Hant', fetchImpl: fsFetch, base: new URL('../../app/i18n/', import.meta.url).href });
   const shot = fx('valid_face_on_240');
   const rows = metricRows(shot.metrics);
   assert.deepEqual(rows.map((r) => r.id), [...METRIC_IDS]);
@@ -55,16 +58,21 @@ test('results card rows: every metric id, value ± ci95, nulls carry Chinese rea
       assert.equal(r.text, '—');
       assert.ok(r.reasons.length > 0, r.id);
       for (const t of r.reasons) assert.match(t, /[一-鿿]/);
-    } else assert.match(r.text, /±/, r.id);
-    assert.ok(r.validityLabel);
+    } else assert.match(r.text, /\d/, r.id); // ± is shown only when the CI is non-zero at display precision (§2.3)
+    assert.ok(r.validityLabel && !/^validity\./.test(r.validityLabel), r.validityLabel);
+    assert.ok(!/^metric\./.test(r.label), r.label);
   }
-  assert.equal(formatMetric({ value: 61.234, unit: 'm/s', ci95: [60.1, 62.3], sigma: null }), '61.2 ± 1.1 m/s');
-  assert.equal(formatMetric({ value: 3.1, unit: 'ratio', ci95: null, sigma: 0.1 }), '3.10 ± 0.20');
+  // SI → display units (§3.3): m/s → mph by default, metric units when asked
+  assert.equal(formatMetric({ value: 61.234, unit: 'm/s', ci95: [60.1, 62.3], sigma: null }, { distance: 'm', speed: 'm/s', body: 'cm', clubLength: 'in', height: 'cm' }), '61.2 ± 1.1 公尺/秒');
+  assert.match(formatMetric({ value: 61.234, unit: 'm/s', ci95: [60.1, 62.3], sigma: null }), /^137\.0 ± 2\.5 英里\/時$/);
   assert.equal(formatMetric({ value: null }), '—');
   assert.ok(metricRows({}).every((r) => r.isNull && r.validity === 'not_computed'));
+  await setLocale('en');
+  for (const r of metricRows(shot.metrics)) for (const x of [r.label, r.validityLabel, ...r.reasons]) assert.ok(!/[一-鿿]/.test(x), x);
+  await setLocale('zh-Hant');
 });
 
-test('every failure evaluate() can report has a Chinese label', () => {
+test('every failure evaluate() can report maps to a calib.check.<id> key with formatted value/limit; errors never show e.message', async () => {
   const names = new Set();
   for (const view of Object.keys(VIEW_LIMITS)) {
     const bad = { yaw_deg: 9, pitch_deg: -9, roll_deg: 9, X_m: 9, Y_m: 9, h_m: 9, D_m: 0.5 };
@@ -75,11 +83,17 @@ test('every failure evaluate() can report has a Chinese label', () => {
     const e2 = evaluate({ view, report: bad, preset: { view: 'other', pose: bad } });
     for (const f of e2.failures) names.add(f.check);
   }
-  for (const n of names) assert.ok(CHECK_LABELS[n], `missing label for ${n}`);
+  assert.ok(names.size > 5);
+  for (const n of names) assert.match(n, /^[A-Za-z][A-Za-z0-9_]*$/, `check id ${n} is usable as a catalog key`);
+  // the line is the calib.check.<id> text (B's catalog); without it t() returns the key, never Chinese prose from here
   const lines = failureTexts({ failures: [{ check: 'rmse_px', value: 3.2, limit: 2 }] });
-  assert.match(lines[0], /重投影誤差太大.*3\.20.*2\.00/);
-  assert.equal(errorText({ code: 'DECODE_FAILED', message: '影片解碼失敗' }), '影片解碼失敗');
-  assert.match(errorText({ code: 'UNSUPPORTED_CODEC', message: 'x' }), /HEVC/);
+  assert.equal(lines.length, 1);
+  const { t: tr } = await import('../../app/src/i18n/index.js');
+  assert.equal(lines[0], tr('calib.check.rmse_px', { value: '3.20', limit: '2.00' }));
+  assert.ok(!/[A-Z]{3,}_/.test(lines[0]), lines[0]);
+  assert.equal(errorText({ code: 'DECODE_FAILED', message: 'secret detail' }).includes('secret'), false);
+  assert.equal(errorText({ code: 'UNSUPPORTED_CODEC', message: 'x' }), '這台裝置無法解碼這個影片格式');
+  assert.equal(errorText({ code: 'NOT_A_CODE_ANYONE_KNOWS', message: 'raw' }), errorText({}));
 });
 
 test('event correction: non-monotonic frames are rejected, a valid move bumps the revision and keeps history', () => {
@@ -88,7 +102,9 @@ test('event correction: non-monotonic frames are rejected, a valid move bumps th
   ev.top = { ...ev.top, frame: ev.mid_downswing.frame + 5, source: 'manual' };
   const mono = checkMonotonic(ev);
   assert.equal(mono.ok, false);
-  assert.match(mono.message, /上桿頂點/);
+  assert.equal(mono.code, 'replay.error.order');
+  assert.equal(mono.params.event, 'mid_downswing');
+  assert.equal(mono.params.before, 'top');
   const r = recomputeShot(shot, ev);
   assert.equal(r.ok, false);
   const ok = JSON.parse(JSON.stringify(shot.events));

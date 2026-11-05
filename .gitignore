@@ -19,3 +19,4 @@ app/models/event-tcn-v1.*
 tests/fixtures/event-tcn-v1.golden.json
 training/vendor/golfdb/*
 !training/vendor/golfdb/LICENSE-NOTICE.txt
+tests/e2e/.shots/

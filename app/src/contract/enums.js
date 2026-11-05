@@ -9,7 +9,7 @@ export const SCHEMA_ID = 'golf-shot/1';
 /** Swing views (re-exported from geom so there is one list). */
 export { VIEWS };
 
-/** The 8 GolfDB swing events, in order (frames must be non-decreasing along this order). */
+/** The 8 swing events, in order (frames must be non-decreasing along this order). */
 export const EVENTS = Object.freeze([
   'address', 'toe_up', 'mid_backswing', 'top', 'mid_downswing', 'impact', 'mid_follow_through', 'finish',
 ]);

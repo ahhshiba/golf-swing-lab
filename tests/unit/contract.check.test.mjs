@@ -64,7 +64,7 @@ test('node scripts/check_contract.mjs exits 0', () => {
 async function withRoot(mutate) {
   const dir = mkdtempSync(join(tmpdir(), 'gsl-contract-'));
   try {
-    for (const p of ['package.json', 'app/src/contract', 'app/src/geom', 'schema', 'tests/fixtures/shots', 'scripts/check_contract.mjs']) {
+    for (const p of ['package.json', 'app/src/contract', 'app/src/geom', 'app/i18n/zh-Hant/reason.json', 'schema', 'tests/fixtures/shots', 'scripts/check_contract.mjs']) {
       mkdirSync(dirname(join(dir, p)), { recursive: true });
       cpSync(join(ROOT, p), join(dir, p), { recursive: true });
     }
@@ -114,14 +114,29 @@ test('reason-codes.js itself may name the codes', async () => {
   assert.equal(other.problems.length, 1);
 });
 
-test('a code without a Traditional Chinese description fails', async () => {
-  const r = await withRoot((d) => edit(d, 'app/src/contract/reason-codes.js', (t) => t.replace("NOT_IMPLEMENTED: '這個版本還沒有提供這個指標'", "NOT_IMPLEMENTED: ''")));
+test('a code without a Traditional Chinese description fails (zh-Hant reason.json <CODE>.long)', async () => {
+  const R = 'app/i18n/zh-Hant/reason.json';
+  const setLong = (v) => (t) => JSON.stringify({ ...JSON.parse(t), 'NOT_IMPLEMENTED.long': v }, null, 2);
+  const r = await withRoot((d) => edit(d, R, setLong('')));
   assert.ok(r.problems.some((p) => p.includes('NOT_IMPLEMENTED has no description')), r.problems.join('\n'));
   assert.ok(r.status >= 1);
-  const e = await withRoot((d) => edit(d, 'app/src/contract/reason-codes.js', (t) => t.replace("NOT_IMPLEMENTED: '這個版本還沒有提供這個指標'", "NOT_IMPLEMENTED: 'not available yet'")));
+  const m = await withRoot((d) => edit(d, R, (t) => { const o = JSON.parse(t); delete o['NOT_IMPLEMENTED.long']; return JSON.stringify(o); }));
+  assert.ok(m.problems.some((p) => p.includes('NOT_IMPLEMENTED has no description')), m.problems.join('\n'));
+  const e = await withRoot((d) => edit(d, R, setLong('not available yet')));
   assert.ok(e.problems.some((p) => p.includes('NOT_IMPLEMENTED description is not Chinese')), e.problems.join('\n'));
-  const s = await withRoot((d) => edit(d, 'app/src/contract/reason-codes.js', (t) => t.replace('這個版本還沒有提供這個指標', '这个版本还没有提供这个指标')));
+  const s = await withRoot((d) => edit(d, R, (t) => t.replace('這個版本還沒有提供這個指標', '这个版本还没有提供这个指标')));
   assert.ok(s.problems.some((p) => p.includes('Simplified-only characters')), s.problems.join('\n'));
+  const j = await withRoot((d) => put(d, R, '{ not json'));
+  assert.ok(j.problems.some((p) => p.includes('reason.json is missing or not valid JSON')), j.problems.join('\n'));
+});
+
+test('reason-codes.js holds codes only: prose values or a describe() export fail', async () => {
+  const p = await withRoot((d) => edit(d, 'app/src/contract/reason-codes.js', (t) => t.replace(
+    'export const REASON_CODES = Object.freeze(Object.fromEntries(REASON_CODE_LIST.map((k) => [k, k])));',
+    "export const REASON_CODES = Object.freeze({ ...Object.fromEntries(REASON_CODE_LIST.map((k) => [k, k])), NOT_IMPLEMENTED: 'prose' });")));
+  assert.ok(p.problems.some((x) => x.includes('REASON_CODES.NOT_IMPLEMENTED must equal')), p.problems.join('\n'));
+  const d2 = await withRoot((d) => edit(d, 'app/src/contract/reason-codes.js', (t) => `${t}\nexport function describe() { return null; }\n`));
+  assert.ok(d2.problems.some((x) => x.includes('describe() must not exist')), d2.problems.join('\n'));
 });
 
 test('schema problems: invalid JSON, a metric id twice, a missing id, a drifting enum', async () => {

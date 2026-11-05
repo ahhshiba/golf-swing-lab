@@ -1,5 +1,6 @@
-// Licence switch (P9 / R2): build.mjs --no-bundled-model leaves app/models/event-tcn-v1.* out of dist/ and the precache,
-// passes the budgets and check-sw; the default build still bundles the model; the app's bundled-model probe reads
+// No GolfDB in the product (PRODUCT-SPEC §7.1, EV-6): the DEFAULT build leaves app/models/event-tcn-v1.* out of dist/
+// and the precache, passes the budgets and check-sw; --include-golfdb-model is a dev-research build that bundles the
+// model and records dev_research: true (deploy_pages.sh refuses it); the app's bundled-model probe reads
 // the build output; check_model_card.mjs passes on the repository model; deploy_pages.sh refuses without approval
 // and its --dry-run builds + lists without writing git objects.
 import test from 'node:test';
@@ -19,8 +20,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), `gsl-${p}-`));
 const outNo = tmp('nomodel');
 const outYes = tmp('withmodel');
-const rNo = build({ out: outNo, noBundledModel: true });
-const rYes = build({ out: outYes });
+const rNo = build({ out: outNo });
+const rYes = build({ out: outYes, includeGolfdbModel: true });
 const dirs = [outNo, outYes];
 test.after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
 
@@ -31,13 +32,19 @@ const fsFetch = (root) => async (url) => {
   return { ok: true, status: 200, json: async () => JSON.parse(txt) };
 };
 
-test('--no-bundled-model: no event-model file in dist/, sw manifest or precache; budgets hold', { skip: NO_MODEL_SKIP }, () => {
+test('default build: no event-model file in dist/, sw manifest or precache; budgets hold; not a research build', { skip: NO_MODEL_SKIP }, () => {
   assert.deepEqual(rNo.problems, []);
   assert.ok(rNo.shellBytes <= BUDGETS.shell_bytes && rNo.precacheBytes <= BUDGETS.precache_bytes);
   for (const f of EVENT_MODEL_FILES) assert.ok(!fs.existsSync(path.join(outNo, f)), f);
   assert.deepEqual([...rNo.excluded].sort(), [...EVENT_MODEL_FILES].sort());
   const man = JSON.parse(fs.readFileSync(path.join(outNo, 'precache-manifest.json'), 'utf8'));
   assert.equal(man.bundled_event_model, false);
+  assert.equal(man.dev_research, false);
+  assert.equal(rNo.devResearch, false);
+  // the legacy flag is the default now: same output
+  const outLegacy = tmp('legacy');
+  dirs.push(outLegacy);
+  assert.equal(build({ out: outLegacy, noBundledModel: true }).version, rNo.version);
   const sw = fs.readFileSync(path.join(outNo, 'sw.js'), 'utf8');
   assert.ok(!sw.includes('event-tcn-v1'), 'sw.js must not list the model');
   assert.ok(![...man.shell.map((e) => e.url), ...man.assets.map((a) => a.url)].some((u) => EVENT_MODEL_RE.test(u)));
@@ -46,8 +53,11 @@ test('--no-bundled-model: no event-model file in dist/, sw manifest or precache;
   assert.notEqual(rNo.version, rYes.version);
 });
 
-test('default build is unchanged in content: the model is bundled and precached', { skip: NO_MODEL_SKIP }, () => {
+test('--include-golfdb-model (dev research): the model is bundled and precached, dev_research is recorded', { skip: NO_MODEL_SKIP }, () => {
   assert.equal(rYes.bundledEventModel, true);
+  assert.equal(rYes.devResearch, true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(outYes, 'precache-manifest.json'), 'utf8')).dev_research, true);
+  assert.match(fs.readFileSync(path.join(outYes, 'src/version.js'), 'utf8'), /DEV_RESEARCH = true/);
   assert.deepEqual(rYes.excluded, []);
   for (const f of EVENT_MODEL_FILES) {
     assert.ok(fs.existsSync(path.join(outYes, f)), f);
@@ -62,7 +72,7 @@ test('check-sw passes on both variants; a no-model deploy is compared like with 
     const res = checkSw({ dist: d, last: noLast, pkg });
     assert.deepEqual(res.filter((r) => !r.ok), [], d);
   }
-  // last deploy = this no-model build; a default local build with the same app/ must not demand a semver bump
+  // last deploy = this no-model build; a research build of the same app/ must not demand a semver bump
   const last = path.join(outNo, 'last-deploy.json');
   fs.writeFileSync(last, JSON.stringify({ version: rNo.version, bundled_event_model: false }));
   const res = checkSw({ dist: outYes, last, pkg });
@@ -70,7 +80,7 @@ test('check-sw passes on both variants; a no-model deploy is compared like with 
   assert.ok(res.some((r) => /no-bundled-model/.test(r.name)));
 });
 
-test('the app boot-time probe sees the model in the default build and not in the --no-bundled-model build', { skip: NO_MODEL_SKIP }, async () => {
+test('the app boot-time probe sees the model in the research build and not in the default build', { skip: NO_MODEL_SKIP }, async () => {
   assert.equal(await bundledModelAvailable(fsFetch(outYes)), true);
   assert.equal(await bundledModelAvailable(fsFetch(outNo)), false);
   // main.js loads without a bundled model: it never imports the model files, only session/models.js
@@ -147,4 +157,5 @@ test('deploy_pages.sh --dry-run builds without the model, lists the files and wr
   assert.equal(r2.status, 0, r2.stderr);
   assert.match(r2.stdout, /models\/event-tcn-v1\.bin/);
   assert.match(r2.stdout, /would be REFUSED now:[\s\S]*work tree is not clean/);
+  assert.match(r2.stdout, /would be REFUSED now:[\s\S]*dev-research build/);
 });

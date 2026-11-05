@@ -1,0 +1,8 @@
+{
+  "face_on": "正面",
+  "dtl": "後方",
+  "high_behind": "高斜角後方",
+  "face_on.hint": "手機在你正前方，對著胸口",
+  "dtl.hint": "手機在你後方，沿著目標線",
+  "high_behind.hint": "手機在後方較高處，看得到球的左右方向"
+}

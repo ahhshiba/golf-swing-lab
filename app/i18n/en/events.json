@@ -1,0 +1,18 @@
+{
+  "source.rules": "Built-in rules",
+  "source.tcn": "Your event model",
+  "source.rules_fallback": "Built-in rules ({reason})",
+  "fallback.tcn_no_card": "the model has no model card",
+  "fallback.tcn_card_third_party": "the model's training data cannot be used",
+  "fallback.tcn_owner_gate": "the model has not passed your held-out threshold yet",
+  "fallback.tcn_view": "the model does not cover this angle",
+  "fallback.tcn_low_visibility": "the golfer is not clear enough in the video",
+  "fallback.tcn_low_impact_p": "the model is unsure about the impact time",
+  "fallback.tcn_not_used": "the model gave no result",
+  "fallback.tcn_output_invalid": "the model output was invalid",
+  "fallback.tcn_error": "the model failed to run",
+  "time_scale.corrected": "Slow-motion video: the {k}× slowed time line was corrected back to real time.",
+  "time_scale.corrected._context": "Shown on a shot analysed from a slow-motion export; {k} is 4 or 8.",
+  "conf.low": "This event time is uncertain; you can adjust it by hand.",
+  "conf.ok": "Event time confidence: {pct}"
+}

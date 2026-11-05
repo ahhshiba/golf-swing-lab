@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 // tests/e2e/run.mjs - browser e2e runner (verify.sh stage browser-e2e, RUN_BROWSER_E2E=1).
 //
-//   node tests/e2e/run.mjs [--only m1,screens,m2,m2-ui,m2-shot,m5,m6,m6-ui,real-pose,m1@webkit,...] [--dist dist] [--no-fixtures]
+//   node tests/e2e/run.mjs [--only m1,screens,m2,m2-ui,m2-shot,m5,m6,m6-ui,real-pose,m1@webkit,a-*,...] [--dist dist]
+//                          [--port N] [--no-fixtures] [--list]
+//
+// Package gates are auto-discovered: every tests/e2e/gates/<pkg>-<name>.mjs exporting `meta` ({ id, title, timeoutMs })
+// + `run(ctx)`, and/or `gates` (an array of { meta, run }), is added after the built-in gates (sorted by file name).
+// --only takes ids or prefixes ending in '*' (e.g. --only 'b-*'). Env: GSL_E2E_DIST (dist dir, default dist/),
+// GSL_E2E_PORT (fixed server port, default free), GSL_E2E_LOCALE (default browser locale, default zh-TW),
+// GSL_SHOTS_DIR (screenshots written by checks.screenshotSet). ctx = { baseUrl, dist, browser? }.
 //
 // Serves dist/ with scripts/devserve.py (127.0.0.1, free port, prefix /golf-swing-lab/) and runs each gate in Chromium.
 // Gates m1, screens, m2 and real-pose also run in Playwright's WebKit (the Safari proxy, ids <gate>@webkit); where
@@ -18,31 +25,63 @@ import * as m5 from './m5.mjs';
 import * as m6 from './m6.mjs';
 import * as screens from './screens.mjs';
 import * as realpose from './realpose.mjs';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 const onWebkit = (m) => ({ meta: { ...m.meta, id: `${m.meta.id}@webkit`, title: `${m.meta.title} [WebKit]` }, run: (ctx) => m.run({ ...ctx, browser: 'webkit' }) });
-const GATES = [
+const BUILTIN = [
   ...[m1, screens, m2, m2.ui, screens.shot, m5, m6, m6.ui, realpose].map((m) => ({ meta: m.meta, run: m.run })),
   ...[m1, screens, m2, realpose].map(onWebkit),
 ];
+const GATES_DIR = path.join(ROOT, 'tests', 'e2e', 'gates');
+
+/** tests/e2e/gates/<pkg>-<name>.mjs → [{ meta, run, file }]; a malformed module is itself a failing gate. */
+export async function discoverGates(dir = GATES_DIR) {
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const f of fs.readdirSync(dir).filter((x) => /^[a-f]-[\w-]+\.mjs$/.test(x)).sort()) {
+    try {
+      const m = await import(pathToFileURL(path.join(dir, f)).href);
+      const list = [...(m.meta && m.run ? [{ meta: m.meta, run: m.run }] : []), ...(Array.isArray(m.gates) ? m.gates : [])];
+      if (!list.length) throw new Error('exports neither meta+run nor gates[]');
+      for (const g of list) {
+        if (!g?.meta?.id || typeof g.run !== 'function') throw new Error('a gate needs meta.id and run()');
+        out.push({ meta: { timeoutMs: 120000, title: g.meta.id, ...g.meta }, run: g.run, file: f });
+      }
+    } catch (e) {
+      const id = f.replace(/\.mjs$/, '');
+      out.push({ meta: { id, title: `gate module ${f}`, timeoutMs: 1000 }, run: async () => { throw new Error(`${f}: ${e.message}`); }, file: f });
+    }
+  }
+  return out;
+}
 
 function timeout(p, ms, id) {
   let t;
   return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`gate ${id} timed out after ${ms} ms`)), ms); })]).finally(() => clearTimeout(t));
 }
 
+const selects = (pattern, id) => (pattern.endsWith('*') ? id.startsWith(pattern.slice(0, -1)) : id === pattern);
+
 async function main(argv) {
   let only = null;
-  let dist = path.join(ROOT, 'dist');
+  let dist = process.env.GSL_E2E_DIST ? path.resolve(process.env.GSL_E2E_DIST) : path.join(ROOT, 'dist');
   let fixtures = true;
+  let port = null;
+  let listOnly = false;
+  const GATES = [...BUILTIN, ...(await discoverGates())];
   for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--only' && argv[i + 1]) only = argv[++i].split(',');
+    if (argv[i] === '--only' && argv[i + 1]) only = argv[++i].split(',').filter(Boolean);
     else if (argv[i] === '--dist' && argv[i + 1]) dist = path.resolve(argv[++i]);
+    else if (argv[i] === '--port' && argv[i + 1]) port = Number(argv[++i]);
     else if (argv[i] === '--no-fixtures') fixtures = false;
-    else { console.error(`usage: run.mjs [--only ${GATES.map((g) => g.meta.id).join(',')}] [--dist dir] [--no-fixtures]`); return 64; }
+    else if (argv[i] === '--list') listOnly = true;
+    else { console.error(`usage: run.mjs [--only ${GATES.map((g) => g.meta.id).join(',')}] [--dist dir] [--port N] [--no-fixtures] [--list]`); return 64; }
   }
   const ids = GATES.map((g) => g.meta.id);
-  if (only && only.some((o) => !ids.includes(o))) { console.error(`unknown gate in --only (known: ${ids.join(', ')})`); return 64; }
-  const gates = GATES.filter((g) => !only || only.includes(g.meta.id));
+  if (new Set(ids).size !== ids.length) { console.error(`duplicate gate ids: ${ids.filter((x, i) => ids.indexOf(x) !== i).join(', ')}`); return 64; }
+  if (only && only.some((o) => !ids.some((id) => selects(o, id)))) { console.error(`unknown gate in --only (known: ${ids.join(', ')})`); return 64; }
+  const gates = GATES.filter((g) => !only || only.some((o) => selects(o, g.meta.id)));
+  if (listOnly) { for (const g of gates) console.log(`${g.meta.id}\t${g.meta.title}${g.file ? `\t(${g.file})` : ''}`); return 0; }
 
   if (!fs.existsSync(path.join(dist, 'index.html'))) {
     const build = path.join(ROOT, 'scripts', 'build.mjs');
@@ -74,7 +113,7 @@ async function main(argv) {
 
   let server;
   try {
-    server = await startServer(dist);
+    server = await startServer(dist, { port: port ?? undefined });
   } catch (e) {
     console.log(`FAIL e2e: dev server did not start: ${e.message}`);
     return 1;
@@ -102,4 +141,6 @@ async function main(argv) {
   return Math.min(counts.FAIL, 255);
 }
 
-main(process.argv).then((c) => { process.exitCode = c; }, (e) => { console.error(e); process.exitCode = 1; });
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main(process.argv).then((c) => { process.exitCode = c; }, (e) => { console.error(e); process.exitCode = 1; });
+}

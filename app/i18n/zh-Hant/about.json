@@ -1,0 +1,18 @@
+{
+  "tagline": "離線的高爾夫揮桿與球飛行分析，個人練習用。",
+  "local": "所有資料只存在這支手機上：沒有帳號、沒有伺服器。",
+  "version": "版本",
+  "version.unknown": "讀取不到版本資訊",
+  "version.format": "{semver} · build {build}",
+  "events.rules": "揮桿階段：自動偵測（規則式）",
+  "events.owner": "揮桿階段：自動偵測（以你自己的揮桿訓練）",
+  "support": "支援",
+  "support.body": "問題與建議請到 GitHub 回報。點下去會用瀏覽器開啟，App 本身不會送出任何資料。",
+  "support.link": "在 GitHub 回報問題",
+  "honest.title": "誠實的數字",
+  "privacy.row": "隱私",
+  "licences.row": "開放原始碼授權",
+  "help.row": "說明與常見問題",
+  "support.url": "https://github.com/ahhshiba/golf-swing-lab/issues",
+  "support.url._context": "Plain link the user taps (PRODUCT-SPEC §10). The app never requests it."
+}

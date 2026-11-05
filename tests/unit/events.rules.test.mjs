@@ -4,8 +4,9 @@
 // frame in that view's nominal framing): it is guarded at its measured level and reported as an open issue.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectEvents, EVENTS, EVENT_CONF_MIN } from '../../app/src/events/rules.js';
-import { synthSwing } from '../synth/swing.js';
+import { detectEvents, EVENTS, EVENT_CONF_MIN, CONF_FEATURES } from '../../app/src/events/rules.js';
+import { detectTimeScaled } from '../../app/src/events/timescale.js';
+import { synthSwing, scoreStress, formatStressRow, STRESS_MODES } from '../synth/swing.js';
 
 const KEY = ['address', 'top', 'impact', 'finish'];
 const N = 40;
@@ -88,4 +89,74 @@ test('confidence is high on clean detections (consumers flag conf < EVENT_CONF_M
   const s = synthSwing({ seed: 6, view: 'face_on', fps: 60 });
   const ev = detectEvents(s.poseSeq, { view: 'face_on' });
   for (const e of KEY) assert.ok(ev[e].conf >= EVENT_CONF_MIN, `${e} conf ${ev[e].conf}`);
+});
+
+// ---- PRODUCT-SPEC §7.3 synthetic stress suite: 3 views × 8 modes × 40 seeds at 60 and 240 Hz, through the same
+// time-scale search the clip pipeline uses. Gates per view (pooled over the 8 modes and both rates; high_behind
+// relaxed by 10 pp): swing found ≥ 98 %, address / top / impact within 2 frames @60 Hz ≥ 95 %, finish within 4 frames
+// ≥ 90 % (short_tail and finish_relax included), tempo ±0.3 ≥ 95 %.
+export const STRESS_GATES = Object.freeze({ found: 0.98, address: 0.95, top: 0.95, impact: 0.95, finish: 0.90, tempo: 0.95 });
+const RELAX = { high_behind: 0.10 };
+// The modes that failed with the rules before this round (audit events/stress.txt, re-measured with this suite on the
+// rules of commit 86cea1c): each must now pass the same thresholds on its own, so a regression there is visible.
+export const BEFORE = Object.freeze({
+  'slowmo_x8 found': { face_on: [0, 0], dtl: [0, 0], high_behind: [0.03, 0.03] },
+  'short_tail finish': { face_on: [0.05, 0], dtl: [0.05, 0.05], high_behind: [0.15, 0.23] },
+  'finish_relax finish': { face_on: [0.08, 0], dtl: [0.05, 0.05], high_behind: [0.83, 0.90] },
+  'high_behind address': { baseline: [0.78, 0.60], waggle: [0.53, 0.57], forward_press: [0, 0.05], low_visibility: [0.75, 0.63] },
+  'forward_press address': { face_on: [0, 0], dtl: [0.23, 0.10], high_behind: [0, 0.05] },
+});
+
+const detectStress = (st) => detectTimeScaled(st.poseSeq, { view: st.swing.view, handedness: st.swing.handedness },
+  { container_fps: st.container_fps, duration_s: st.duration_s });
+
+test('§7.3 stress suite: 3 views × 8 modes × 40 seeds at 60 / 240 Hz meet the per-view gates', { timeout: 600000 }, () => {
+  const rows = scoreStress(detectStress, { modes: STRESS_MODES, rates: [60, 240], seeds: 40 });
+  for (const r of rows) console.log(formatStressRow(r));
+  const keys = Object.keys(STRESS_GATES);
+  const fails = [];
+  for (const view of ['face_on', 'dtl', 'high_behind']) {
+    const vr = rows.filter((r) => r.view === view);
+    assert.equal(vr.length, STRESS_MODES.length * 2);
+    const pooled = Object.fromEntries(keys.map((k) => [k, vr.reduce((s, r) => s + r[k], 0) / vr.length]));
+    console.log(`${view} pooled: ${keys.map((k) => `${k} ${(100 * pooled[k]).toFixed(1)}%`).join(', ')}`);
+    for (const k of keys) {
+      const thr = STRESS_GATES[k] - (RELAX[view] ?? 0);
+      if (!(pooled[k] >= thr - 1e-9)) fails.push(`${view} ${k} ${(100 * pooled[k]).toFixed(1)}% < ${(100 * thr).toFixed(0)}%`);
+    }
+  }
+  // the formerly failing modes, each on its own
+  const cell = (view, mode, fps) => rows.find((r) => r.view === view && r.mode === mode && r.fps === fps);
+  const check = (view, mode, key) => {
+    for (const fps of [60, 240]) {
+      const thr = STRESS_GATES[key] - (RELAX[view] ?? 0);
+      const v = cell(view, mode, fps)[key];
+      if (!(v >= thr - 1e-9)) fails.push(`${view} ${mode} ${fps} Hz ${key} ${(100 * v).toFixed(0)}% < ${(100 * thr).toFixed(0)}%`);
+    }
+  };
+  for (const view of ['face_on', 'dtl', 'high_behind']) {
+    check(view, 'slowmo_x8', 'found');
+    check(view, 'short_tail', 'finish');
+    check(view, 'finish_relax', 'finish');
+  }
+  for (const mode of ['baseline', 'waggle', 'forward_press', 'low_visibility']) check('high_behind', mode, 'address');
+  for (const [what, by] of Object.entries(BEFORE)) {
+    const [a, b] = what.split(' ');
+    const now = Object.entries(by).map(([x, before]) => {
+      const [view, mode] = a === 'high_behind' ? ['high_behind', x] : [x, a];
+      return `${x} ${before.map((v) => `${(100 * v).toFixed(0)}%`).join('/')} -> ${[60, 240].map((f) => `${(100 * cell(view, mode, f)[b]).toFixed(0)}%`).join('/')}`;
+    });
+    console.log(`before -> now (60/240 Hz) ${what}: ${now.join(', ')}`);
+  }
+  assert.deepEqual(fails, []);
+});
+
+test('confidence: toe_up is no longer pinned below 0.5 on clean swings; calibrated conf stays in [0.02, 0.98]', () => {
+  for (const view of ['face_on', 'dtl']) {
+    const s = synthSwing({ seed: 9, view, fps: 60 });
+    const ev = detectEvents(s.poseSeq, { view });
+    assert.ok(ev.toe_up.conf >= EVENT_CONF_MIN, `${view} toe_up conf ${ev.toe_up.conf}`);
+    for (const e of EVENTS) assert.ok(ev[e].conf >= 0.02 && ev[e].conf <= 0.98, `${e} ${ev[e].conf}`);
+    assert.equal(ev.diag.conf_features.address.length, CONF_FEATURES.length);
+  }
 });

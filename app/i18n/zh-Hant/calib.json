@@ -1,0 +1,23 @@
+{
+  "check.abs_yaw_deg": "手機左右轉向偏了",
+  "check.abs_pitch_deg": "鏡頭上下傾斜",
+  "check.abs_roll_deg": "手機歪了",
+  "check.abs_Y_m": "腳架離球線太遠（要在 {limit} 以內）",
+  "check.min_D_m": "離球太近：至少要 {limit}，避免被球桿打到",
+  "check.preset_view": "機位是另一個角度的",
+  "check.rel_yaw_deg": "轉向和上次的機位不同",
+  "check.rel_pitch_deg": "傾斜和上次的機位不同",
+  "check.rel_roll_deg": "歪斜和上次的機位不同",
+  "check.rel_D_m": "距離和上次的機位不同",
+  "check.rel_X_m": "前後位置和上次的機位不同",
+  "check.rel_Y_m": "左右位置和上次的機位不同",
+  "check.rel_h_m": "高度和上次的機位不同",
+  "check.rmse_px": "四個角點得不夠準",
+  "check.edge_residual_px": "墊子邊線對不齊",
+  "check.f_format": "鏡頭和上次校正的不同",
+  "check.ghost_px": "墊子沒對準虛線框",
+  "check.corners_in_frame": "墊子太靠近畫面邊緣",
+  "check.ball_width": "球的大小和預期不同",
+  "check.ball_min_px": "球在畫面上太小",
+  "check.frames_budget": "球飛過畫面的時間偏短（提醒）"
+}

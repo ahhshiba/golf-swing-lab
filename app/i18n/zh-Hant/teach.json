@@ -1,0 +1,23 @@
+{
+  "accept": "正確",
+  "prompt": "第 {k} / 8 個：{event}。偵測對了就按「正確」。",
+  "adjust_hint": "不對的話，用 ◀ ▶ 找到正確的一幀，按「設為這一幀」。",
+  "all_done": "8 個時間點都確認了",
+  "all_done_short": "已全部確認",
+  "saved_next": "已儲存，下一桿",
+  "skip": "略過這一桿",
+  "shot_n": "第 {k} 桿（共 {n} 桿待標註）",
+  "progress": "已標註 {done} / {target} 桿",
+  "progress_label": "標註進度",
+  "intro.title": "這是做什麼的？",
+  "intro.body": "揮桿時間點（準備、上桿頂點、擊球…）目前用規則自動偵測。你確認或修正自己的揮桿，累積 20 桿以上，就能用你的揮桿訓練出更準的偵測器。",
+  "intro.privacy": "標註只存在這支手機；匯出的檔案只有姿勢與時間點，沒有影片。",
+  "empty.none": "沒有可標註的揮桿",
+  "empty.done": "有影片的揮桿都標完了",
+  "empty.body": "只有保存了影片的揮桿可以標註。多練幾球再回來。",
+  "export.title": "訓練集",
+  "export.hint": "把標註和姿勢資料存成一個檔案，用來訓練偵測器。",
+  "export.button": "匯出訓練集",
+  "export.none": "還沒有標註",
+  "export.empty": "還沒有可以匯出的標註"
+}

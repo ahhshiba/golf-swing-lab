@@ -1,13 +1,21 @@
-// ui/magnifier.js — mat-corner picker on a frozen frame (CAFCR C3 C5 / P1): tap a corner, a 4x magnifier loupe
-// appears in the opposite top corner, drag to refine, lift to set. Corners in source-image pixels, ordered
-// [tn, ln, lf, tf] (interfaces.md §2). Optional sub-pixel refinement with calib/mat.js refineCorners.
-
+// ui/magnifier.js — mat-corner picker on a frozen frame (setup step 3; UX-07, a11y_i18n-m1, A11Y-6): tap a corner,
+// a 2× loupe shows it in the opposite top corner, drag to refine; then a fine-adjust row moves the selected corner
+// by ±1 px (×10 toggle, long-press repeats), 下一角 selects the next one, and the arrow keys do the same while the
+// canvas has focus. Corners in source-image pixels, ordered [tn, ln, lf, tf] (interfaces.md §2). Optional sub-pixel
+// refinement with calib/mat.js refineCorners.
+//
+//   createCornerPicker({ onChange(corners, info), ghost?, doc? }) ->
+//     { el, setFrame(canvas), setGhost(corners|null), reset(), corners(), setCorners(cs), refine() -> result|null,
+//       frame(), select(i), selected(), nudge(dx, dy), edgeResidual() }
 import { h } from './dom.js';
+import { icon } from './components.js';
+import { t } from '../i18n/index.js';
 import { refineCorners } from '../calib/mat.js';
 
-export const CORNER_LABELS = Object.freeze(['後側・近端角（tn）', '目標側・近端角（ln）', '目標側・遠端角（lf）', '後側・遠端角（tf）']);
-const ZOOM = 4;
+const ZOOM = 2; // loupe CSS px per source-image px (the loupe canvas has 2 backing px per CSS px)
 const LOUPE_CSS = 132;
+const REPEAT_DELAY_MS = 400;
+const REPEAT_EVERY_MS = 70;
 
 /** Draw any CanvasImageSource into a new W×H canvas. */
 export function snapshot(source, W, H) {
@@ -27,26 +35,46 @@ export function grayOf(canvas) {
   return { data, W, H };
 }
 
-/**
- * createCornerPicker({ onChange(corners, info), ghost?: [[u,v]×4] }) ->
- *   { el, setFrame(canvas), setGhost(corners|null), reset(), corners(), refine() -> result|null, frame() }
- */
 export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
   let frame = null; // source canvas (W×H)
   let corners = [null, null, null, null];
-  let active = -1;
+  let active = -1; // corner being dragged
+  let sel = 0; // corner the fine-adjust row moves
+  let big = false; // ×10
   let ghostPts = ghost;
   let edge = null;
-  const view = h('canvas.picker-canvas', { 'aria-label': '點選墊子四角' });
-  const loupe = h('canvas.loupe', { width: LOUPE_CSS * 2, height: LOUPE_CSS * 2, hidden: true });
-  const prompt = h('p.picker-prompt', '');
-  const el = h('div.picker', {}, h('div.picker-stage', {}, view, loupe), prompt);
+  const promptId = `picker-prompt-${Math.random().toString(36).slice(2, 8)}`;
+  const view = h('canvas.picker-canvas', { tabindex: '0', role: 'application', 'aria-label': t('setup.picker.canvas'), 'aria-describedby': promptId });
+  const loupe = h('canvas.loupe', { width: LOUPE_CSS * 2, height: LOUPE_CSS * 2, hidden: true, 'aria-hidden': 'true' });
+  const prompt = h('p.picker-prompt', { id: promptId, 'aria-live': 'polite' }, '');
+  const cornerBtns = [0, 1, 2, 3].map((i) => h('button.corner-chip', { type: 'button', 'data-corner': String(i), 'aria-pressed': 'false', 'aria-label': t('setup.picker.corner_select', { n: i + 1, name: t(`setup.corner.${i}`) }), onclick: () => api.select(i) }, String(i + 1)));
+  const arrow = (dir, dx, dy) => {
+    const b = h('button.nudge', { type: 'button', 'data-dir': dir, 'aria-label': t(`setup.picker.nudge_${dir}`) }, icon(dir === 'left' ? 'chevron-left' : dir === 'right' ? 'chevron-right' : 'chevron-down'));
+    if (dir === 'up') b.classList.add('flip');
+    let hold = 0;
+    let rep = 0;
+    const stop = () => { clearTimeout(hold); clearInterval(rep); hold = 0; rep = 0; };
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); api.nudge(dx, dy); stop(); hold = setTimeout(() => { rep = setInterval(() => api.nudge(dx, dy), REPEAT_EVERY_MS); }, REPEAT_DELAY_MS); });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, stop);
+    b.addEventListener('click', (e) => { if (e.detail === 0) api.nudge(dx, dy); }); // keyboard / switch access
+    return b;
+  };
+  const x10 = h('button.nudge-x10', { type: 'button', 'aria-pressed': 'false', onclick: () => { big = !big; x10.setAttribute('aria-pressed', big ? 'true' : 'false'); } }, t('setup.picker.x10'));
+  const nextBtn = h('button.nudge-next', { type: 'button', onclick: () => api.select((sel + 1) % 4) }, t('setup.picker.next_corner'));
+  const fine = h('div.fine-adjust', { role: 'group', 'aria-label': t('setup.picker.fine') },
+    h('div.corner-chips', {}, cornerBtns),
+    h('div.nudge-pad', {}, arrow('left', -1, 0), arrow('up', 0, -1), arrow('down', 0, 1), arrow('right', 1, 0)),
+    h('div.nudge-extra', {}, x10, nextBtn));
+  const el = h('div.picker', {}, h('div.picker-stage', {}, view, loupe), prompt, fine);
 
   function next() { return corners.findIndex((c) => c === null); }
 
   function updatePrompt() {
     const i = active >= 0 ? active : next();
-    prompt.textContent = i >= 0 ? `請點：${CORNER_LABELS[i]}（按住拖曳可微調）` : '四角都點好了；可拖曳任何一角重新調整。';
+    if (i >= 0) prompt.textContent = t('setup.picker.tap', { n: i + 1, name: t(`setup.corner.${i}`) });
+    else prompt.textContent = t('setup.picker.adjust', { n: sel + 1, name: t(`setup.corner.${sel}`) });
+    cornerBtns.forEach((b, j) => { b.setAttribute('aria-pressed', j === sel ? 'true' : 'false'); b.classList.toggle('set', Boolean(corners[j])); });
+    fine.hidden = !corners.some(Boolean);
   }
 
   function draw() {
@@ -55,17 +83,22 @@ export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
     ctx.drawImage(frame, 0, 0);
     const s = Math.max(2, frame.width / 480);
     if (ghostPts) polygon(ctx, ghostPts, 'rgba(255,255,255,0.9)', s, true);
-    const done = corners.filter(Boolean);
-    if (done.length === 4) polygon(ctx, corners, 'rgba(0,200,120,0.95)', s, false);
+    if (corners.every(Boolean)) polygon(ctx, corners, 'rgba(0,200,120,0.95)', s, false);
     corners.forEach((c, i) => {
       if (!c) return;
-      ctx.fillStyle = i === active ? '#ffcc00' : '#00c878';
+      ctx.fillStyle = i === sel ? '#ffcc00' : '#00c878';
       ctx.beginPath();
-      ctx.arc(c[0], c[1], 5 * s, 0, 2 * Math.PI);
+      ctx.arc(c[0], c[1], (i === sel ? 6 : 5) * s, 0, 2 * Math.PI);
       ctx.fill();
-      ctx.fillStyle = '#000';
-      ctx.font = `${10 * s}px sans-serif`;
-      ctx.fillText(String(i + 1), c[0] + 6 * s, c[1] - 6 * s);
+      ctx.lineWidth = s;
+      ctx.strokeStyle = '#000';
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 3 * s;
+      ctx.font = `bold ${12 * s}px sans-serif`;
+      ctx.strokeText(String(i + 1), c[0] + 7 * s, c[1] - 7 * s);
+      ctx.fillText(String(i + 1), c[0] + 7 * s, c[1] - 7 * s);
     });
   }
 
@@ -92,7 +125,7 @@ export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
     loupe.style.left = xCss < wCss / 2 ? '' : '4px';
     loupe.style.right = xCss < wCss / 2 ? '4px' : '';
     const ctx = loupe.getContext('2d');
-    const half = loupe.width / (2 * ZOOM);
+    const half = loupe.width / (2 * 2 * ZOOM);
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, loupe.width, loupe.height);
@@ -103,6 +136,13 @@ export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
     ctx.moveTo(loupe.width / 2, 0); ctx.lineTo(loupe.width / 2, loupe.height);
     ctx.moveTo(0, loupe.height / 2); ctx.lineTo(loupe.width, loupe.height / 2);
     ctx.stroke();
+  }
+
+  function loupeAt(i) {
+    const c = corners[i];
+    if (!c || !frame) { loupe.hidden = true; return; }
+    const r = view.getBoundingClientRect();
+    drawLoupe(c[0], c[1], (c[0] / frame.width) * (r.width || 1), r.width || 1);
   }
 
   function nearest(u, v) {
@@ -123,8 +163,9 @@ export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
     const [u, v, x, w] = toImage(ev);
     const near = nearest(u, v);
     active = near >= 0 ? near : next();
-    if (active < 0) return;
+    if (active < 0) active = sel;
     corners[active] = [u, v];
+    sel = active;
     edge = null;
     drawLoupe(u, v, x, w);
     draw();
@@ -140,14 +181,26 @@ export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
   });
   const end = () => {
     if (active < 0) return;
-    loupe.hidden = true;
     active = -1;
+    const n = next();
+    if (n >= 0) { loupe.hidden = true; sel = n; }
     draw();
     updatePrompt();
     onChange(api.corners(), { edge });
   };
   view.addEventListener('pointerup', end);
   view.addEventListener('pointercancel', end);
+  view.addEventListener('keydown', (e) => {
+    const k = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (k) { e.preventDefault(); const m = e.shiftKey ? 10 : 1; api.nudge(k[0] * m, k[1] * m, { raw: true }); return; }
+    if (/^[1-4]$/.test(e.key)) { e.preventDefault(); api.select(Number(e.key) - 1); }
+    if (e.key === 'Enter' && frame && !corners[sel]) {
+      // keyboard: place the selected corner at the ghost point (or the image centre) to start from
+      e.preventDefault();
+      corners[sel] = ghostPts?.[sel] ? [...ghostPts[sel]] : [frame.width / 2, frame.height / 2];
+      draw(); updatePrompt(); loupeAt(sel); onChange(api.corners(), { edge });
+    }
+  });
 
   const api = {
     el,
@@ -160,10 +213,23 @@ export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
       updatePrompt();
     },
     frame: () => frame,
-    setGhost(g) { ghostPts = g; draw(); },
-    reset() { corners = [null, null, null, null]; edge = null; draw(); updatePrompt(); onChange(null, { edge }); },
+    setGhost(g) { ghostPts = g; if (globalThis.__GSL_E2E__ && g) view.dataset.ghost = JSON.stringify(g.map((p) => [+p[0].toFixed(2), +p[1].toFixed(2)])); draw(); },
+    reset() { corners = [null, null, null, null]; sel = 0; edge = null; loupe.hidden = true; draw(); updatePrompt(); onChange(null, { edge }); },
     corners: () => (corners.every(Boolean) ? corners.map((c) => [c[0], c[1]]) : null),
     setCorners(cs) { corners = cs.map((c) => (c ? [c[0], c[1]] : null)); draw(); updatePrompt(); },
+    select(i) { sel = Math.max(0, Math.min(3, i)); draw(); updatePrompt(); loupeAt(sel); },
+    selected: () => sel,
+    /** Move the selected corner by (dx, dy) image px (×10 when the toggle is on, unless raw). */
+    nudge(dx, dy, { raw = false } = {}) {
+      if (!frame || !corners[sel]) return;
+      const m = raw ? 1 : big ? 10 : 1;
+      const c = corners[sel];
+      corners[sel] = [Math.max(0, Math.min(frame.width, c[0] + dx * m)), Math.max(0, Math.min(frame.height, c[1] + dy * m))];
+      edge = null;
+      draw();
+      loupeAt(sel);
+      onChange(api.corners(), { edge });
+    },
     /** Sub-pixel refinement around the tapped corners; keeps the taps when it fails. */
     refine() {
       const cs = api.corners();

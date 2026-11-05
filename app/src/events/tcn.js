@@ -1,5 +1,6 @@
-// Event TCN inference in plain JS (CAFCR K9 / R2): the model trained by training/train_tcn.py and exported by
-// training/export.py to app/models/event-tcn-v1.{bin,json}. Pure: no DOM, no clock, no randomness, no fetch
+// Event TCN inference in plain JS (CAFCR K9 / R2): a model trained by training/train_owner.py (the owner's own
+// labelled swings, PRODUCT-SPEC §7.4) and exported in the gsl-event-tcn/1 format (training/export.py). meta.card is
+// the model card (json.model_card) that pipeline/clip.js gates on. Pure: no DOM, no clock, no randomness, no fetch
 // (the caller loads the two files and passes them in).
 //
 // Network (training/model.py): x = (features - mean) / std (non-finite -> 0), per frame of the evfeat-1 30 Hz grid;
@@ -28,7 +29,7 @@ function tensorView(buf, spec) {
 
 /**
  * loadTcn(json, arrayBuffer) -> { meta, predict(features) -> Float32Array(K*9), predictRows(features) -> rows }
- * json: parsed event-tcn-v1.json; arrayBuffer: the bytes of event-tcn-v1.bin. Throws on a format, feature
+ * json: the parsed model .json; arrayBuffer: the bytes of its .bin. Throws on a format, feature
  * version or size mismatch (the caller then keeps the rules).
  */
 export function loadTcn(json, arrayBuffer) {
@@ -127,7 +128,7 @@ export function loadTcn(json, arrayBuffer) {
 
   return {
     meta: { format: json.format, version: json.version, feature_version: json.feature_version, classes: json.classes,
-      n_params: json.n_params, sha256: json.sha256 },
+      n_params: json.n_params, sha256: json.sha256, card: json.model_card ?? null },
     predict, predictRows,
   };
 }

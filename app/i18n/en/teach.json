@@ -1,0 +1,23 @@
+{
+  "accept": "Correct",
+  "prompt": "Phase {k} of 8: {event}. Tap “Correct” if it is right.",
+  "adjust_hint": "If it is wrong, find the right frame with ◀ ▶ and tap “Set to this frame”.",
+  "all_done": "All 8 phases confirmed",
+  "all_done_short": "All confirmed",
+  "saved_next": "Saved. Next swing",
+  "skip": "Skip this swing",
+  "shot_n": "Swing {k} ({n} to label)",
+  "progress": "{done} / {target} swings labelled",
+  "progress_label": "Labelling progress",
+  "intro.title": "What is this for?",
+  "intro.body": "Swing phases (address, top, impact…) are detected by rules. Confirm or correct your own swings; with 20 or more you can train a detector on your swing.",
+  "intro.privacy": "Labels stay on this phone. The exported file has poses and phases only, no video.",
+  "empty.none": "No swings to label",
+  "empty.done": "Every swing with a video is labelled",
+  "empty.body": "Only swings with a saved video can be labelled. Practise some more and come back.",
+  "export.title": "Training set",
+  "export.hint": "Save the labels and pose data as one file for training the detector.",
+  "export.button": "Export training set",
+  "export.none": "No labels yet",
+  "export.empty": "No labels to export yet"
+}

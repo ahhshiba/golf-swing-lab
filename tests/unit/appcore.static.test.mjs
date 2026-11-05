@@ -48,7 +48,7 @@ export function importsOf(src) {
   return out;
 }
 
-const OWN = [path.join(SRC, 'main.js'), path.join(SRC, 'state.js'), ...walk(path.join(SRC, 'ui'), (p) => p.endsWith('.js')), ...walk(path.join(SRC, 'session'), (p) => p.endsWith('.js'))];
+const OWN = [path.join(SRC, 'main.js'), path.join(SRC, 'state.js'), path.join(SRC, 'boot-watchdog.js'), path.join(SRC, 'version.js'), ...walk(path.join(SRC, 'ui'), (p) => p.endsWith('.js')), ...walk(path.join(SRC, 'session'), (p) => p.endsWith('.js'))];
 
 test('every static import in app/src resolves to an existing file with the named exports', async () => {
   const files = walk(SRC, (p) => p.endsWith('.js') || p.endsWith('.mjs'));
@@ -75,7 +75,7 @@ test('every static import in app/src resolves to an existing file with the named
 
 test('app-core modules load in Node (no DOM access at import time), except main.js which boots', async () => {
   for (const f of OWN) {
-    if (f.endsWith('main.js')) continue;
+    if (f.endsWith('main.js') || f.endsWith('boot-watchdog.js')) continue; // the boot entry and the classic watchdog script
     await import(pathToFileURL(f).href);
   }
 });
@@ -84,7 +84,8 @@ test('no URL routing, no external URLs, no eval in the app shell', () => {
   const files = [...OWN, path.join(APP, 'index.html'), path.join(APP, 'manifest.webmanifest'), path.join(APP, 'sw.template.js'), ...walk(path.join(APP, 'styles'), () => true)];
   const bad = [/location\.hash/, /history\.(pushState|replaceState)/, /https?:\/\//, /(^|[^A-Za-z0-9_$])eval\s*\(/, /new\s+Function([^A-Za-z0-9_$]|$)/, /hashchange|popstate/];
   for (const f of files) {
-    const src = fs.readFileSync(f, 'utf8');
+    // XML namespace names (createElementNS) are identifiers, never fetched
+    const src = fs.readFileSync(f, 'utf8').replace(/http:\/\/www\.w3\.org\/(2000\/svg|1999\/xlink|1998\/Math\/MathML)/g, '');
     for (const re of bad) assert.ok(!re.test(src), `${path.relative(ROOT, f)} matches ${re}`);
   }
 });
@@ -143,15 +144,22 @@ test('manifest.webmanifest is a valid installable standalone zh-Hant manifest wi
 });
 
 test('styles: tokens, light + dark, safe areas, 100dvh, 44 px targets, 16 px inputs, no hover-only rules', () => {
-  const css = fs.readFileSync(path.join(APP, 'styles', 'app.css'), 'utf8');
-  assert.match(css, /:root\s*\{[^}]*--bg:/);
-  assert.match(css, /@media \(prefers-color-scheme: dark\)/);
-  assert.match(css, /env\(safe-area-inset-top/);
-  assert.match(css, /env\(safe-area-inset-bottom/);
-  assert.match(css, /100dvh/);
-  assert.match(css, /--tap:\s*44px/);
-  assert.match(css, /min-height:\s*var\(--tap\)/);
-  assert.match(css, /input, textarea \{[^}]*font-size:\s*16px/);
-  assert.match(css, /touch-action:\s*manipulation/);
-  assert.ok(!/:hover/.test(css), 'no :hover rules (phone first, no hover-only affordances)');
+  // design system "Range" (PRODUCT-SPEC §1): raw values live in tokens.css, app.css uses them
+  const tokens = fs.readFileSync(path.join(APP, 'styles', 'tokens.css'), 'utf8');
+  const app = fs.readFileSync(path.join(APP, 'styles', 'app.css'), 'utf8');
+  const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8');
+  assert.ok(html.indexOf('styles/tokens.css') > -1 && html.indexOf('styles/tokens.css') < html.indexOf('styles/app.css'), 'tokens.css is loaded before app.css');
+  assert.match(tokens, /:root\s*\{[^}]*--bg:/);
+  assert.match(tokens, /@media \(prefers-color-scheme: dark\)/);
+  assert.match(tokens, /:root\[data-theme="dark"\]/);
+  assert.match(tokens, /:root\[data-theme="sun"\]/);
+  assert.match(tokens, /env\(safe-area-inset-top/);
+  assert.match(tokens + app, /env\(safe-area-inset-bottom/);
+  assert.match(app, /100dvh/);
+  assert.match(tokens, /--hit-min:\s*44px/);
+  assert.match(app, /button, \.button \{[^}]*min-height:\s*var\(--hit-min\)/);
+  assert.match(tokens, /--fs-input:\s*max\(16px, 1rem\)/);
+  assert.match(app, /button, \.button, select, input, textarea \{[^}]*font-size:\s*var\(--fs-input\)/);
+  assert.match(app, /touch-action:\s*manipulation/);
+  for (const [name, css] of [['tokens.css', tokens], ['app.css', app]]) assert.ok(!/:hover/.test(css), `${name}: no :hover rules (phone first, no hover-only affordances)`);
 });

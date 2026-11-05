@@ -1,0 +1,17 @@
+{
+  "close": "Close",
+  "dismiss": "Dismiss",
+  "sheet": "Sheet",
+  "grabber": "Drag handle",
+  "selected": "Selected",
+  "step_done": "Done",
+  "step_active": "In progress",
+  "step_pending": "Not started",
+  "step_error": "Failed",
+  "validity": "Confidence: {label}",
+  "state": "State: {text}",
+  "ci": "Uncertainty ±{ci}",
+  "expand": "Expand",
+  "collapse": "Collapse",
+  "new_window": "Opens in a new window"
+}

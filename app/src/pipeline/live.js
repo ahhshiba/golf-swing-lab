@@ -6,7 +6,9 @@
 //                    calibration?, handedness = 'right', audioAvailable = true, mediaClock?() -> t_media_s,
 //                    setFps?(hz), frameStats?() -> { dropped_pct }, thermal? ({ push(sample) -> decision }),
 //                    analyzePractice = false, idle_hz = 10, swing_hz = 30, impact_min_db = 20, now?() -> ms, newIds?() -> ids,
-//                    onShot?(r), onEvent?(ev), onError?(e), onDegrade?(decision), onStopLive?(decision) })
+//                    onShot?(r), onEvent?(ev), onError?(e), onDegrade?(decision), onStopLive?(decision),
+//                    getClub?() -> club (controller.club(): the club of the NEXT job), onQueue?(ev),
+//                    livePoseModel = 'lite', queueLimit = 2, idleCutMs = 8000 })
 //     -> { handleFrame(bitmap, t_media_s, meta) -> Promise, handleOnset(t_media_s, level_db?) (< impact_min_db dropped; buffered until a frame at or
 //          after t_media_s has its pose, so the detector sees media-time order), touch(), stats(), state(),
 //          degrade(decision?), idle() -> Promise (all queued analyses done) }
@@ -18,6 +20,13 @@
 // <video> clock is UNVERIFIED on iOS). Segments are cut on entering ADDRESS (discarded, so the next one starts near
 // the address) and on each detected swing (analysed). touches stays 0 unless the UI calls touch() (KD7).
 // Latency = (media now - t_finish at detection) + (analysis done - detection), per shot; p95 over the session.
+// PF-2 / R6 (PRODUCT-SPEC §5): a job analyses only address-0.5 s ... impact+1.2 s (finish+0.3 s when the impact time is
+// unknown) at <= 60 Hz with the lite pose model (livePoseModel); jobs run one at a time NEWEST FIRST, at most
+// queueLimit wait (an older waiting job is dropped when a newer one would exceed it: diag live.analysis_dropped, onQueue
+// { dropped }); onQueue gets { queued, started, done, eta_s, dropped } after every change (controller.analysisQueue).
+// While IDLE the recorder segment is cut and discarded every idleCutMs (8 s) so an idle bay never grows one unbounded
+// segment; during SWING the recorder is held (recorder.hold(true)) so its own cap (capture/recorder.js, 12 s) cannot
+// cut a swing in two. diag live.retained_blobs = segments waiting for or in analysis.
 // P18: every shot pushes { latency_s, dropped_frac } into the thermal guard; 'degrade' -> pose_model lite, sampling
 // halved, RC.THERMAL_DEGRADED on later shots; 'stop_live' -> onStopLive (UI suggests high-speed mode).
 // Diag logs (bounded, last LOG_MAX): live.shot_log = [{ kind, t_impact, t_peak, t_finish, impact_source }] per detected
@@ -30,6 +39,7 @@ import { createThermalGuard } from '../session/thermal.js';
 import { diagRecord } from '../workers/diag.js';
 
 const LOG_MAX = 64;
+const POSE_HZ_MAX = 60;
 const r3 = (x) => (Number.isFinite(x) ? Math.round(x * 1000) / 1000 : null);
 const L_WRIST = 15;
 const R_WRIST = 16;
@@ -74,12 +84,17 @@ export function createLiveLoop(o) {
   let idleHz = o.idle_hz ?? 10;
   const impactMinDb = o.impact_min_db ?? 20;
   let swingHz = o.swing_hz ?? 30;
-  let poseModel = o.clipOptions?.pose_model ?? 'full';
-  let poseHz = o.clipOptions?.pose_hz ?? 60;
+  let poseModel = o.livePoseModel ?? 'lite';
+  let poseHz = Math.min(POSE_HZ_MAX, o.clipOptions?.pose_hz ?? POSE_HZ_MAX);
   let degraded = false;
-  let lastCutAt = -Infinity;
-  let queue = Promise.resolve();
-  const st = { soft_onsets: 0, frames: 0, wrist: 0, detections: 0, shots: 0, practice: 0, analysed: 0, failed: 0, touches: 0, latencies: [] };
+  let lastCutAt = now();
+  const queueLimit = Number.isInteger(o.queueLimit) && o.queueLimit >= 1 ? o.queueLimit : 2;
+  const idleCutMs = Number.isFinite(o.idleCutMs) && o.idleCutMs > 0 ? o.idleCutMs : 8000;
+  const waiting = []; // jobs not started yet (oldest first); the newest runs next
+  let running = null;
+  let drainWaiters = [];
+  const durations = []; // last analysis durations (ms) for the ETA
+  const st = { soft_onsets: 0, frames: 0, wrist: 0, detections: 0, shots: 0, practice: 0, analysed: 0, failed: 0, touches: 0, latencies: [], dropped: 0, queue_max: 0, idle_cuts: 0 };
 
   // Audio onsets arrive in real time, wrist samples only after the frame tap + pose round trip (100-300 ms later), but
   // events/live.js needs its samples in media-time order: an impact click fed before the downswing frames is ignored
@@ -87,6 +102,7 @@ export function createLiveLoop(o) {
   const pendingAudio = [];
   const shotLog = [];
   const onsetLog = [];
+  const jobLog = []; // live.jobs: [{ ms, latency_s, ok, code, queued }] per analysis (latency = detection lag + job)
   const pushLog = (arr, x, path) => { arr.push(x); if (arr.length > LOG_MAX) arr.shift(); diagRecord(path, arr.slice()); };
   let lastFrameT = -Infinity;
   const flushAudio = (upTo) => {
@@ -103,43 +119,99 @@ export function createLiveLoop(o) {
     emit({ type: 'segment_cut', reason });
   }
 
+  const avgMs = () => (durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : 6000);
+  function queueEvent(extra = {}) {
+    const ev = {
+      queued: waiting.length, started: running ? 1 : 0, done: st.analysed, failed: st.failed, dropped: st.dropped,
+      eta_s: Math.round(((waiting.length + (running ? 0.5 : 0)) * avgMs()) / 100) / 10, ...extra,
+    };
+    st.queue_max = Math.max(st.queue_max, waiting.length);
+    diagRecord('live.queue', ev);
+    diagRecord('live.retained_blobs', waiting.length + (running ? 1 : 0));
+    try { o.onQueue?.(ev); } catch { /* UI */ }
+  }
+
+  function drained() {
+    if (running || waiting.length) return;
+    const w = drainWaiters;
+    drainWaiters = [];
+    for (const r of w) r();
+  }
+
+  async function runJob(job) {
+    const { ev, segP, detectedAt, lag_s } = job;
+    let blob;
+    try { blob = await segP; } catch (e) { st.failed += 1; o.onError?.(e); return; }
+    const t0 = Number.isFinite(blob && blob.t_media_start_s) ? blob.t_media_start_s : 0;
+    const rel = (t) => Math.max(0, t - t0);
+    const warnings = [...(o.clipOptions?.warnings ?? []), ...(ev.reason_codes ?? [])];
+    if (degraded && !warnings.includes(RC.THERMAL_DEGRADED)) warnings.push(RC.THERMAL_DEGRADED);
+    const ids = typeof o.newIds === 'function' ? o.newIds() : o.clipOptions?.ids;
+    const startS = rel(ev.t_address - 0.5);
+    const endAbs = Number.isFinite(ev.t_impact) ? ev.t_impact + 1.2 : ev.t_finish + 0.3;
+    const club = typeof o.getClub === 'function' ? o.getClub() : null;
+    const options = {
+      ...o.clipOptions, ids, mode: 'live', source: 'camera', pose_model: poseModel, pose_hz: poseHz, warnings,
+      ...(club ? { club: { ...(o.clipOptions?.club ?? {}), ...club } } : {}),
+      trim_s: [startS, Math.max(startS + 0.1, rel(endAbs))],
+      audioOnset_t: ev.impact_source === 'audio' ? rel(ev.t_impact) : undefined,
+      live_event: { ...ev, t_offset_s: t0 },
+    };
+    if (club) diagRecord('live.job_club', { type: club.type ?? null });
+    const a0 = now();
+    const logJob = (ok, code) => pushLog(jobLog, { ms: Math.round(now() - a0), latency_s: r3(lag_s + (now() - detectedAt) / 1000), ok, code: code ?? null, queued: waiting.length }, 'live.jobs');
+    try {
+      const res = await o.analyzeSegment(blob, options);
+      durations.push(now() - a0);
+      if (durations.length > 5) durations.shift();
+      logJob(true);
+      const latency_s = lag_s + (now() - detectedAt) / 1000;
+      st.analysed += 1;
+      st.latencies.push(latency_s);
+      const p95 = percentile95(st.latencies);
+      diagRecord('live.latency_p95_s', p95);
+      diagRecord('live.latency_last_s', latency_s);
+      diagRecord('live.touches_per_shot', st.touches / Math.max(1, st.shots));
+      const fs = typeof o.frameStats === 'function' ? o.frameStats() : null;
+      const dropped_frac = fs && Number.isFinite(fs.dropped_pct) ? fs.dropped_pct / 100 : undefined;
+      if (fs) diagRecord('live.frames_dropped_pct', fs.dropped_pct);
+      const decision = thermal.push({ latency_s, dropped_frac });
+      if (decision && decision.action === 'degrade') api.degrade(decision);
+      else if (decision && decision.action === 'stop_live') { diagRecord('thermal.stop_live', true); o.onStopLive?.(decision); }
+      o.onShot?.({ shot: res.shot, timings_ms: res.timings_ms, latency_s, kind: ev.kind, event: ev, segment: blob });
+    } catch (e) {
+      durations.push(now() - a0);
+      if (durations.length > 5) durations.shift();
+      logJob(false, e && typeof e.code === 'string' ? e.code : 'INTERNAL');
+      st.failed += 1;
+      o.onError?.(e);
+    }
+  }
+
+  function pump() {
+    if (running || !waiting.length) { drained(); return; }
+    const job = waiting.pop(); // newest first
+    running = job;
+    queueEvent({ started_shot: job.n });
+    runJob(job).finally(() => {
+      running = null;
+      queueEvent();
+      pump();
+    });
+  }
+
   function analyse(ev, detectedAt, lag_s) {
     const segP = Promise.resolve().then(() => o.recorder.cut());
+    segP.catch(() => {});
     lastCutAt = now();
-    queue = queue.then(async () => {
-      let blob;
-      try { blob = await segP; } catch (e) { st.failed += 1; o.onError?.(e); return; }
-      const t0 = Number.isFinite(blob && blob.t_media_start_s) ? blob.t_media_start_s : 0;
-      const rel = (t) => Math.max(0, t - t0);
-      const warnings = [...(o.clipOptions?.warnings ?? []), ...(ev.reason_codes ?? [])];
-      if (degraded && !warnings.includes(RC.THERMAL_DEGRADED)) warnings.push(RC.THERMAL_DEGRADED);
-      const ids = typeof o.newIds === 'function' ? o.newIds() : o.clipOptions?.ids;
-      const options = {
-        ...o.clipOptions, ids, mode: 'live', source: 'camera', pose_model: poseModel, pose_hz: poseHz, warnings,
-        trim_s: [rel(ev.t_address - 0.5), Math.max(rel(ev.t_address - 0.5) + 0.1, rel(ev.t_finish + 0.3))],
-        audioOnset_t: ev.impact_source === 'audio' ? rel(ev.t_impact) : undefined,
-        live_event: { ...ev, t_offset_s: t0 },
-      };
-      try {
-        const res = await o.analyzeSegment(blob, options);
-        const latency_s = lag_s + (now() - detectedAt) / 1000;
-        st.analysed += 1;
-        st.latencies.push(latency_s);
-        const p95 = percentile95(st.latencies);
-        diagRecord('live.latency_p95_s', p95);
-        diagRecord('live.touches_per_shot', st.touches / Math.max(1, st.shots));
-        const fs = typeof o.frameStats === 'function' ? o.frameStats() : null;
-        const dropped_frac = fs && Number.isFinite(fs.dropped_pct) ? fs.dropped_pct / 100 : undefined;
-        if (fs) diagRecord('live.frames_dropped_pct', fs.dropped_pct);
-        const decision = thermal.push({ latency_s, dropped_frac });
-        if (decision && decision.action === 'degrade') api.degrade(decision);
-        else if (decision && decision.action === 'stop_live') { diagRecord('thermal.stop_live', true); o.onStopLive?.(decision); }
-        o.onShot?.({ shot: res.shot, timings_ms: res.timings_ms, latency_s, kind: ev.kind, event: ev, segment: blob });
-      } catch (e) {
-        st.failed += 1;
-        o.onError?.(e);
-      }
-    });
+    waiting.push({ ev, segP, detectedAt, lag_s, n: st.shots });
+    while (waiting.length > queueLimit) {
+      waiting.shift(); // the oldest waiting segment is released (its blob is garbage now)
+      st.dropped += 1;
+      diagRecord('live.analysis_dropped', st.dropped);
+    }
+    queueEvent();
+    pump();
   }
 
   function onEvents(events) {
@@ -147,8 +219,8 @@ export function createLiveLoop(o) {
       emit(ev);
       if (ev.type === 'state') {
         if (ev.to === 'ADDRESS' && ev.from === 'IDLE') cutDiscard('address');
-        if (ev.to === 'SWING') o.setFps?.(swingHz);
-        if (ev.to === 'IDLE' || ev.to === 'ADDRESS') o.setFps?.(idleHz);
+        if (ev.to === 'SWING') { o.setFps?.(swingHz); o.recorder.hold?.(true); }
+        if (ev.to === 'IDLE' || ev.to === 'ADDRESS') { o.setFps?.(idleHz); o.recorder.hold?.(false); }
       } else if (ev.type === 'shot') {
         st.detections += 1;
         pushLog(shotLog, { kind: ev.kind, t_impact: r3(ev.t_impact), t_peak: r3(ev.t_peak), t_finish: r3(ev.t_finish), impact_source: ev.impact_source ?? null }, 'live.shot_log');
@@ -184,9 +256,12 @@ export function createLiveLoop(o) {
       }
       flushAudio(t_s);
       const s = wristSample(row.img, row.world, { calibration, handedness });
-      if (!s) return;
-      st.wrist += 1;
-      onEvents(det.feed({ ...s, t_s }));
+      if (s) {
+        st.wrist += 1;
+        onEvents(det.feed({ ...s, t_s }));
+      }
+      // R6: an idle bay must not grow one unbounded recorder segment
+      if (det.state() === 'IDLE' && now() - lastCutAt >= idleCutMs) { st.idle_cuts += 1; cutDiscard('idle'); }
     },
     handleOnset(t_s, level_db) {
       if (!Number.isFinite(t_s)) return;
@@ -202,7 +277,7 @@ export function createLiveLoop(o) {
     },
     touch() { st.touches += 1; diagRecord('live.touches_per_shot', st.touches / Math.max(1, st.shots)); },
     state: () => det.state(),
-    stats: () => ({ ...st, latencies: st.latencies.slice(), latency_p95_s: percentile95(st.latencies), degraded, pose_model: poseModel, pose_hz: poseHz, idle_hz: idleHz }),
+    stats: () => ({ ...st, latencies: st.latencies.slice(), latency_p95_s: percentile95(st.latencies), degraded, pose_model: poseModel, pose_hz: poseHz, idle_hz: idleHz, queued: waiting.length, running: Boolean(running) }),
     degrade(decision) {
       if (degraded) return;
       degraded = true;
@@ -214,7 +289,7 @@ export function createLiveLoop(o) {
       diagRecord('thermal.degraded', true);
       o.onDegrade?.(decision ?? { action: 'degrade' });
     },
-    idle: () => queue,
+    idle: () => (running || waiting.length ? new Promise((r) => drainWaiters.push(r)) : Promise.resolve()),
   };
   return api;
 }

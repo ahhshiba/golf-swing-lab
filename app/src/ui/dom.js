@@ -1,4 +1,8 @@
-// ui/dom.js — tiny DOM helpers (browser only).
+// ui/dom.js — tiny DOM helpers (browser only at call time; importing is DOM-free).
+// Components of the design system live in ./components.js; the helpers here are kept for the existing screens.
+//   Toasts: components.js toast.info / toast.error (the old dom.js toast() alias was removed at integration, §8.7).
+import { t, has } from '../i18n/index.js';
+import { screenHeader as cScreenHeader } from './components.js';
 
 /** h('button.primary', { onclick }, 'text', child…) — tag with optional .classes / #id, attrs and children. */
 export function h(spec, attrs = {}, ...children) {
@@ -46,25 +50,20 @@ export function numberInput(attrs = {}) {
 
 export function select(options, value, attrs = {}) {
   const s = h('select', attrs);
-  for (const [v, label] of options) s.append(h('option', { value: v, selected: v === value }, label));
+  for (const [v, label] of options) s.append(h('option', { value: v, selected: v === value }, optionLabel(v, label)));
   return s;
 }
 
-let toastTimer = null;
-/** Short status message at the bottom of the screen. */
-export function toast(text, ms = 3500) {
-  const el = document.getElementById('toast');
-  if (!el) return;
-  el.textContent = text;
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+/** Transitional: a numeric label for a club type (CLUBS changed to [type, length_m]) shows the club name. */
+function optionLabel(v, label) {
+  if (typeof label === 'number' && has(`club.${v}`)) return t(`club.${v}`);
+  return label;
 }
 
 /** A download link for a Blob (also clicked once); the object URL is revoked later. */
 export function downloadLink(blob, filename, label) {
   const url = URL.createObjectURL(blob);
-  const a = h('a.button', { href: url, download: filename }, label ?? `下載 ${filename}`);
+  const a = h('a.button', { href: url, download: filename }, label ?? t('common.download_file', { name: filename }));
   setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
   return a;
 }
@@ -78,8 +77,7 @@ export function card(title, ...children) {
   return h('section.card', {}, title ? h('h2', title) : null, ...children);
 }
 
+/** Legacy signature of components.screenHeader({ title, back, onBack }). */
 export function screenHeader(title, onBack) {
-  return h('header.screen-header', {},
-    onBack ? h('button.back', { type: 'button', 'aria-label': '返回', onclick: onBack }, '‹ 返回') : null,
-    h('h1', title));
+  return cScreenHeader({ title, back: Boolean(onBack), onBack });
 }

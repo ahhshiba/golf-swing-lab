@@ -1,0 +1,16 @@
+{
+  "title": "開放原始碼授權",
+  "intro": "這個 App 使用下列開放原始碼元件。授權全文隨 App 一起安裝，不需要網路。",
+  "mediapipe.name": "MediaPipe Tasks Vision 1.2.2",
+  "mediapipe.what": "姿勢偵測，含 Pose Landmarker 模型（lite、full、heavy）",
+  "mediapipe.licence": "Apache License 2.0 · Google LLC",
+  "mp4box.name": "mp4box.js 2.4.1",
+  "mp4box.what": "讀取 MP4 與 MOV 影片檔",
+  "mp4box.licence": "BSD 3-Clause License · Telecom Paris / GPAC",
+  "icons.name": "Lucide 風格圖示",
+  "icons.what": "介面圖示，依 Lucide 的線條風格繪製",
+  "icons.licence": "ISC License · Lucide Contributors",
+  "show": "授權全文",
+  "loading": "讀取中…",
+  "missing": "這個版本沒有附上授權檔，請到「關於」回報。"
+}

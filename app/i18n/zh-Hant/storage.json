@@ -1,0 +1,12 @@
+{
+  "unknown": "讀不到儲存空間用量，沒有清理任何東西。",
+  "ok": "儲存空間充足。",
+  "low_free": "剩餘空間不到 {minMb} MB（還有 {freeMb} MB），建議暫停保存影片。",
+  "over_limit_practice": "儲存空間已超過上限（用了 {usedMb} MB）。練習中只提醒，不會刪除任何東西。",
+  "over_limit": {
+    "other": "儲存空間已超過上限（用了 {usedMb} MB）。建議先匯出備份。清理只刪原始影片（從最舊、沒加星號的開始），不會刪任何一球的數字或姿勢：可刪 {n} 支影片，約釋出 {freedMb} MB。"
+  },
+  "over_limit_unsatisfied": {
+    "other": "儲存空間已超過上限（用了 {usedMb} MB）。刪掉所有可刪的影片（{n} 支，約 {freedMb} MB）仍不夠：請先匯出，再手動清理。"
+  }
+}

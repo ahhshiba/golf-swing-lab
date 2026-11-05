@@ -10,6 +10,9 @@ import {
   builtinShotValidator, normalizeValidation, resolveDefaultValidator, encodeTyped, decodeTyped,
 } from '../../app/src/store/export.js';
 import { METRIC_IDS } from '../../app/src/store/metric-ids.js';
+
+// every store of the current schema empty (stores added by later schema versions, e.g. trash, included)
+const ALL_EMPTY = Object.freeze(Object.fromEntries(STORE_NAMES.map((n) => [n, 0])));
 import { openMem, makeVenue, makePreset, makeShot, makeDataset, fillRepo, dumpRepo, accept, hasChinese } from './store.fixtures.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -22,11 +25,22 @@ async function counts(repo) {
   return out;
 }
 
-async function assertRejectedUntouched(repo, data, opts, pattern) {
+// The store never produces localized text (PRODUCT-SPEC I18N-1/I18N-5): an ImportError carries a reason code that
+// the history screen maps to `history.restore.error.<reason>`, which must exist in both catalogs.
+const HISTORY_CATALOG = Object.fromEntries(['zh-Hant', 'en'].map((loc) => [loc,
+  JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), `../../app/i18n/${loc}/history.json`), 'utf8'))]));
+const REASONS = ['not_json', 'not_export', 'version', 'missing_fields', 'bad_field', 'invalid'];
+
+async function assertRejectedUntouched(repo, data, opts, reason, pattern) {
   const before = await dumpRepo(repo, STORE_NAMES);
   await assert.rejects(importJSON(repo, data, opts), (e) => {
     assert.ok(e instanceof ImportError, `ImportError expected, got ${e}`);
-    assert.ok(hasChinese(e.message), `message must be Traditional Chinese: ${e.message}`);
+    assert.equal(e.code, 'IMPORT_REJECTED');
+    assert.ok(REASONS.includes(e.reason), `unknown reason ${e.reason}`);
+    assert.equal(e.reason, reason, e.message);
+    for (const [loc, cat] of Object.entries(HISTORY_CATALOG)) assert.equal(typeof cat[`restore.error.${e.reason}`], 'string', `${loc} lacks restore.error.${e.reason}`);
+    assert.ok(e.params && typeof e.params === 'object');
+    assert.ok(!hasChinese(e.message) && !hasChinese(JSON.stringify(e.details)) && !hasChinese(JSON.stringify(e.params)), `no localized text: ${e.message}`);
     if (pattern) assert.match(e.message, pattern);
     assert.ok(Array.isArray(e.details));
     return true;
@@ -46,7 +60,7 @@ test('export -> clear -> import round trip deep-equals (4 shots, 2 presets, 1 ve
 
   const file = JSON.stringify(await exportJSON(repo, { now: NOW, app_version: '0.1.0-test' }));
   await repo.clear();
-  assert.deepEqual(await counts(repo), { venues: 0, presets: 0, sessions: 0, shots: 0, poses: 0, clips: 0, labels: 0, models: 0 });
+  assert.deepEqual(await counts(repo), ALL_EMPTY);
 
   const res = await importJSON(repo, file, { validate: accept });
   assert.equal(res.ok, true);
@@ -92,7 +106,7 @@ test('filtered export carries the parents of the exported shots and nothing else
   const res = await importJSON(fresh, asFile(out), { validate: accept });
   assert.equal(res.total.added, 2 + 1 + 1 + 1);
   assert.deepEqual(await fresh.shots.list(), ds.shots.filter((s) => s.preset_id === 'preset-B'));
-  await assert.rejects(exportJSON(repo, { presetId: 'typo' }), /不認得/);
+  await assert.rejects(exportJSON(repo, { presetId: 'typo' }), (e) => e.code === 'BAD_QUERY' && /presetId/.test(e.message));
   // club and date filters
   assert.deepEqual((await exportJSON(repo, { club_type: 'driver' })).shots.map((s) => s.shot_id), ['shot-2']);
   assert.deepEqual((await exportJSON(repo, { from: '2026-11-03T00:00:00.000Z' })).shots.map((s) => s.shot_id), ['shot-3', 'shot-4']);
@@ -141,10 +155,10 @@ test('poses (typed arrays) and clips (Blob) survive export -> import when reques
   const corrupt = asFile(await exportJSON(repo, { now: NOW, includePoses: true }));
   corrupt.poses[0].img.b64 = 'AAAA!!!';
   const target = await openMem();
-  await assertRejectedUntouched(target, corrupt, { validate: accept }, /姿勢序列資料損毀/);
+  await assertRejectedUntouched(target, corrupt, { validate: accept }, 'invalid', /poses: corrupt data/);
   const odd = asFile(await exportJSON(repo, { now: NOW, includePoses: true }));
   odd.poses[0].img.b64 = 'AAAA'; // 3 bytes: not a whole number of float32 values
-  await assertRejectedUntouched(target, odd, { validate: accept }, /長度不正確/);
+  await assertRejectedUntouched(target, odd, { validate: accept }, 'invalid', /bad length/);
 });
 
 test('encodeTyped / decodeTyped round trip nested structures', () => {
@@ -154,27 +168,27 @@ test('encodeTyped / decodeTyped round trip nested structures', () => {
 
 // -------------------------------------------------------------------------------------------- import
 
-test('import rejects a wrong format with a Chinese message and writes nothing', async () => {
+test('import rejects a wrong format with a reason code and writes nothing', async () => {
   const repo = await openMem();
   await fillRepo(repo);
   const ok = asFile(await exportJSON(repo, { now: NOW }));
   const cases = [
-    [{ ...ok, format: 'something-else/1' }, /不是 golf-swing-lab 的匯出檔/],
-    [{ ...ok, format: undefined }, /不是 golf-swing-lab 的匯出檔/],
-    [{ ...ok, format: 'golf-swing-lab-export/2' }, /格式版本/],
-    [{ ...ok, format: 'golf-swing-lab-export/0' }, /格式版本/],
-    [[1, 2, 3], /不是 golf-swing-lab 的匯出檔/],
-    [42, /不是 golf-swing-lab 的匯出檔/],
-    [null, /不是 golf-swing-lab 的匯出檔/],
-    [{ ...ok, shots: undefined }, /shots/],
-    [{ ...ok, venues: {} }, /venues/],
-    [{ ...ok, poses: 'nope' }, /poses/],
-    ['{ not json', /不是有效的 JSON/],
-    ['', /不是有效的 JSON/],
+    [{ ...ok, format: 'something-else/1' }, 'not_export', /not a golf-swing-lab export/],
+    [{ ...ok, format: undefined }, 'not_export', /not a golf-swing-lab export/],
+    [{ ...ok, format: 'golf-swing-lab-export/2' }, 'version', /format version/],
+    [{ ...ok, format: 'golf-swing-lab-export/0' }, 'version', /format version/],
+    [[1, 2, 3], 'not_export', /not a golf-swing-lab export/],
+    [42, 'not_export', /not a golf-swing-lab export/],
+    [null, 'not_export', /not a golf-swing-lab export/],
+    [{ ...ok, shots: undefined }, 'missing_fields', /shots/],
+    [{ ...ok, venues: {} }, 'missing_fields', /venues/],
+    [{ ...ok, poses: 'nope' }, 'bad_field', /poses/],
+    ['{ not json', 'not_json', /not valid JSON/],
+    ['', 'not_json', /not valid JSON/],
   ];
   const target = await openMem();
   await target.venues.put(makeVenue('pre-existing'));
-  for (const [data, pattern] of cases) await assertRejectedUntouched(target, data, { validate: accept }, pattern);
+  for (const [data, reason, pattern] of cases) await assertRejectedUntouched(target, data, { validate: accept }, reason, pattern);
   // text with a BOM (as written by exportCSV({bom}) style tools) still parses
   const res = await importJSON(target, `\uFEFF${JSON.stringify(ok)}`, { validate: accept });
   assert.equal(res.ok, true);
@@ -186,8 +200,8 @@ test('a partly invalid file is rejected as a whole: not even its valid records a
   const file = asFile(await exportJSON(repo, { now: NOW }));
   file.shots[2].schema = 'golf-shot/99';       // bad schema (builtin validator)
   const target = await openMem();
-  await assertRejectedUntouched(target, file, { validate: builtinShotValidator }, /沒有寫入任何資料.*1 筆球.*shot-3/);
-  assert.deepEqual(await counts(target), { venues: 0, presets: 0, sessions: 0, shots: 0, poses: 0, clips: 0, labels: 0, models: 0 });
+  await assertRejectedUntouched(target, file, { validate: builtinShotValidator }, 'invalid', /nothing written.*1 invalid shot.*shot-3/);
+  assert.deepEqual(await counts(target), ALL_EMPTY);
 
   // several kinds of failure at once: all are listed in details
   const bad = asFile(await exportJSON(repo, { now: NOW }));
@@ -199,27 +213,30 @@ test('a partly invalid file is rejected as a whole: not even its valid records a
   try { await importJSON(target, bad, { validate: builtinShotValidator }); } catch (e) { err = e; }
   assert.ok(err instanceof ImportError);
   assert.ok(err.details.length >= 4, err.details.join(' | '));
-  assert.ok(hasChinese(err.message));
+  assert.equal(err.reason, 'invalid');
+  assert.equal(err.params.n, err.details.length);
+  assert.ok(!hasChinese(err.message) && !hasChinese(err.details.join(' ')));
   assert.equal(await target.shots.count(), 0);
 
   // a custom validator in every accepted return shape
   const bads = [
     () => false,
-    () => ({ ok: false, errors: ['x 不對'] }),
-    () => ({ valid: false, errors: [{ path: 'metrics.tempo_ratio', message: '超出範圍' }] }),
-    () => ['x 不對'],
+    () => ({ ok: false, errors: ['x is wrong'] }),
+    () => ({ valid: false, errors: [{ path: 'metrics.tempo_ratio', message: 'out of range' }] }),
+    () => ['x is wrong'],
     async () => ({ ok: false }),
     () => { throw new Error('validator crashed'); },
     () => undefined,
   ];
   const goodFile = asFile(await exportJSON(repo, { now: NOW }));
-  for (const validate of bads) await assertRejectedUntouched(target, goodFile, { validate: (s) => (s.shot_id === 'shot-2' ? validate(s) : true) }, /沒有寫入任何資料/);
+  for (const validate of bads) await assertRejectedUntouched(target, goodFile, { validate: (s) => (s.shot_id === 'shot-2' ? validate(s) : true) }, 'invalid', /nothing written/);
   for (const validate of [() => true, () => ({ ok: true }), () => ({ valid: true, errors: [] }), () => [], async () => true]) {
     const t = await openMem();
     assert.equal((await importJSON(t, asFile(await exportJSON(repo, { now: NOW })), { validate })).ok, true);
     assert.equal(await t.shots.count(), 4);
   }
-  assert.deepEqual(normalizeValidation([{ path: 'a', message: 'b' }]), { ok: false, errors: ['a：b'] });
+  assert.deepEqual(normalizeValidation([{ path: 'a', message: 'b' }]), { ok: false, errors: ['a: b'] });
+  assert.deepEqual(normalizeValidation(false), { ok: false, errors: ['validation failed'] });
 });
 
 test('import merges by id: higher revision wins, a tie keeps the stored record, duplicates inside the file resolve the same way', async () => {
@@ -246,8 +263,10 @@ test('import merges by id: higher revision wins, a tie keeps the stored record, 
   assert.deepEqual(res.counts.shots, { added: 2, updated: 1, kept: 2 });
   assert.deepEqual(res.counts.venues, { added: 0, updated: 1, kept: 0 });
   assert.equal(res.warnings.length, 1);
-  assert.match(res.warnings[0], /重複/);
-  assert.match(res.message, /新增 2 筆、更新 2 筆、略過 2 筆/);
+  assert.match(res.warnings[0], /shots: 2 duplicate shot_id/);
+  assert.match(res.message, /2 added, 2 updated, 2 kept/);
+  assert.deepEqual(res.msg, { code: 'history.restore.done', params: { added: 2, updated: 2, kept: 2 } });
+  assert.ok(!hasChinese(JSON.stringify({ w: res.warnings, m: res.message, msg: res.msg })));
   const note = async (id) => (await repo.shots.get(id)).note;
   assert.equal(await note('tie'), 'stored');
   assert.equal(await note('lower'), 'stored');
@@ -262,7 +281,7 @@ test('default validator: contract/validate.js when it can be loaded, else the bu
   assert.equal(typeof def.fn, 'function');
   assert.ok(def.source === 'contract' || def.source === 'builtin');
   if (def.source === 'builtin') {
-    assert.ok(hasChinese(def.note));
+    assert.ok(typeof def.note === 'string' && !hasChinese(def.note));
     const repo = await openMem();
     await fillRepo(repo);
     const file = asFile(await exportJSON(repo, { now: NOW }));
@@ -272,7 +291,7 @@ test('default validator: contract/validate.js when it can be loaded, else the bu
     assert.ok(res.warnings.some((w) => /contract\/validate\.js/.test(w)));
     assert.equal(await fresh.shots.count(), 4);
     file.shots[0].schema = 'wrong';
-    await assertRejectedUntouched(await openMem(), file, undefined, /不符合格式/);
+    await assertRejectedUntouched(await openMem(), file, undefined, 'invalid', /invalid shot/);
   }
   assert.deepEqual(builtinShotValidator(makeShot()), { ok: true, errors: [] });
   assert.equal(builtinShotValidator(null).ok, false);

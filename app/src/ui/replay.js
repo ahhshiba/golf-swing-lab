@@ -1,9 +1,25 @@
-// ui/replay.js — clip replay on a canvas with the pose skeleton overlay, frame stepping and draggable event
-// markers (P6). Pure helpers (checkMonotonic, nearestIndex) are exported for tests.
-
+// ui/replay.js — clip replay with the pose skeleton overlay, frame stepping and the event timeline (package C;
+// PRODUCT-SPEC §2.3 Results › 5, V03 / A11Y-2 / UX-09 / A11Y-6). Pure helpers are exported for tests.
+//
+//   POSE_EDGES                      BlazePose-33 skeleton edges
+//   checkMonotonic(events) -> { ok, code, params, message }   code 'replay.error.order' { event, before, f, fb };
+//                                   message = t(code, …) for display (rendered at call time)
+//   nearestIndex(ts, t)             index of the sample closest to t in an ascending array
+//   assignLanes(xs, { width, size, gap }) -> [{ x, left, lane }]   markers of `size` px centred on xs (px) never overlap:
+//                                   each goes to the lowest lane whose previous marker ends ≥ gap before it
+//   clampFrame(f, maxFrame)         integer frame in [0, maxFrame]
+//
+//   createReplay({ clipBlob, poseSeq, fps, events, detected, onEventsChange(events, { dirty }), editable = true,
+//                  showControls = true }) ->
+//     { el, events(), setEvents(ev), destroy(), time(), frame(), seek(t_s), seekFrame(f), setEventAt(name, t_s?),
+//       select(name), selected(), undo(), canUndo(), resetEvent(name?), dirty(), markSaved(), hasMedia() }
+//   Timeline: 12 px dots (lane-assigned, no text on the track) with a 44 px hit box, role=slider (arrow ±1 frame,
+//   Shift+arrow ±10, Home/End), the selected event's name in one chip above, an event ChipRow below, big ◀ ▶ frame
+//   buttons, 設為這一幀 (event-set-frame), 重設為偵測值, 復原 (event-undo). Dragging a dot still works.
 import { h, clear } from './dom.js';
+import * as C from './components.js';
 import { EVENTS } from '../contract/enums.js';
-import { EVENT_LABELS } from './format.js';
+import { t, fmtNum } from '../i18n/index.js';
 
 /** BlazePose-33 skeleton edges. */
 export const POSE_EDGES = Object.freeze([
@@ -11,67 +27,114 @@ export const POSE_EDGES = Object.freeze([
   [27, 29], [29, 31], [28, 30], [30, 32], [27, 31], [28, 32], [0, 11], [0, 12], [15, 17], [16, 18],
 ]);
 
-/** Events in GolfDB order must have non-decreasing frames: { ok, message } (message in Chinese). */
+const MARKER = 44; // hit box (px); the visible dot is 12 px
+const LANE_GAP = 4;
+
+/** Events in swing order must have non-decreasing frames. */
 export function checkMonotonic(events) {
   let prev = null;
   for (const name of EVENTS) {
     const e = events?.[name];
     if (!e || !Number.isFinite(e.frame)) continue;
     if (prev && e.frame < prev.e.frame) {
-      return { ok: false, message: `事件順序不對：「${EVENT_LABELS[name]}」（第 ${e.frame} 幀）不能早於「${EVENT_LABELS[prev.name]}」（第 ${prev.e.frame} 幀）` };
+      const params = { event: name, before: prev.name, f: e.frame, fb: prev.e.frame };
+      const code = 'replay.error.order';
+      return { ok: false, code, params, get message() { return t(code, { ...params, event: t(`event.${name}`), before: t(`event.${prev.name}`) }); } };
     }
     prev = { name, e };
   }
-  return { ok: true, message: '' };
+  return { ok: true, code: null, params: {}, message: '' };
 }
 
 /** Index of the sample closest to t in an ascending time array. */
-export function nearestIndex(ts, t) {
+export function nearestIndex(ts, t0) {
   if (!ts || !ts.length) return -1;
   let lo = 0;
   let hi = ts.length - 1;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
-    if (ts[mid] <= t) lo = mid; else hi = mid;
+    if (ts[mid] <= t0) lo = mid; else hi = mid;
   }
-  return Math.abs(ts[lo] - t) <= Math.abs(ts[hi] - t) ? lo : hi;
+  return Math.abs(ts[lo] - t0) <= Math.abs(ts[hi] - t0) ? lo : hi;
 }
 
-/**
- * createReplay({ clipBlob, poseSeq, fps, events, onEventsChange(events) }) ->
- *   { el, events(), setEvents(ev), destroy(), time(), frame(), seek(t_s), setEventAt(name, t_s?) }
- * setEventAt (P14 annotation): moves event `name` to the frame under the cursor (or at t_s) as a manual event.
- */
-export function createReplay({ clipBlob = null, poseSeq = null, fps = 60, events = {}, onEventsChange = () => {} }) {
-  let ev = JSON.parse(JSON.stringify(events ?? {}));
-  const canvas = h('canvas.replay-canvas', {});
-  const video = h('video', { playsinline: true, muted: true, preload: 'auto', hidden: true });
-  const label = h('span.replay-time', '');
-  const bar = h('div.timeline', {});
-  const url = clipBlob ? URL.createObjectURL(clipBlob) : null;
-  let duration = 0;
-  let tLocal = 0; // time cursor when there is no video
-  if (url) video.src = url;
+/** Lane assignment for markers of `size` px centred at xs (px) on a track `width` px wide. Input order is kept. */
+export function assignLanes(xs, { width, size = MARKER, gap = LANE_GAP } = {}) {
+  const W = Math.max(size, Number(width) || size);
+  const items = xs.map((x, i) => ({ i, x, left: Math.max(0, Math.min(W - size, x - size / 2)) }));
+  const order = [...items].sort((a, b) => a.left - b.left || a.i - b.i);
+  const laneEnd = []; // right edge of the last marker in each lane
+  for (const it of order) {
+    let lane = laneEnd.findIndex((end) => it.left >= end + gap);
+    if (lane < 0) { lane = laneEnd.length; laneEnd.push(0); }
+    laneEnd[lane] = it.left + size;
+    it.lane = lane;
+  }
+  return items.map(({ x, left, lane }) => ({ x, left, lane }));
+}
 
-  const dt = 1 / (fps > 0 ? fps : 60);
-  const frameOf = (t) => Math.round(t * fps);
+export function clampFrame(f, maxFrame) {
+  const m = Number.isFinite(maxFrame) && maxFrame >= 0 ? Math.floor(maxFrame) : Infinity;
+  return Math.max(0, Math.min(m, Math.round(Number(f) || 0)));
+}
+
+const copy = (o) => JSON.parse(JSON.stringify(o ?? {}));
+const css = (el, name, fallback) => {
+  try { const v = getComputedStyle(el).getPropertyValue(name).trim(); return v || fallback; } catch (_) { return fallback; }
+};
+
+export function createReplay({ clipBlob = null, poseSeq = null, fps = 60, events = {}, detected = null, onEventsChange = () => {}, editable = true, showControls = true } = {}) {
+  const FPS = fps > 0 ? fps : 60;
+  let ev = copy(events);
+  const original = copy(detected ?? events);
+  let saved = JSON.stringify(ev);
+  const undoStack = [];
+  let sel = EVENTS.find((n) => ev[n]) ?? EVENTS[0];
+  const url = clipBlob ? URL.createObjectURL(clipBlob) : null;
+  const hasPose = Boolean(poseSeq?.img && poseSeq?.t_s && poseSeq.t_s.length);
+  const media = Boolean(url || hasPose);
+  let duration = 0;
+  let tLocal = 0;
+
+  const frameOf = (s) => Math.round(s * FPS);
+  const maxFrame = () => (duration > 0 ? Math.round(duration * FPS) : Infinity);
+
+  // ------------------------------------------------------------------ stage
+  const canvas = h('canvas.replay-canvas', { role: 'img' });
+  const video = h('video', { playsinline: true, muted: true, preload: 'auto', hidden: true });
+  if (url) video.src = url;
+  const stage = media
+    ? h('div.replay-stage', {}, canvas, video)
+    : C.emptyState({ icon: 'film-off', title: t('replay.no_clip.title'), body: t('replay.no_clip.body'), testid: 'replay-empty' });
+  if (!media) stage.classList.add('replay-empty');
+
+  const timeEl = h('p.replay-time', { 'aria-live': 'off' });
 
   function draw() {
+    if (!media) return;
     const W = video.videoWidth || poseSeq?.W || 640;
     const H = video.videoHeight || poseSeq?.H || 360;
     if (canvas.width !== W) { canvas.width = W; canvas.height = H; canvas.style.aspectRatio = `${W} / ${H}`; }
     const g = canvas.getContext('2d');
-    if (video.readyState >= 2) g.drawImage(video, 0, 0, W, H);
-    else { g.fillStyle = '#111'; g.fillRect(0, 0, W, H); }
-    const t = url ? (video.currentTime || 0) : tLocal;
-    label.textContent = `${t.toFixed(3)} s · 第 ${frameOf(t)} 幀`;
-    if (poseSeq?.img && poseSeq?.t_s) {
-      const i = nearestIndex(poseSeq.t_s, t);
+    if (!g) return;
+    if (url && video.readyState >= 2) g.drawImage(video, 0, 0, W, H);
+    else {
+      g.fillStyle = css(canvas, 'background-color', 'black');
+      g.fillRect(0, 0, W, H);
+      if (!url) { // pose-only: ground line
+        g.strokeStyle = css(canvas, '--replay-ground', 'gray');
+        g.lineWidth = Math.max(2, W / 300);
+        g.beginPath(); g.moveTo(0, H * 0.9); g.lineTo(W, H * 0.9); g.stroke();
+      }
+    }
+    const tt = now();
+    if (hasPose) {
+      const i = nearestIndex(poseSeq.t_s, tt);
       if (i >= 0) {
         const o = i * 33 * 4;
         const P = (k) => [poseSeq.img[o + 4 * k] * W, poseSeq.img[o + 4 * k + 1] * H, poseSeq.img[o + 4 * k + 3]];
         g.lineWidth = Math.max(2, W / 400);
-        g.strokeStyle = 'rgba(0,220,140,0.9)';
+        g.strokeStyle = css(canvas, 'color', 'lime');
         for (const [a, b] of POSE_EDGES) {
           const pa = P(a); const pb = P(b);
           if (pa[2] < 0.3 || pb[2] < 0.3) continue;
@@ -81,77 +144,254 @@ export function createReplay({ clipBlob = null, poseSeq = null, fps = 60, events
     }
   }
 
-  function renderMarkers() {
-    clear(bar);
-    if (!(duration > 0)) return;
-    for (const name of EVENTS) {
-      const e = ev[name];
-      if (!e || !Number.isFinite(e.t_s)) continue;
-      const m = h('button.marker', { type: 'button', title: EVENT_LABELS[name], style: { left: `${(100 * e.t_s) / duration}%` }, dataset: { event: name } }, EVENT_LABELS[name]);
-      m.addEventListener('pointerdown', (pe) => {
-        pe.preventDefault();
-        m.setPointerCapture?.(pe.pointerId);
-        const move = (me) => {
-          const r = bar.getBoundingClientRect();
-          const t = Math.max(0, Math.min(duration, ((me.clientX - r.left) / r.width) * duration));
-          const f = frameOf(t);
-          ev[name] = { ...ev[name], frame: f, t_s: f / fps, source: 'manual', conf: 1 };
-          m.style.left = `${(100 * ev[name].t_s) / duration}%`;
-          seek(ev[name].t_s);
-        };
-        const up = () => { m.removeEventListener('pointermove', move); m.removeEventListener('pointerup', up); onEventsChange(api.events()); };
-        m.addEventListener('pointermove', move);
-        m.addEventListener('pointerup', up);
-      });
-      m.addEventListener('click', () => seek(e.t_s));
-      bar.append(m);
-    }
+  // ------------------------------------------------------------------ timeline
+  const selChip = h('p.tl-selected', { 'aria-live': 'polite' });
+  const rail = h('div.tl-rail', {});
+  const cursor = h('div.tl-cursor', { 'aria-hidden': 'true' });
+  const track = h('div.tl-track', {}, rail, cursor);
+  const markers = new Map();
+  const chips = C.chipRow({
+    items: EVENTS.map((n) => [n, t(`event.${n}`)]), value: sel, label: t('replay.events.label'), testid: 'event-chips',
+    onChange: (n) => { select(n); const e = ev[n]; if (e) seekFrame(e.frame); },
+  });
+  for (const b of chips.querySelectorAll('.chip-row-opt')) { b.setAttribute('data-testid', 'event-chip'); b.setAttribute('data-event', b.dataset.value); }
+
+  function trackWidth() { return track.clientWidth || track.getBoundingClientRect?.().width || 320; }
+
+  function layout() {
+    const W = trackWidth();
+    const names = EVENTS.filter((n) => ev[n] && Number.isFinite(ev[n].frame));
+    const dur = duration > 0 ? duration : 1;
+    const xs = names.map((n) => (Math.min(dur, ev[n].frame / FPS) / dur) * W);
+    const lanes = assignLanes(xs, { width: W });
+    let maxLane = 0;
+    names.forEach((n, i) => {
+      const m = markers.get(n) ?? makeMarker(n);
+      const { left, lane, x } = lanes[i];
+      maxLane = Math.max(maxLane, lane);
+      m.el.style.left = `${left}px`;
+      m.el.style.top = `${lane * (MARKER + LANE_GAP)}px`;
+      m.dot.style.left = `${x - left}px`;
+      m.el.style.setProperty('--stem-x', `${x - left}px`);
+      m.el.hidden = false;
+      const f = ev[n].frame;
+      m.el.setAttribute('aria-valuenow', String(f));
+      m.el.setAttribute('aria-valuemax', String(Number.isFinite(maxFrame()) ? maxFrame() : f));
+      m.el.setAttribute('aria-valuetext', t('replay.marker.valuetext', { event: t(`event.${n}`), f, s: fmtNum(f / FPS, { digits: 2 }) }));
+      m.el.classList.toggle('is-selected', n === sel);
+      m.el.classList.toggle('is-manual', ev[n].source === 'manual');
+      m.el.dataset.lane = String(lane);
+      m.el.style.setProperty('--lane', String(lane));
+    });
+    for (const [n, m] of markers) if (!names.includes(n)) m.el.hidden = true;
+    track.style.height = `${(maxLane + 1) * (MARKER + LANE_GAP)}px`;
+    paintCursor();
   }
 
-  function seek(t) {
-    const c = Math.max(0, Math.min(duration || t, t));
-    if (!url) { tLocal = c; draw(); return; }
-    video.currentTime = c;
+  function paintCursor() {
+    const W = trackWidth();
+    const dur = duration > 0 ? duration : 1;
+    cursor.style.left = `${(Math.min(dur, Math.max(0, now())) / dur) * W}px`;
   }
+
+  function makeMarker(n) {
+    const dot = h('span.tl-dot', { 'aria-hidden': 'true' });
+    const el = h('button.tl-marker', {
+      type: 'button', role: 'slider', 'aria-label': t(`event.${n}`), 'aria-valuemin': '0', 'data-event': n, 'data-testid': 'event-marker',
+      'aria-orientation': 'horizontal',
+    }, dot);
+    if (!editable) el.setAttribute('aria-readonly', 'true');
+    el.addEventListener('click', () => { select(n); if (ev[n]) seekFrame(ev[n].frame); });
+    el.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 10 : 1;
+      let d = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowUp') d = step;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') d = -step;
+      else if (e.key === 'PageUp') d = 10;
+      else if (e.key === 'PageDown') d = -10;
+      if (d === null && e.key !== 'Home' && e.key !== 'End') return;
+      e.preventDefault();
+      select(n);
+      const cur = ev[n]?.frame ?? frameOf(now());
+      let f = d === null ? (e.key === 'Home' ? 0 : maxFrame()) : cur + d;
+      f = clampFrame(f, maxFrame());
+      if (editable) moveEvent(n, f); else seekFrame(f);
+    });
+    el.addEventListener('pointerdown', (pe) => {
+      if (!editable) return;
+      pe.preventDefault();
+      el.setPointerCapture?.(pe.pointerId);
+      select(n);
+      let moved = false;
+      const startState = copy(ev);
+      const move = (me) => {
+        const r = track.getBoundingClientRect();
+        const dur = duration > 0 ? duration : 1;
+        const s = Math.max(0, Math.min(dur, ((me.clientX - r.left) / r.width) * dur));
+        const f = clampFrame(frameOf(s), maxFrame());
+        if (f === ev[n]?.frame) return;
+        if (!moved) { undoStack.push(startState); moved = true; }
+        ev[n] = { ...(ev[n] ?? {}), frame: f, t_s: f / FPS, source: 'manual', conf: 1 };
+        layout();
+        seekFrame(f);
+      };
+      const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); if (moved) changed(); };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+    track.append(el);
+    const m = { el, dot };
+    markers.set(n, m);
+    return m;
+  }
+
+  track.addEventListener('pointerdown', (pe) => {
+    if (pe.target !== track && pe.target !== rail) return;
+    const r = track.getBoundingClientRect();
+    const dur = duration > 0 ? duration : 0;
+    if (dur > 0) seek(((pe.clientX - r.left) / r.width) * dur);
+  });
+
+  // ------------------------------------------------------------------ controls
+  const prev = C.button({ label: t('replay.prev_frame'), icon: 'step-back', size: 'lg', variant: 'secondary', testid: 'replay-prev', onClick: () => seekFrame(frameOf(now()) - 1) });
+  const next = C.button({ label: t('replay.next_frame'), icon: 'step-forward', size: 'lg', variant: 'secondary', testid: 'replay-next', onClick: () => seekFrame(frameOf(now()) + 1) });
+  const setBtn = C.button({ label: t('replay.set_frame'), variant: 'primary', size: 'lg', block: true, testid: 'event-set-frame', onClick: () => setEventAt(sel) });
+  const resetBtn = C.button({ label: t('replay.reset_event'), variant: 'plain', size: 'md', testid: 'event-reset', onClick: () => resetEvent(sel) });
+  const undoBtn = C.button({ label: t('common.undo'), icon: 'undo', variant: 'plain', size: 'md', testid: 'event-undo', onClick: () => undo() });
+  const msgEl = h('p.replay-msg', { role: 'status' });
+
+  const controls = h('div.replay-controls', {},
+    timeEl,
+    h('div.replay-step', {}, prev, next),
+    editable ? setBtn : null,
+    editable ? h('div.replay-edit-row', {}, undoBtn, resetBtn) : null,
+    msgEl);
+
+  const el = h('div.replay', {}, stage,
+    h('div.tl-wrap', { 'data-testid': 'timeline' }, selChip, track, chips),
+    showControls ? controls : null);
+
+  // ------------------------------------------------------------------ state
+  function select(n) {
+    if (!EVENTS.includes(n)) return;
+    sel = n;
+    chips.value = n;
+    const e = ev[n];
+    const src = e ? t(e.source === 'manual' ? 'event.source.manual' : 'event.source.auto') : '';
+    selChip.textContent = e ? t('replay.selected', { event: t(`event.${n}`), f: e.frame, source: src }) : t('replay.selected_none', { event: t(`event.${n}`) });
+    for (const [k, m] of markers) m.el.classList.toggle('is-selected', k === n);
+    paintButtons();
+  }
+
+  function paintButtons() {
+    undoBtn.setDisabled(undoStack.length === 0);
+    const o = original[sel];
+    const c = ev[sel];
+    resetBtn.setDisabled(!o || (c && c.frame === o.frame && c.source === o.source));
+  }
+
+  function changed() {
+    const m = checkMonotonic(ev);
+    msgEl.textContent = m.ok ? '' : m.message;
+    msgEl.className = m.ok ? 'replay-msg' : 'replay-msg bad';
+    layout();
+    select(sel);
+    onEventsChange(api.events(), { dirty: api.dirty(), ok: m.ok, check: m });
+  }
+
+  function moveEvent(n, f) {
+    if (ev[n] && ev[n].frame === f && ev[n].source === 'manual') { seekFrame(f); return; }
+    undoStack.push(copy(ev));
+    ev[n] = { ...(ev[n] ?? {}), frame: f, t_s: f / FPS, source: 'manual', conf: 1 };
+    if (!(duration >= ev[n].t_s)) duration = Math.max(duration || 0, ev[n].t_s);
+    seekFrame(f);
+    changed();
+  }
+
+  function setEventAt(n, s = now()) {
+    if (!EVENTS.includes(n)) throw new RangeError(`unknown event '${n}'`);
+    const f = clampFrame(frameOf(s), Infinity);
+    undoStack.push(copy(ev));
+    ev[n] = { ...(ev[n] ?? {}), frame: f, t_s: f / FPS, source: 'manual', conf: 1 };
+    if (!(duration >= ev[n].t_s)) duration = Math.max(duration || 0, ev[n].t_s);
+    changed();
+    return ev[n];
+  }
+
+  function resetEvent(n = sel) {
+    const o = original[n];
+    if (!o) return;
+    undoStack.push(copy(ev));
+    ev[n] = copy(o);
+    seekFrame(o.frame);
+    changed();
+  }
+
+  function undo() {
+    if (!undoStack.length) return false;
+    ev = undoStack.pop();
+    const e = ev[sel];
+    if (e) seekFrame(e.frame);
+    changed();
+    return true;
+  }
+
+  function seek(s) {
+    const c = Math.max(0, duration > 0 ? Math.min(duration, s) : s);
+    if (!url) tLocal = c;
+    else video.currentTime = c;
+    paintTime();
+    if (!url) draw();
+  }
+  function seekFrame(f) { seek(clampFrame(f, maxFrame()) / FPS); }
   const now = () => (url ? (video.currentTime || 0) : tLocal);
 
-  video.addEventListener('loadedmetadata', () => { duration = video.duration; renderMarkers(); draw(); });
-  video.addEventListener('seeked', draw);
+  function paintTime() {
+    const f = frameOf(now());
+    timeEl.textContent = t('replay.frame', { f, s: fmtNum(now(), { digits: 2 }) });
+    canvas.setAttribute('aria-label', t('replay.canvas', { f, s: fmtNum(now(), { digits: 2 }), at: atEvent(f) }));
+    paintCursor();
+  }
+  function atEvent(f) {
+    const hit = EVENTS.filter((n) => ev[n]?.frame === f).map((n) => t(`event.${n}`));
+    return hit.length ? t('replay.canvas_at', { events: hit.join(' · ') }) : '';
+  }
+
+  video.addEventListener('loadedmetadata', () => { if (Number.isFinite(video.duration)) duration = Math.max(duration, video.duration); layout(); draw(); paintTime(); });
+  video.addEventListener('seeked', () => { draw(); paintTime(); });
   video.addEventListener('loadeddata', draw);
 
-  const el = h('div.replay', {},
-    canvas, video,
-    h('div.row', {},
-      h('button', { type: 'button', 'aria-label': '上一幀', onclick: () => seek(now() - dt) }, '◀ 上一幀'),
-      label,
-      h('button', { type: 'button', 'aria-label': '下一幀', onclick: () => seek(now() + dt) }, '下一幀 ▶')),
-    bar,
-    url ? null : h('p.hint', '這一球沒有保存影片（可能已在儲存清理時刪除），只能修改事件數值。'));
-  if (!url) {
+  {
     const ts = poseSeq?.t_s;
-    const lastEv = Math.max(0, ...EVENTS.map((n) => ev[n]?.t_s).filter(Number.isFinite));
+    const lastEv = Math.max(0, ...EVENTS.map((n) => ev[n]?.t_s ?? (Number.isFinite(ev[n]?.frame) ? ev[n].frame / FPS : NaN)).filter(Number.isFinite));
     duration = ts && ts.length ? Math.max(ts[ts.length - 1], lastEv) : lastEv;
-    renderMarkers();
-    draw();
   }
+  let ro = null;
+  try { ro = new ResizeObserver(() => layout()); ro.observe(track); } catch (_) { /* old browsers: layout once */ }
+  queueMicrotask(() => { layout(); select(sel); if (ev[sel]) seekFrame(ev[sel].frame); else paintTime(); draw(); });
+  select(sel);
+  paintTime();
 
   const api = {
     el,
-    events: () => JSON.parse(JSON.stringify(ev)),
-    setEvents(e) { ev = JSON.parse(JSON.stringify(e)); renderMarkers(); },
+    events: () => copy(ev),
+    setEvents(e) { ev = copy(e); saved = JSON.stringify(ev); undoStack.length = 0; layout(); select(sel); },
     time: () => now(),
     frame: () => frameOf(now()),
-    seek: (t) => seek(t),
-    setEventAt(name, t = now()) {
-      if (!EVENTS.includes(name)) throw new RangeError(`unknown event '${name}'`);
-      const f = Math.max(0, frameOf(t));
-      ev[name] = { ...(ev[name] ?? {}), frame: f, t_s: f / fps, source: 'manual', conf: 1 };
-      if (!(duration >= ev[name].t_s)) duration = Math.max(duration || 0, ev[name].t_s);
-      renderMarkers();
-      onEventsChange(api.events());
-      return ev[name];
-    },
-    destroy() { if (url) URL.revokeObjectURL(url); video.removeAttribute('src'); },
+    seek: (s) => seek(s),
+    seekFrame,
+    setEventAt,
+    select,
+    selected: () => sel,
+    undo,
+    canUndo: () => undoStack.length > 0,
+    resetEvent,
+    dirty: () => JSON.stringify(ev) !== saved,
+    markSaved() { saved = JSON.stringify(ev); undoStack.length = 0; paintButtons(); },
+    hasMedia: () => media,
+    layout,
+    destroy() { try { ro?.disconnect(); } catch (_) { /* ignore */ } if (url) URL.revokeObjectURL(url); video.removeAttribute('src'); clear(el); },
   };
   return api;
 }

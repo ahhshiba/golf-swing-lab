@@ -10,7 +10,7 @@
 // on the serviceWorker 'message' channel with {type:'VERSION', version, precache_complete: 0..1}. Without an answer the
 // report counts how many entries of the MANIFEST embedded in sw.js (shell + precached assets) are in the caches.
 
-import { get } from './record.js';
+import { get, events } from './record.js';
 
 export const REPORT_SCHEMA = 'gsl-device-report/1';
 export const CODEC_AVC = 'avc1.64002A';
@@ -37,6 +37,30 @@ export function emptyReport() {
     calibration: null,
     thermal: { degraded: null },
   };
+}
+
+/**
+ * Human summary of a report for the Diagnostics screen (V19 / R12): ids + values only, the screen formats and
+ * labels them (t('diag.row.<id>')). -> [{ id, icon, value, ok: true|false|null }]   (ok null = unknown)
+ */
+export function summarize(rep) {
+  const r = rep || {};
+  const n = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  const errs = Array.isArray(r.events) ? r.events.filter((e) => e && e.kind === 'error') : [];
+  const quota = n(r.storage?.quota);
+  const usage = n(r.storage?.usage);
+  return [
+    { id: 'version', icon: 'info', value: r.app_version ?? null, ok: r.app_version ? true : null },
+    { id: 'camera_fps', icon: 'camera', value: n(r.gum?.actual_fps), ok: n(r.gum?.actual_fps) === null ? null : r.gum.actual_fps >= 30 },
+    { id: 'camera_size', icon: 'camera', value: n(r.gum?.width) && n(r.gum?.height) ? `${r.gum.width}x${r.gum.height}` : null, ok: n(r.gum?.width) === null ? null : r.gum.width <= 1280 },
+    { id: 'decoder', icon: 'video', value: r.webcodecs?.avc1 === true ? 'webcodecs' : (r.webcodecs?.avc1 === false ? 'video' : null), ok: r.webcodecs?.avc1 ?? null },
+    { id: 'pose', icon: 'person', value: r.pose?.delegate ?? null, ok: r.pose?.delegate ? true : null },
+    { id: 'storage', icon: 'storage', value: usage !== null && quota !== null ? { usage, quota } : null, ok: usage !== null && quota !== null ? quota - usage > 500 * 1048576 : null },
+    { id: 'persisted', icon: 'lock', value: r.storage?.persisted ?? null, ok: r.storage?.persisted ?? null },
+    { id: 'offline', icon: 'download', value: r.precache_complete ?? null, ok: typeof r.precache_complete === 'number' ? r.precache_complete >= 1 : null },
+    { id: 'standalone', icon: 'home', value: r.standalone ?? null, ok: r.standalone ?? null },
+    { id: 'errors', icon: 'alert', value: errs.length, ok: errs.length === 0 },
+  ];
 }
 
 function isObj(v) {
@@ -200,6 +224,13 @@ export async function buildReport(opts = {}) {
     rep.storage.usage = typeof est.usage === 'number' ? est.usage : null;
     rep.storage.quota = typeof est.quota === 'number' ? est.quota : null;
   }
+
+  // crash log + offline readiness (PRODUCT-SPEC §4.3): added by buildReport, outside the emptyReport() skeleton
+  rep.events = events();
+  const op = get('offline.progress');
+  rep.offline = { ready: null, done: null, total: null };
+  if (op && typeof op === 'object') rep.offline = { ready: op.ready ?? null, done: op.done ?? null, total: op.total ?? null };
+  if (rep.offline.ready === null && typeof rep.precache_complete === 'number') rep.offline.ready = rep.precache_complete >= 1;
 
   rep.webcodecs.avc1 = await codecSupported(env, 'decode', CODEC_AVC);
   rep.webcodecs.hevc = await codecSupported(env, 'decode', CODEC_HEVC);

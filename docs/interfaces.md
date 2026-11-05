@@ -101,7 +101,8 @@ Frames must be non-decreasing in this order.
 ```
 Invariants (enforced by `contract/validate.js`): `value !== null ⇔ validity ∈ {valid, estimated, low_confidence}`;
 `value === null ⇒ reason_codes.length > 0`; `value !== null ⇒ ci95 !== null || sigma !== null`; every code is
-defined in `contract/reason-codes.js` with a Traditional Chinese description.
+defined in `contract/reason-codes.js` (codes only: `REASON_CODE_LIST`, `REASON_CODES`/`RC` = `{ NAME: 'NAME' }`) and has
+a Traditional Chinese description in the zh-Hant catalog, `reason.<NAME>.long` (`app/i18n/zh-Hant/reason.json`).
 Helper: `contract/metric.js` exports `metricValue({...})`, `metricNull(validity, codes, unit)`.
 
 **Calibration** (from `calib/`), exactly the `calibration{…}` object of CAFCR §F3:
@@ -162,6 +163,11 @@ about the optical axis (positive = clockwise as seen by the camera, i.e. image c
 
 ## 9. Reason codes and metric ids (shared, fixed)
 
+User-visible text for codes, metric ids, clubs, views and events comes from the catalogs (docs/i18n.md §4); pure
+modules return codes / `{ code, params }`, never prose. Codes added in the 2026-11 round: RC `NO_CALIBRATION`,
+`CLIP_NOT_SAVED`, `SLOWMO_CORRECTED`; error codes in `APP_ERROR_CODES` (contract/reason-codes.js).
+
+
 Reason codes live in `app/src/contract/reason-codes.js` (already written; owned by contract). Import
 `{ RC }` and always write `RC.TRACK_TOO_SHORT`, never a bare string, so `scripts/check_contract.mjs` can check them.
 If you need a code that is missing, use the closest existing one and list the request in your report.
@@ -191,3 +197,13 @@ exactly these keys:
 | 18 | `launch_h_deg` (+ = right of target for a right-hander) | deg |
 | 19 | `carry_m` | m |
 | 20 | `smash_factor` | ratio |
+
+### 9.x WP-A shell additions (2026-11-05)
+- `state.js`: `SUB_SCREENS`, `ALL_SCREENS`, `TABS`, `TABBAR_HIDDEN`, `tabOf(screen, prevTab)`, `nav.root(screen)`.
+- `app.ready()` → Promise (late layers + controller loaded); `app.build` = `{ version, semver, id, devResearch,
+  bundledEventModel }` from `src/version.js` (About: `${semver} · build ${id}`); `app.version()` never returns "dev"
+  in a build.
+- Lints: `node scripts/check_i18n.mjs [--pkg B|practice …] [--strict]`, `node scripts/check_tokens.mjs [--strict]`;
+  verify stages `tokens`, `i18n` (always `--strict` since the integration commit: any finding in any package FAILS, 0 CJK literals in app/src), `event-conf`
+  (`scripts/check_event_conf.mjs`, SKIP until it exists). `static` also forbids `innerHTML`, `insertAdjacentHTML`,
+  `outerHTML =`, `document.write` in app/src (XML namespace URIs are exempt from the URL ban).

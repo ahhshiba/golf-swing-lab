@@ -41,3 +41,20 @@
 | U27 | H.264 解碼走 WebCodecs（Safari） | Playwright Chromium 沒有 H.264 解碼器（`isConfigSupported(avc1)` false）；Playwright WebKit 因缺 `libwoff1`、`libevent-2.1-7t64`、`libavif16`（需 sudo）無法啟動，m1／screens／m2／real-pose 的 @webkit 版本為 SKIP | 實機匯入 H.264 MP4，看 m2 條件（解碼數＝sample_count） |
 | U28 | MediaPipe 遙測被擋後在 Safari 無副作用 | tasks-vision 1.2.2 每 60 秒 POST `odml.pa.googleapis.com/v1/log`；`blockForeignFetch` 擋下後 Chromium 正常 | 實機飛航模式與連網各匯入一次，診斷報告 `pose.blocked_requests` 有數字、分析正常 |
 | U29 | 即時模式音訊與影像時間對齊（M5 依擊球時間比對） | 假相機＋假麥克風：比對誤差與音訊-影像偏移見 m5 輸出 | 實機 10 真揮＋5 空揮＋10 隔壁聲，`live.shot_log` 對照錄影時間 |
+
+## 平台穩定性與效能（WP-D，2026-11-05；機器上的 gate：`tests/e2e/gates/d-platform.mjs`）
+
+機器上（Chromium，這台主機）已驗的結果寫在第三欄；第四欄是只有 iPhone 才能確認的事。實測後把結果寫進最後一欄。
+
+| # | 項目 | 機器上的結果（不是實機） | 實機要做什麼 | 實機結果 |
+|---|---|---|---|---|
+| D1 | 相機中斷後恢復（來電、鎖定螢幕、切到其他 App） | 單元測試：track ended → `session.status.camera_lost`；`reopenCamera()` 後 `onStreamChange` 收到新 stream，track 訂閱只有一個 | 即時模式中各做一次：來電、鎖屏 30 秒、切到相機 App 再回來；按「重新開啟相機」後 20 秒內繼續偵測到揮桿（診斷 `live.detections` 增加、`interruptions.count`） | |
+| D2 | 100 球練習不被系統砍掉（記憶體） | d-recorder：閒置 120 秒，每段 ≤ 8.1 秒（上限 12 秒），保留的錄影段 0，JS heap 增加 < 0.1 MB；即時畫面 1280×720 | 實機打 100 球（或閒置 + 揮桿 30 分鐘），App 沒有被重新載入；診斷 `recorder.segments.max_s` ≤ 12、`live.retained_blobs` ≤ 2 | |
+| D3 | 手機空間滿 | d-quota（4 MB 配額）：存 1 球、0 支影片，球帶 `CLIP_NOT_SAVED`；單元測試：寫入時 QuotaExceededError 會改存不含影片 | 把手機空間塞到剩 < 500 MB，打 3 球：數字照常保存、影片沒存、出現「空間不足」提示；清出空間後新的球又會存影片 | |
+| D4 | `navigator.storage.persist()` 在主畫面 App 的結果 | Chromium 桌面回傳 false（非主畫面） | 加入主畫面後開啟一次，診斷「防止系統清除資料」是「是」；Safari 分頁裡應是「否」並看得到提醒 | |
+| D5 | 720p 即時擷取不影響 240 fps 高速匯入 | 即時模式要求 1280×720（PF-5）；高速模式只走匯入，不經相機 | 錄 240 fps 慢動作後匯入，`import.last.effective_fps` ≥ 200，球數據有值 | |
+| D6 | 發熱降級 | 單元測試：p95 延遲 > 12 秒先降級（lite、抽幀加倍），再建議改高速模式 | 夏天戶外 30 分鐘即時模式，記錄 `thermal.degraded` 何時出現、球到數字的秒數（`live.latency_p95_s`） | |
+| D7 | 即時模式一球到結果的時間 | d-latency（CPU×4，假相機）：中位 4.3 秒；本機 GPU 是軟體模擬，姿勢改用 CPU delegate（`pose.gpu_software`），每幀 20 ms（GPU 模擬 370 ms） | iPhone 13 即時模式 10 球，`live.jobs` 的 `latency_s` 中位 ≤ 6 秒；`pose.delegate` 應為 GPU、`pose.gpu_software` 不存在 | |
+| D8 | 離線可用 | d-offline：170 個檔案 20.7 MB，首次開啟約 4 秒完成並發出進度；重新載入後仍顯示已完成 | 主畫面 App 第一次開啟時看到下載進度直到「可離線使用」，再開飛航模式重開 App，可以練習與匯入 | |
+| D9 | IndexedDB 卡住 | d-idb-hang：`indexedDB.open` 永不回應時 5.7 秒內進入 App，顯示「結果不會被儲存」 | （難以人為重現）若曾看到「載入中…」不動，回報診斷檔案 | |
+| D10 | 分析引擎當掉 | d-worker-crash：當掉後 1.4 秒顯示「分析引擎停止回應，已重新啟動」，重建後同一支影片可再分析；單幀姿勢 5 秒逾時 | 連續匯入 10 支長影片（各 > 10 秒）不需要重開 App；若出現錯誤，診斷「最近的錯誤」有時間與錯誤 | |

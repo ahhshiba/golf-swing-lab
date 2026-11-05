@@ -15,6 +15,14 @@
 //     the e2e gate real-pose, which fails on any request leaving the local server); the app is offline and private
 //     (KD5), so createPoseLandmarker installs this guard first. A rejected send makes the vendored logger stop for
 //     good. Blocked requests are counted in diag pose.blocked_requests.
+//   softwareRenderer(env = globalThis) -> string | null   the WebGL renderer name when it is a software rasteriser
+//     (SwiftShader, llvmpipe, softpipe, Microsoft Basic Render): MediaPipe's GPU delegate on it is ~15x slower than the
+//     CPU (XNNPACK) delegate (measured here: lite 370 ms vs 21 ms per frame), so createPoseLandmarker then uses 'CPU'
+//     for a requested 'GPU' (diag pose.gpu_software = the renderer). Real phone GPUs are never matched.
+//   blockForeignRequests(env = globalThis) -> { fetch, xhr, beacon, websocket }   PV-2 second layer (PRODUCT-SPEC §6.2):
+//     the fetch guard plus XMLHttpRequest.prototype.open (throws), navigator.sendBeacon (returns false) and WebSocket
+//     (throws) for any URL outside this origin. Idempotent; the worker installs it at start-up. Counted in the same
+//     diag pose.blocked_requests (with pose.blocked_last = the API name, never the URL).
 
 import { poseRow } from './convert.js';
 import { diagRecord } from '../workers/diag.js';
@@ -48,17 +56,34 @@ export function createMonotonicClock() {
   };
 }
 
+let blockedCount = 0;
+function noteBlocked(api) {
+  blockedCount += 1;
+  diagRecord('pose.blocked_requests', blockedCount);
+  diagRecord('pose.blocked_last', api);
+}
+
+function originOf(env) {
+  return env && env.location && env.location.origin && env.location.origin !== 'null' ? env.location.origin : null;
+}
+
+/** true when `input` (string | URL | Request) is an http(s)/ws(s) URL of another origin than env's. */
+export function isForeign(input, env = globalThis) {
+  const origin = originOf(env);
+  if (!origin) return false;
+  let u = null;
+  try { u = new URL(typeof input === 'string' || input instanceof URL ? String(input) : input.url, env.location ? env.location.href : undefined); } catch { u = null; }
+  if (!u) return false;
+  if (/^wss?:$/.test(u.protocol)) return u.host !== new URL(origin).host;
+  return /^https?:$/.test(u.protocol) && u.origin !== origin;
+}
+
 export function blockForeignFetch(env = globalThis) {
   const orig = env && env.fetch;
   if (typeof orig !== 'function' || orig.__gslLocalOnly) return false;
-  const origin = env.location && env.location.origin && env.location.origin !== 'null' ? env.location.origin : null;
-  let blocked = 0;
   const guarded = function fetch(input, init) {
-    let u = null;
-    try { u = new URL(typeof input === 'string' || input instanceof URL ? String(input) : input.url, env.location ? env.location.href : undefined); } catch { u = null; }
-    if (u && /^https?:$/.test(u.protocol) && origin && u.origin !== origin) {
-      blocked += 1;
-      diagRecord('pose.blocked_requests', blocked);
+    if (isForeign(input, env)) {
+      noteBlocked('fetch');
       return Promise.reject(new TypeError('blocked: the app is offline-only (no requests leave this origin)'));
     }
     return orig.call(this ?? env, input, init);
@@ -66,6 +91,69 @@ export function blockForeignFetch(env = globalThis) {
   guarded.__gslLocalOnly = true;
   env.fetch = guarded;
   return true;
+}
+
+export function blockForeignRequests(env = globalThis) {
+  const out = { fetch: blockForeignFetch(env), xhr: false, beacon: false, websocket: false };
+  try {
+    const X = env.XMLHttpRequest;
+    const open = X && X.prototype && X.prototype.open;
+    if (typeof open === 'function' && !open.__gslLocalOnly) {
+      const guarded = function openGuard(method, url, ...rest) {
+        if (isForeign(url, env)) { noteBlocked('xhr'); throw new TypeError('blocked: the app is offline-only'); }
+        return open.call(this, method, url, ...rest);
+      };
+      guarded.__gslLocalOnly = true;
+      X.prototype.open = guarded;
+      out.xhr = true;
+    }
+  } catch { /* read-only prototype */ }
+  try {
+    const nav = env.navigator;
+    const beacon = nav && nav.sendBeacon;
+    if (typeof beacon === 'function' && !beacon.__gslLocalOnly) {
+      const guarded = function sendBeacon(url, data) {
+        if (isForeign(url, env)) { noteBlocked('beacon'); return false; }
+        return beacon.call(nav, url, data);
+      };
+      guarded.__gslLocalOnly = true;
+      Object.defineProperty(nav, 'sendBeacon', { value: guarded, configurable: true, writable: true });
+      out.beacon = true;
+    }
+  } catch { /* not configurable */ }
+  try {
+    const WS = env.WebSocket;
+    if (typeof WS === 'function' && !WS.__gslLocalOnly) {
+      const Guarded = function WebSocket(url, protocols) {
+        if (isForeign(url, env)) { noteBlocked('websocket'); throw new TypeError('blocked: the app is offline-only'); }
+        return protocols === undefined ? new WS(url) : new WS(url, protocols);
+      };
+      Guarded.prototype = WS.prototype;
+      Guarded.__gslLocalOnly = true;
+      for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) Guarded[k] = WS[k];
+      env.WebSocket = Guarded;
+      out.websocket = true;
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
+const SOFTWARE_GL = /SwiftShader|llvmpipe|softpipe|Software Rasterizer|Basic Render|Mesa OffScreen/i;
+
+export function softwareRenderer(env = globalThis) {
+  try {
+    const canvas = typeof env.OffscreenCanvas === 'function' ? new env.OffscreenCanvas(1, 1)
+      : (env.document ? env.document.createElement('canvas') : null);
+    if (!canvas) return null;
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    if (!gl) return null;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER) || '');
+    try { gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* ignore */ }
+    return SOFTWARE_GL.test(name) ? name : null;
+  } catch {
+    return null;
+  }
 }
 
 function inModuleWorker() {
@@ -82,7 +170,7 @@ function median(a) {
 export async function createPoseLandmarker(opts = {}) {
   const model = opts.model ?? 'full';
   const urls = assetUrls({ model });
-  if (!opts.vision) blockForeignFetch(globalThis);
+  if (!opts.vision) blockForeignRequests(globalThis);
   const vision = opts.vision ?? (await import(urls.bundle));
   const moduleWorker = opts.moduleWorker ?? inModuleWorker();
   const fileset = await vision.FilesetResolver.forVisionTasks(urls.wasm, moduleWorker);
@@ -107,6 +195,10 @@ export async function createPoseLandmarker(opts = {}) {
     outputSegmentationMasks: false,
   }); };
   let delegate = opts.delegate ?? 'GPU';
+  if (delegate === 'GPU' && !opts.vision) {
+    const sw = softwareRenderer(globalThis);
+    if (sw) { delegate = 'CPU'; diagRecord('pose.gpu_software', sw); }
+  }
   let lm;
   try {
     lm = await make(delegate);

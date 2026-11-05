@@ -1,0 +1,32 @@
+{
+  "title": "Label swing phases",
+  "list": "The 8 swing phases",
+  "frame": "Frame {f}",
+  "row_done": "{event}: frame {f}, confirmed",
+  "row_todo": "{event}: frame {f}, not confirmed yet",
+  "count": "{n} of 8 confirmed",
+  "left": {
+    "one": "{n} phase still to confirm",
+    "other": "{n} phases still to confirm"
+  },
+  "save": "Save labels",
+  "saved": "Labels saved (version {n})",
+  "hint_export": "Labels only train and check the detector; they do not change this shot’s numbers. Export the training set in History › Teach the swing detector.",
+  "list_sep": ", ",
+  "missing_events_n": {
+    "one": "{n} phase not set: {names}",
+    "other": "{n} phases not set: {names}"
+  },
+  "invalid": "The labels are not valid",
+  "not_object": "The labels are not valid",
+  "unknown_field": "The labels contain an unknown field",
+  "missing_shot_id": "The labels do not belong to a shot",
+  "bad_source": "The labels come from an unknown source",
+  "bad_time": "The label time is not valid",
+  "bad_revision": "The label version is not valid",
+  "bad_fps": "The label frame rate is not valid",
+  "missing_events": "The labels have no swing phases",
+  "unknown_event": "The labels contain an unknown phase",
+  "bad_event": "A swing phase is missing or not valid",
+  "order": "The swing phases are out of order"
+}

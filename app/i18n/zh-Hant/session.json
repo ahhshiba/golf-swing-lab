@@ -1,0 +1,15 @@
+{
+  "status.requesting": "正在取得權限…",
+  "status.ready": "權限已取得，開始架設。",
+  "status.camera_unavailable": "相機無法使用：可以改用「匯入影片」。",
+  "status.camera_lost": "相機中斷了（切到其他 App、來電或鎖定螢幕）。點「重新開啟相機」繼續。",
+  "status.camera_reopened": "相機已重新開啟。",
+  "status.camera_still_lost": "相機仍然無法使用。",
+  "status.low_space": "手機剩不到 {freeMb} MB：這次練習不保存影片，數字照常保存。",
+  "status.clip_not_saved": "空間不足：這一球的影片沒有保存，數字與姿勢已保存。",
+  "status.storage_full": "手機空間已滿：這一球沒有保存。請先清理空間。",
+  "status.camera_released": "已把相機交給內建相機：錄好慢動作後回來「匯入影片」。",
+  "status.thermal_degraded": "手機發熱或太慢：已自動降低分析精度。",
+  "status.thermal_stop_live": "即時分析仍然太慢：建議改用高速模式（先錄影再匯入）。",
+  "status.ended": "練習結束。"
+}

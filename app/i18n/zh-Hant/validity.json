@@ -1,0 +1,13 @@
+{
+  "valid": "可信",
+  "estimated": "估計",
+  "low_confidence": "低可信",
+  "not_measurable": "量不到",
+  "occluded": "被遮住",
+  "ambiguous": "不明確",
+  "dropped": "已捨棄",
+  "stale": "過期",
+  "not_observable": "量不到",
+  "implausible": "不合理",
+  "not_computed": "未計算"
+}

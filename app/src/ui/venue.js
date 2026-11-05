@@ -1,117 +1,269 @@
-// ui/venue.js — P1 venue wizard: mat L/W measured twice (≤ 3 mm), slope (phone flat on the mat 3 s, ±0.1°),
-// tee height, bay depth B with the CAFCR C2 narrow-bay verdict. The f-lock (3 magnifier solves, SD ≤ 1 %) runs in
-// the first setup (ui/setup.js) so a session keeps its single getUserMedia.
-
-import { h, clear, field, numberInput, card, toast, screenHeader, select } from './dom.js';
-import { VIEW_LABELS } from './format.js';
+// ui/venue.js — venue wizard (PRODUCT-SPEC §2.3 Venue; UX-12): five steps with a diagram each — mat length (two
+// measurements ≤ 3 mm apart), mat width (twice), ball spot, bay depth B (optional, CAFCR C2 verdict), slope + tee +
+// name. Nothing is prefilled on a new venue; units are input suffixes (settings.units.body: cm | in). The f-lock
+// (3 solves, SD ≤ 1 %) runs in the first setup (ui/setup.js) so a session keeps its single getUserMedia.
+//   show({ venue_id }) edits a venue, show({ list: true }) shows the venue list (ui/venues.js), show() adds one.
+import { h, clear } from './dom.js';
+import { button, screenHeader, notice, segmented } from './components.js';
+import { t, fmtNum } from '../i18n/index.js';
+import { parseInput, convert, unitLabel } from '../i18n/units.js';
 import { bayAdvice, twoMeasureCheck } from '../session/bay.js';
-import { DEFAULT_VENUE } from '../calib/mat.js';
 import { flatSlope, lowPassStep } from '../calib/gravity.js';
 import { newId, nowIso } from '../session/ids.js';
 import { startMotion } from './sensors.js';
+import { mountVenues } from './venues.js';
+
+const TOL_MM = 3; // twoMeasureCheck's default tolerance, shown to the user in their units
+
+export const VENUE_STEPS = Object.freeze(['length', 'width', 'ball', 'bay', 'finish']);
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+/** Small illustration per step (mat seen from above, the measured span highlighted). */
+function stepDiagram(step) {
+  const el = (tag, a = {}) => { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, String(v)); return e; };
+  const svg = el('svg', { viewBox: '0 0 240 120', class: 'venue-diagram', 'aria-hidden': 'true' });
+  svg.append(el('rect', { x: 60, y: 22, width: 120, height: 70, rx: 3, class: 'vd-mat' }));
+  svg.append(el('circle', { cx: 120, cy: 74, r: 4, class: 'vd-ball' }));
+  const dim = (x1, y1, x2, y2) => { svg.append(el('line', { x1, y1, x2, y2, class: 'vd-dim' })); for (const [x, y] of [[x1, y1], [x2, y2]]) svg.append(el('circle', { cx: x, cy: y, r: 3, class: 'vd-end' })); };
+  if (step === 'length') dim(60, 104, 180, 104);
+  if (step === 'width') dim(196, 22, 196, 92);
+  if (step === 'ball') dim(120, 74, 120, 92);
+  if (step === 'bay') { svg.append(el('rect', { x: 210, y: 8, width: 6, height: 100, class: 'vd-wall' })); dim(124, 74, 210, 74); }
+  if (step === 'finish') { svg.append(el('rect', { x: 100, y: 46, width: 26, height: 44, rx: 4, class: 'vd-phone' })); svg.append(el('line', { x1: 92, y1: 98, x2: 148, y2: 88, class: 'vd-dim' })); }
+  svg.append(el('path', { d: 'M196 112 l14 0 m-5 -4 l5 4 l-5 4', class: 'vd-target' }));
+  return svg;
+}
 
 export function mountVenue(root, app) {
-  let slope = null; // { slope_deg, dir_deg }
+  let idx = 0;
+  let draft = null; // { venue_id?, name, L1, L2, W1, W2, edge, B, slope, slopeDir, tee, editing }
   let stopMotion = null;
+  let list = null;
+
+  const bodyUnit = () => (app.units().body === 'in' ? 'in' : 'cm');
+  const bayUnit = () => (app.units().body === 'in' ? 'ft' : 'm');
+  /** A small length (mm) in the user's body unit (cm or in): the two-reading difference and its tolerance. */
+  const smallLen = (mm) => {
+    const su = app.units().body === 'in' ? 'in' : 'cm';
+    return `${fmtNum(convert(mm / 1000, 'm', su), { digits: su === 'in' ? 2 : 1 })} ${unitLabel(su)}`;
+  };
+  const toUnit = (si, u) => (Number.isFinite(si) ? fmtNum(convert(si, 'm', u), { digits: u === 'cm' || u === 'in' ? 1 : 2 }).replace(/[,\s]/g, '') : '');
+
+  function fresh(v = null) {
+    return v
+      ? { venue_id: v.venue_id, name: v.name ?? '', L1: v.mat_L, L2: v.mat_L, W1: v.mat_W, W2: v.mat_W, edge: v.ball_edge_m ?? null, B: v.bay_B_m ?? null, slope: v.slope_deg ?? null, slopeDir: v.slope_dir_deg ?? null, tee: v.tee_lift_m ?? null, editing: v }
+      : { name: '', L1: null, L2: null, W1: null, W2: null, edge: null, B: null, slope: null, slopeDir: null, tee: null, editing: null };
+  }
+
+  /** <label> + input with a unit suffix; onValue(si|null) on every input. */
+  function measure({ id, label, unit, si, onValue, hint, placeholder }) {
+    const input = h('input', { type: 'text', inputmode: 'decimal', id, autocomplete: 'off', value: toUnit(si, unit), placeholder: placeholder ?? '', 'aria-describedby': hint ? `${id}-hint` : null });
+    input.addEventListener('input', () => onValue(parseInput(input.value, unit)));
+    return h('div.field.measure', {},
+      h('label.field-label', { for: id }, label),
+      h('div.input-suffix', {}, input, h('span.suffix', { 'aria-hidden': 'true' }, unitLabel(unit))),
+      hint ? h('span.hint', { id: `${id}-hint` }, hint) : null);
+  }
+
+  function pairCheck(a, b, out) {
+    const r = twoMeasureCheck(a, b, TOL_MM);
+    if (r.diff_mm === null) { out.className = 'check'; out.textContent = Number.isFinite(a) ? t('venue.pair.need_second') : t('venue.pair.need_two'); return r; }
+    out.className = `check ${r.ok ? 'ok' : 'bad'}`;
+    out.textContent = t(r.ok ? 'venue.pair.ok' : 'venue.pair.bad', { d: smallLen(r.diff_mm), tol: smallLen(TOL_MM) });
+    return r;
+  }
+
+  function frame(step, content, { primaryLabel, reason, onPrimary, secondary } = {}) {
+    const n = idx + 1;
+    const title = draft.editing ? t('venue.title_edit') : t('venue.title_new');
+    const primary = button({ label: primaryLabel ?? t('common.next'), variant: 'primary', size: 'lg', block: true, testid: 'venue-primary', reason, onClick: onPrimary ?? (() => go(1)) });
+    clear(root,
+      screenHeader({ title, back: true, onBack: () => (idx > 0 ? go(-1) : app.nav.back()) }),
+      h('div.venue-step', { 'data-testid': 'venue-step', 'data-step': step },
+        h('p.step-count', t('venue.step_count', { n, total: VENUE_STEPS.length })),
+        h('h2.step-title', t(`venue.${step}.title`)),
+        stepDiagram(step),
+        h('p.step-body', t(`venue.${step}.body`, { tol: smallLen(TOL_MM) })),
+        content),
+      h('div.step-cta', {}, secondary ?? null, primary));
+    return primary;
+  }
+
+  function go(d) {
+    stopMotion?.();
+    stopMotion = null;
+    idx = Math.max(0, Math.min(VENUE_STEPS.length - 1, idx + d));
+    render();
+    root.querySelector('.step-title')?.focus?.();
+  }
+
+  function renderPair(step) {
+    const isL = step === 'length';
+    const k1 = isL ? 'L1' : 'W1';
+    const k2 = isL ? 'L2' : 'W2';
+    const out = h('p.check', { role: 'status' });
+    let primary = null;
+    const update = () => {
+      const r = pairCheck(draft[k1], draft[k2], out);
+      const bad = !(r.ok);
+      const range = r.mean !== null && !(r.mean > 0.5 && r.mean < 4);
+      primary?.setReason(range ? t('venue.reason.range') : bad ? (r.diff_mm === null ? t('venue.reason.two') : t('venue.reason.mismatch')) : null);
+    };
+    const u = bodyUnit();
+    const content = h('div.grid2', {},
+      measure({ id: `venue-${k1}`, label: t('venue.pair.first'), unit: u, si: draft[k1], onValue: (v) => { draft[k1] = v; update(); } }),
+      measure({ id: `venue-${k2}`, label: t('venue.pair.second'), unit: u, si: draft[k2], onValue: (v) => { draft[k2] = v; update(); } }));
+    primary = frame(step, h('div', {}, content, out));
+    update();
+  }
+
+  function renderBall() {
+    const u = bodyUnit();
+    let primary = null;
+    const update = () => primary?.setReason(draft.edge !== null && !(draft.edge > 0.05 && draft.edge < Math.max(0.2, (draft.W1 ?? 2) - 0.05)) ? t('venue.reason.edge') : null);
+    const content = measure({ id: 'venue-edge', label: t('venue.ball.label'), unit: u, si: draft.edge, placeholder: toUnit(0.3, u), hint: t('venue.ball.hint', { v: toUnit(0.3, u), unit: unitLabel(u) }), onValue: (v) => { draft.edge = v; update(); } });
+    primary = frame('ball', content);
+    update();
+  }
+
+  function renderBay() {
+    const u = bayUnit();
+    const out = h('div.bay-verdict', { role: 'status' });
+    let primary = null;
+    const paint = () => {
+      primary?.setLabel(draft.B === null ? t('venue.bay.skip') : t('common.next'));
+      const a = bayAdvice(draft.B);
+      primary?.setReason(draft.B !== null && !a.ok ? t('venue.reason.bay') : null);
+      if (!a.ok) { clear(out, draft.B === null ? h('p.hint', t('venue.bay.skip_hint')) : h('p.check.bad', t('venue.reason.bay'))); return; }
+      const fmt = (m) => `${toUnit(m, u)} ${unitLabel(u)}`;
+      clear(out, h('div', { class: `verdict-card verdict-${a.verdict}` },
+        h('p.verdict-title', t(`bay.verdict.${a.verdict}`)),
+        h('p.verdict-body', t(`bay.body.${a.verdict}`, { D: fmt(a.D_m), h: fmt(a.h_max_m), shift: fmt(a.shift_m) }))));
+    };
+    const content = h('div', {},
+      measure({ id: 'venue-B', label: t('venue.bay.label'), unit: u, si: draft.B, hint: t('venue.bay.hint'), onValue: (v) => { draft.B = v; paint(); } }),
+      out);
+    primary = frame('bay', content, { primaryLabel: draft.B === null ? t('venue.bay.skip') : t('common.next') });
+    paint();
+  }
+
+  function slopeBlock() {
+    // V22: the measurement state is a badge (neutral = not measured / measuring, ok = measured, warn = unavailable).
+    const out = h('span', { role: 'status', class: Number.isFinite(draft.slope) ? 'badge ok' : 'badge', 'data-testid': 'venue-slope-status' }, Number.isFinite(draft.slope) ? t('venue.slope.value', { deg: fmtNum(draft.slope, { digits: 2 }) }) : t('venue.slope.none'));
+    const manual = h('input', { type: 'text', inputmode: 'decimal', id: 'venue-slope', value: Number.isFinite(draft.slope) ? String(draft.slope) : '', autocomplete: 'off' });
+    manual.addEventListener('input', () => { const x = parseInput(manual.value, 'deg'); draft.slope = Number.isFinite(x) && Math.abs(x) < 15 ? x : null; draft.slopeDir = null; });
+    const measureBtn = button({
+      label: t('venue.slope.measure'), variant: 'tinted', size: 'lg', block: true, icon: 'level',
+      onClick: () => {
+        // sync from the click: the motion permission needs the user activation
+        let lp = null;
+        const hist = [];
+        out.className = 'badge';
+        out.textContent = t('venue.slope.measuring');
+        stopMotion?.();
+        stopMotion = startMotion(app, (acc, t_s) => {
+          lp = lowPassStep(lp, acc, t_s, 0.3);
+          const fs = flatSlope(lp.value);
+          if (!fs) return;
+          hist.push({ t_s, ...fs });
+          while (hist.length && hist[0].t_s < t_s - 3) hist.shift();
+          const span = hist.length ? t_s - hist[0].t_s : 0;
+          const vals = hist.map((x) => x.slope_deg);
+          const spread = Math.max(...vals) - Math.min(...vals);
+          if (span >= 2.9 && spread <= 0.2) {
+            draft.slope = fs.slope_deg;
+            draft.slopeDir = fs.dir_deg;
+            manual.value = fmtNum(fs.slope_deg, { digits: 2 });
+            out.className = 'badge ok';
+            out.textContent = t('venue.slope.done', { deg: fmtNum(fs.slope_deg, { digits: 2 }), pm: fmtNum(spread / 2, { digits: 2 }) });
+            stopMotion?.();
+            stopMotion = null;
+          } else {
+            out.textContent = t('venue.slope.progress', { deg: fmtNum(fs.slope_deg, { digits: 2 }), pm: fmtNum(spread / 2, { digits: 2 }) });
+          }
+        }, () => { out.className = 'badge warn'; out.textContent = t('venue.slope.unavailable'); });
+      },
+    });
+    return h('div.optional-block', {},
+      h('h3', t('venue.slope.title')), h('p.hint', t('venue.slope.hint')), measureBtn, h('p.slope-status', {}, out),
+      h('div.field.measure', {}, h('label.field-label', { for: 'venue-slope' }, t('venue.slope.manual')), h('div.input-suffix', {}, manual, h('span.suffix', { 'aria-hidden': 'true' }, '°'))));
+  }
+
+  function renderFinish() {
+    const name = h('input', { type: 'text', id: 'venue-name', value: draft.name, placeholder: t('venue.name.placeholder'), autocomplete: 'off', maxlength: 60 });
+    name.addEventListener('input', () => { draft.name = name.value; });
+    const teeU = app.units().body === 'in' ? 'in' : 'cm';
+    const tee = segmented({ label: t('venue.tee.title'), options: [['none', t('venue.tee.none')], ['rubber', t('venue.tee.rubber')], ['custom', t('venue.tee.custom')]], value: draft.tee === null ? 'none' : Math.abs(draft.tee - 0.03) < 1e-6 ? 'rubber' : 'custom', onChange: (v) => { draft.tee = v === 'none' ? null : v === 'rubber' ? 0.03 : (draft.tee ?? 0.03); paintTee(); } });
+    const teeBox = h('div');
+    const paintTee = () => {
+      const custom = draft.tee !== null && Math.abs(draft.tee - 0.03) >= 1e-6;
+      clear(teeBox, custom || (draft.tee !== null && tee.value === 'custom') ? measure({ id: 'venue-tee', label: t('venue.tee.height'), unit: teeU, si: draft.tee, onValue: (v) => { draft.tee = Number.isFinite(v) && v >= 0 && v < 0.1 ? v : null; } }) : null);
+    };
+    paintTee();
+    const content = h('div', {},
+      h('div.field', {}, h('label.field-label', { for: 'venue-name' }, t('venue.name.label')), name),
+      slopeBlock(),
+      h('div.optional-block', {}, h('h3', t('venue.tee.title')), h('p.hint', t('venue.tee.hint')), tee, teeBox),
+      notice({ variant: 'info', title: t('venue.flock.title'), body: t('venue.flock.body') }));
+    frame('finish', content, { primaryLabel: t('venue.save'), onPrimary: () => saveVenue() });
+  }
+
+  async function saveVenue() {
+    const l = twoMeasureCheck(draft.L1, draft.L2);
+    const w = twoMeasureCheck(draft.W1, draft.W2);
+    if (!l.ok || !w.ok) { idx = l.ok ? 1 : 0; render(); return; }
+    const adv = bayAdvice(draft.B);
+    const base = draft.editing ?? { venue_id: newId('venue'), created_at: nowIso(), f_locked: null, f_W: null, f_H: null, f_sd_pct: null, f_view: 'face_on', f_solves: [] };
+    const matChanged = draft.editing && (Math.abs(draft.editing.mat_L - l.mean) > 1e-4 || Math.abs(draft.editing.mat_W - w.mean) > 1e-4);
+    const venue = {
+      ...base,
+      name: draft.name.trim() || t('venue.name.default'),
+      mat_L: +l.mean.toFixed(4), mat_W: +w.mean.toFixed(4), ball_edge_m: Number.isFinite(draft.edge) ? +draft.edge.toFixed(4) : 0.3, ball_x_m: base.ball_x_m ?? 0,
+      slope_deg: Number.isFinite(draft.slope) ? draft.slope : null, slope_dir_deg: draft.slopeDir ?? null,
+      tee_lift_m: Number.isFinite(draft.tee) ? draft.tee : null,
+      bay_B_m: adv.ok ? adv.B_m : null, bay_verdict: adv.ok ? adv.verdict : null,
+      updated_at: nowIso(),
+    };
+    if (matChanged) Object.assign(venue, { f_locked: null, f_W: null, f_H: null, f_sd_pct: null, f_solves: [] });
+    if (!app.repo) { app.toast.error(t('venue.save_no_repo')); return; }
+    try {
+      await app.repo.venues.put(venue);
+    } catch (e) {
+      app.errors.report(e, { where: 'venue.save' });
+      return;
+    }
+    app.store.set({ venueId: venue.venue_id, presetId: null });
+    app.toast.info(draft.editing ? t('venue.saved_edit') : t('venue.saved'));
+    draft = null;
+    idx = 0;
+    app.nav.back();
+  }
 
   function render() {
-    slope = null;
-    const name = h('input', { type: 'text', placeholder: '例如：XX 練習場 7 號打位', id: 'venue-name' });
-    const L1 = numberInput({ value: DEFAULT_VENUE.mat_L, id: 'venue-L1' });
-    const L2 = numberInput({ placeholder: '第二次', id: 'venue-L2' });
-    const W1 = numberInput({ value: DEFAULT_VENUE.mat_W, id: 'venue-W1' });
-    const W2 = numberInput({ placeholder: '第二次', id: 'venue-W2' });
-    const edge = numberInput({ value: DEFAULT_VENUE.ball_edge_m, id: 'venue-edge' });
-    const matOut = h('p.check', '');
-    const checkMat = () => {
-      const l = twoMeasureCheck(+L1.value, +L2.value);
-      const w = twoMeasureCheck(+W1.value, +W2.value);
-      matOut.className = `check ${l.ok && w.ok ? 'ok' : 'bad'}`;
-      matOut.textContent = `長：${l.diff_mm === null ? '請量兩次' : `兩次差 ${l.diff_mm.toFixed(1)} mm ${l.ok ? '✓' : '✗ 超過 3mm，請重量'}`}；寬：${w.diff_mm === null ? '請量兩次' : `兩次差 ${w.diff_mm.toFixed(1)} mm ${w.ok ? '✓' : '✗ 超過 3mm，請重量'}`}`;
-      return { l, w };
-    };
-    for (const i of [L1, L2, W1, W2]) i.addEventListener('input', checkMat);
-
-    const slopeOut = h('p.check', '尚未量測');
-    const slopeManual = numberInput({ placeholder: '或手動輸入（度）', id: 'venue-slope' });
-    const slopeBtn = h('button', { type: 'button' }, '手機平放墊上量坡度（3 秒）');
-    slopeBtn.addEventListener('click', () => {
-      // sync from the click: the motion permission needs user activation
-      let lp = null;
-      const hist = [];
-      slopeOut.textContent = '量測中，請不要碰手機…';
-      stopMotion?.();
-      stopMotion = startMotion(app, (acc, t_s) => {
-        lp = lowPassStep(lp, acc, t_s, 0.3);
-        const fs = flatSlope(lp.value);
-        if (!fs) return;
-        hist.push({ t_s, ...fs });
-        while (hist.length && hist[0].t_s < t_s - 3) hist.shift();
-        const span = hist.length ? t_s - hist[0].t_s : 0;
-        const vals = hist.map((x) => x.slope_deg);
-        const spread = Math.max(...vals) - Math.min(...vals);
-        if (span >= 2.9 && spread <= 0.2) {
-          slope = { slope_deg: fs.slope_deg, dir_deg: fs.dir_deg };
-          slopeOut.className = 'check ok';
-          slopeOut.textContent = `坡度 ${fs.slope_deg.toFixed(2)}°（穩定 ±${(spread / 2).toFixed(2)}°）✓`;
-          stopMotion?.();
-          stopMotion = null;
-        } else {
-          slopeOut.textContent = `量測中… ${fs.slope_deg.toFixed(2)}°（晃動 ±${(spread / 2).toFixed(2)}°）`;
-        }
-      }, (err) => { slopeOut.className = 'check bad'; slopeOut.textContent = `無法使用水平儀（${err}）：請手動輸入坡度`; });
-    });
-
-    const tee = numberInput({ placeholder: '球底離墊高度，例如 30', id: 'venue-tee' });
-    const B = numberInput({ placeholder: '例如 3.1', id: 'venue-B' });
-    const bayOut = h('div.bay', '');
-    B.addEventListener('input', () => {
-      const a = bayAdvice(+B.value);
-      clear(bayOut, a.ok
-        ? h('div', {}, h('p', `正面距離 D ≈ ${a.D_m.toFixed(2)} m、手機高度上限 ${a.h_max.toFixed(2)} m、平移 ${a.shift} m`), h('p', { class: `verdict ${a.verdict}` }, a.text))
-        : h('p', a.text));
-    });
-
-    // f-lock: done inside the first P3 of a session (one getUserMedia per session, CAFCR P1/P2): the setup screen
-    // collects 3 magnifier solves and locks f when their SD ≤ 1 %.
-    const fView = select(Object.entries(VIEW_LABELS), 'face_on', { id: 'venue-fview' });
-
-    const save = h('button.primary.big', { type: 'button' }, '儲存場地');
-    save.addEventListener('click', async () => {
-      const { l, w } = checkMat();
-      if (!l.ok || !w.ok) { toast('墊子長寬要各量兩次，差 ≤3mm'); return; }
-      const slopeDeg = slope?.slope_deg ?? (slopeManual.value === '' ? null : +slopeManual.value);
-      const adv = bayAdvice(+B.value);
-      const venue = {
-        venue_id: newId('venue'), name: name.value.trim() || '我的練習場', created_at: nowIso(),
-        mat_L: +l.mean.toFixed(4), mat_W: +w.mean.toFixed(4), ball_edge_m: +edge.value || 0.3, ball_x_m: 0,
-        slope_deg: Number.isFinite(slopeDeg) ? slopeDeg : null, slope_dir_deg: slope?.dir_deg ?? null,
-        tee_lift_m: tee.value === '' ? null : +tee.value / 1000, bay_B_m: adv.ok ? adv.B_m : null,
-        bay_verdict: adv.ok ? adv.verdict : null,
-        f_locked: null, f_W: null, f_H: null, f_sd_pct: null, f_view: fView.value, f_solves: [],
-      };
-      if (!app.repo) { toast('資料庫無法使用，場地沒有保存'); return; }
-      await app.repo.venues.put(venue);
-      app.store.set({ venueId: venue.venue_id });
-      toast('場地已儲存：第一次架設時點四角 3 次鎖定焦距');
-      app.nav.go('home');
-    });
-
-    clear(root,
-      screenHeader('新增場地', () => app.nav.back()),
-      card('1. 名稱', field('場地名稱', name)),
-      card('2. 墊子尺寸（捲尺量兩次）',
-        h('div.grid2', {}, field('長 L（沿目標線，m）', L1), field('再量一次', L2), field('寬 W（m）', W1), field('再量一次', W2)),
-        field('球距相機側長邊（m）', edge, '預設 0.30m'), matOut),
-      card('3. 坡度', slopeBtn, slopeOut, field('手動坡度（度）', slopeManual)),
-      card('4. 球座高度', field('球座高度（mm）', tee, '練習場固定橡膠球座：球底離墊子的高度')),
-      card('5. 球到面前隔板距離 B', field('B（m）', B, '腳架佔 0.25m，正面距離 D = B − 0.25'), bayOut),
-      card('6. 鎖定焦距', field('第一次架設的角度', fView), h('p.hint', '開始練習後，在架設畫面用放大鏡點墊子四角 3 次：三次焦距的標準差 ≤1% 就會自動鎖定並存回這個場地（一段練習只開一次相機）。')),
-      save);
+    if (!draft) draft = fresh();
+    const step = VENUE_STEPS[idx];
+    if (step === 'length' || step === 'width') renderPair(step);
+    else if (step === 'ball') renderBall();
+    else if (step === 'bay') renderBay();
+    else renderFinish();
   }
 
   return {
-    show() { render(); },
-    hide() { stopMotion?.(); stopMotion = null; },
+    async show(params = {}) {
+      list?.hide?.();
+      list = null;
+      if (params.list) {
+        list = mountVenues(root, app, { header: true });
+        await list.show();
+        return;
+      }
+      idx = 0;
+      draft = fresh();
+      if (params.venue_id && app.repo) {
+        try { const v = await app.repo.venues.get(params.venue_id); if (v) draft = fresh(v); } catch (_) { /* new venue */ }
+      }
+      render();
+    },
+    hide() { stopMotion?.(); stopMotion = null; list?.hide?.(); },
   };
 }

@@ -1,0 +1,101 @@
+/* screens/settings.css — owned by package F (trust) (PRODUCT-SPEC §1.1). Tokens only: no hex colours, no px font sizes;
+   transitions/animations only inside @media (prefers-reduced-motion: no-preference). Linked from index.html. */
+
+/* ------------------------------------------------------------------ Settings: grouped list */
+.set-group { margin: var(--s-6) 0 0; }
+.set-group:first-of-type { margin-top: var(--s-3); }
+.set-group-title {
+  font: var(--t-caption); letter-spacing: .02em; text-transform: uppercase; color: var(--text-2);
+  margin: 0 0 var(--s-2); padding: 0 var(--s-4);
+}
+.set-group > .card, .set-group > .list-group { margin-top: 0; }
+.set-field { margin: 0 0 var(--s-4); }
+.set-field:last-child { margin-bottom: 0; }
+.set-field .hint { margin: 0; }
+.set-input { display: flex; align-items: center; gap: var(--s-2); }
+.set-input input { flex: 1 1 auto; min-width: 0; font-variant-numeric: tabular-nums; }
+.set-suffix { flex: none; color: var(--text-2); font: var(--t-callout); min-width: 2.5em; }
+.set-error { margin: var(--s-1) 0 0; color: var(--danger-text); font: var(--t-footnote); font-weight: 600; }
+.set-note { margin-top: var(--s-3); }
+.set-toggles { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.set-toggle {
+  min-height: var(--hit-min); padding: var(--s-1) var(--s-3) var(--s-1) var(--s-2); border-radius: var(--r-pill);
+  font: var(--t-callout); font-weight: 600; background: var(--surface); color: var(--text); gap: var(--s-1);
+}
+.set-toggle-mark { display: inline-flex; width: 1.25em; height: 1.25em; align-items: center; justify-content: center; border-radius: 50%; border: var(--border-control) solid var(--control-border); }
+.set-toggle-mark .icon { width: 1em; height: 1em; visibility: hidden; }
+.set-toggle[aria-pressed="true"] { background: var(--accent-tint); color: var(--accent); border-color: var(--accent); }
+.set-toggle[aria-pressed="true"] .set-toggle-mark { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.set-toggle[aria-pressed="true"] .set-toggle-mark .icon { visibility: visible; }
+[data-screen="settings"] .segmented, [data-screen="developer"] .segmented { flex-wrap: wrap; }
+[data-screen="settings"] .segmented-opt, [data-screen="developer"] .segmented-opt { flex: 1 1 4.5em; overflow-wrap: normal; word-break: keep-all; hyphens: auto; }
+.segmented-opt[aria-disabled="true"] { color: var(--text-3); }
+.set-group .chip-row { margin: 0 calc(-1 * var(--s-4)); padding: var(--s-1) var(--s-4); scroll-padding: 0 var(--s-4); }
+.list-group .list-row { min-height: var(--row-min); }
+
+/* ------------------------------------------------------------------ Privacy / Help / About / Licences */
+.trust-lead { font: var(--t-headline); margin: var(--s-3) 0; }
+.trust-points { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-4); }
+.trust-point { display: flex; gap: var(--s-3); align-items: flex-start; }
+.tp-icon { flex: none; display: inline-flex; width: 2rem; height: 2rem; align-items: center; justify-content: center; border-radius: var(--r-sm); background: var(--accent-tint); color: var(--accent); }
+.tp-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tp-title { font: var(--t-headline); }
+.tp-body { font: var(--t-callout); color: var(--text-2); }
+.trust-danger h2 { color: var(--danger-text); }
+.trust-danger .btn { margin-top: var(--s-3); }
+.trust-list { margin: 0 0 var(--s-2); padding-left: var(--s-5); display: grid; gap: var(--s-2); font: var(--t-callout); }
+.trust-sub { margin-top: var(--s-4); }
+.trust-inset { margin: var(--s-3) calc(-1 * var(--s-4)) calc(-1 * var(--s-4)); border-radius: 0 0 var(--r-md) var(--r-md); border-left: 0; border-right: 0; border-bottom: 0; box-shadow: none; }
+a.trust-link {
+  display: flex; flex-direction: row; align-items: center; justify-content: center; gap: var(--s-2);
+  min-height: var(--hit-primary); padding: var(--s-3) var(--s-5); border-radius: var(--r-md);
+  background: var(--accent-tint); color: var(--accent); font: var(--t-headline); text-decoration: none; text-align: center;
+}
+a.trust-link:focus-visible { outline: var(--border-focus) solid var(--info); outline-offset: 2px; }
+:root[data-theme="sun"] a.trust-link, :root[data-theme="sun"] .set-toggle { border: 2px solid var(--control-border); }
+.faq { display: grid; }
+.faq-item { border-top: 1px solid var(--separator); }
+.faq-item:first-child { border-top: 0; }
+.faq-item summary { list-style: none; gap: var(--s-2); padding: var(--s-2) 0; font: var(--t-headline); justify-content: space-between; }
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-q { flex: 1; min-width: 0; }
+.faq-chev { flex: none; display: inline-flex; color: var(--text-2); }
+.faq-item[open] .faq-chev { transform: rotate(180deg); }
+.faq-a { margin: 0 0 var(--s-3); color: var(--text-2); font: var(--t-callout); }
+.glossary { margin: var(--s-3) 0 0; display: grid; }
+.glossary dt { font: var(--t-headline); padding-top: var(--s-3); border-top: 1px solid var(--separator); display: flex; flex-direction: column; }
+.glossary dt:first-child { border-top: 0; padding-top: 0; }
+.gl-term { font: var(--t-footnote); color: var(--text-2); }
+.glossary dd { margin: var(--s-1) 0 var(--s-3); display: flex; flex-direction: column; gap: 2px; font: var(--t-callout); }
+.gl-range { color: var(--text-2); font: var(--t-footnote); }
+.about-hero .about-name { font: var(--t-title2); margin: 0 0 var(--s-1); }
+[data-testid="about-version"] { font-variant-numeric: tabular-nums; max-width: 60%; }
+.licence-name { font: var(--t-callout); font-weight: 600; }
+.licence-details summary { color: var(--accent); font-weight: 600; }
+pre.licence-text {
+  white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-footnote)/1.45 var(--font-mono);
+  max-height: 50dvh; overflow: auto; margin: var(--s-2) 0 0; padding: var(--s-3); border-radius: var(--r-sm);
+  background: var(--surface-2); color: var(--text); user-select: text; -webkit-user-select: text;
+}
+
+/* ------------------------------------------------------------------ Storage */
+.storage-used { font: var(--t-headline); margin-top: 0; }
+.storage-meter { height: 8px; border-radius: var(--r-pill); background: var(--surface-2); border: var(--border-control) solid var(--control-border); overflow: hidden; margin: var(--s-2) 0; }
+.storage-meter-fill { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left center; }
+.storage-persisted { display: flex; align-items: center; gap: var(--s-2); margin: 0; }
+
+/* ------------------------------------------------------------------ Developer */
+.dev-files { display: grid; gap: var(--s-2); margin: var(--s-3) 0; }
+.dev-problems { margin: var(--s-1) 0 0; padding-left: var(--s-5); font: var(--t-footnote); }
+/* spec-code overlay (Developer › Show spec codes): data-spec attributes become visible */
+:root[data-spec-codes] [data-spec] { position: relative; outline: 1px dashed var(--info); }
+:root[data-spec-codes] [data-spec]::before {
+  content: attr(data-spec); position: absolute; top: 0; right: 0; z-index: 3; padding: 0 var(--s-1);
+  font: var(--t-caption); background: var(--info); color: var(--on-accent); border-radius: 0 0 0 var(--r-sm); pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .faq-chev { transition: transform var(--dur-fast) var(--ease-out); }
+  .set-toggle { transition: transform var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out); }
+}
+.trust-danger .status:empty { min-height: 0; margin: 0; }

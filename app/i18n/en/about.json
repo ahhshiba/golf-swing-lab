@@ -1,0 +1,18 @@
+{
+  "tagline": "Offline golf swing and ball-flight analysis for personal practice.",
+  "local": "All data stays on this phone: no account, no server.",
+  "version": "Version",
+  "version.unknown": "Version information unavailable",
+  "version.format": "{semver} · build {build}",
+  "events.rules": "Swing phases: automatic (rule-based)",
+  "events.owner": "Swing phases: automatic (trained on your own swings)",
+  "support": "Support",
+  "support.body": "Report problems and ideas on GitHub. The link opens in your browser; the app itself sends nothing.",
+  "support.link": "Report a problem on GitHub",
+  "honest.title": "Honest numbers",
+  "privacy.row": "Privacy",
+  "licences.row": "Open-source licences",
+  "help.row": "Help & FAQ",
+  "support.url": "https://github.com/ahhshiba/golf-swing-lab/issues",
+  "support.url._context": "Plain link the user taps (PRODUCT-SPEC §10). The app never requests it."
+}

@@ -84,3 +84,74 @@ test('a controllerchange the user did not ask for never reloads', () => {
   sw.fire();
   assert.equal(reloads, 0);
 });
+
+// ---- navigator opener (A11Y-1) and settings v2 (PRODUCT-SPEC §8.0.5) ----
+import { loadSettings, saveSettings, migrateV1, DEFAULT_SETTINGS, CLUBS, clubLength, SETTINGS_KEY } from '../../app/src/session/settings.js';
+
+test('navigator: go(screen, params, { opener }) hands the opener back as restoreFocus on back()', () => {
+  const s = createStore(initialState());
+  const nav = createNavigator(s);
+  const btn = { id: 'opener' };
+  nav.go('settings', {}, { opener: btn });
+  assert.equal(s.get().restoreFocus, null);
+  nav.go('about');
+  nav.back();
+  assert.equal(s.get().screen, 'settings');
+  assert.equal(s.get().restoreFocus, null);
+  nav.back();
+  assert.equal(s.get().screen, 'home');
+  assert.equal(s.get().restoreFocus, btn);
+});
+
+function mem(init = {}) {
+  const m = new Map(Object.entries(init));
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), map: m };
+}
+
+test('settings v2: defaults (§10 units), v1 migration keeps v1, nested fields merge and normalise', () => {
+  const fresh = loadSettings(mem(), { languages: ['zh-TW'] });
+  assert.equal(fresh.locale, 'auto');
+  assert.equal(fresh.theme, 'auto');
+  assert.deepEqual(fresh.units, { distance: 'yd', speed: 'mph', body: 'cm', clubLength: 'in', height: 'cm' });
+  assert.deepEqual(fresh.onboarding, { done_v: 0 });
+  assert.deepEqual(fresh.live, { metrics: ['tempo_ratio', 'club_speed_mps', 'carry_m'], voice: true });
+  assert.equal(fresh.dev, false);
+  assert.equal(fresh.sunSuggested, false);
+  assert.deepEqual(loadSettings(mem(), { languages: ['en-US'] }).units, { distance: 'yd', speed: 'mph', body: 'in', clubLength: 'in', height: 'ftin' });
+  const v1 = { handedness: 'left', height_m: 1.62, club_type: 'driver', club_length_m: 1.15, model: 'lite', lastView: 'dtl', mode: 'highspeed' };
+  const st = mem({ 'gsl-settings-v1': JSON.stringify(v1) });
+  const s = loadSettings(st, { languages: ['zh-TW'] });
+  for (const [k, v] of Object.entries(v1)) assert.equal(s[k], v, k);
+  assert.ok(st.map.has(SETTINGS_KEY), 'migrated record written');
+  assert.equal(st.map.get('gsl-settings-v1'), JSON.stringify(v1), 'v1 kept for a downgrade');
+  assert.deepEqual(migrateV1({ ...v1, junk: 1 }), v1);
+  const st2 = mem();
+  saveSettings({ units: { distance: 'm' }, live: { voice: false }, theme: 'sun', locale: 'en' }, st2);
+  const s2 = loadSettings(st2, { languages: ['zh-TW'] });
+  assert.equal(s2.units.distance, 'm');
+  assert.equal(s2.units.speed, 'mph', 'one-level merge keeps the other units');
+  assert.equal(s2.live.voice, false);
+  assert.deepEqual(s2.live.metrics, [...DEFAULT_SETTINGS.live.metrics]);
+  assert.equal(s2.theme, 'sun');
+  saveSettings({ theme: 'neon', locale: 'fr', units: { speed: 'knots' } }, st2);
+  const s3 = loadSettings(st2);
+  assert.equal(s3.theme, 'auto');
+  assert.equal(s3.locale, 'auto');
+  assert.equal(s3.units.speed, 'mph');
+  const broken = mem({ [SETTINGS_KEY]: '{not json' });
+  assert.equal(loadSettings(broken).club_type, '7i');
+  const throwing = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+  assert.equal(saveSettings({ dev: true }, throwing).dev, true, 'private mode keeps the value in memory');
+});
+
+test('CLUBS are [type, length_m] (name from t("club." + type)); clubLength()', () => {
+  assert.deepEqual(CLUBS.map((c) => c[0]), ['driver', '3w', 'hybrid', '5i', '7i', '9i', 'pw', 'sw']);
+  for (const c of CLUBS) {
+    assert.equal(typeof c[1], 'number');
+    assert.ok(c[1] > 0.8 && c[1] < 1.2);
+    assert.equal(c[2], c[1], 'deprecated index 2 = length for v1-shape callers');
+    assert.ok(Object.isFrozen(c));
+  }
+  assert.equal(clubLength('7i'), 0.94);
+  assert.equal(clubLength('putter'), null);
+});

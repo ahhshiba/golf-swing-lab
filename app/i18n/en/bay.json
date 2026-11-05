@@ -1,0 +1,14 @@
+{
+  "verdict.ideal": "Ideal bay depth",
+  "verdict.usable": "Usable bay depth",
+  "verdict.usable_short": "Shallow bay",
+  "verdict.not_guaranteed": "Bay too shallow",
+  "body.ideal": "Phone {D} from the ball, at most {h} high, moved {shift} toward the target.",
+  "body.usable": "Phone {D} from the ball, no higher than {h}, moved {shift} toward the target.",
+  "body.usable_short": "Phone {D} from the ball, no higher than {h}. With fast driver swings the ball numbers may be missing.",
+  "body.not_guaranteed": "Face-on ball numbers are not reliable here: use the behind or high-behind angle instead.",
+  "short.ideal": "You can use the standard position in this bay.",
+  "short.usable_short": "Shallow bay: keep the phone lower; fast drives may miss ball numbers.",
+  "short.usable": "Usable depth: keep the phone low.",
+  "short.not_guaranteed": "Bay too shallow: face-on ball numbers may be off; use a behind angle."
+}

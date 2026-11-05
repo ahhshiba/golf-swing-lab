@@ -1,0 +1,6 @@
+{
+  "live": "Live",
+  "highspeed": "Slow-motion import",
+  "live.hint": "Set the phone up and swing; each swing is analysed automatically",
+  "highspeed.hint": "Record in slow motion and import for ball speed, launch and carry"
+}

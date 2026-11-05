@@ -29,8 +29,8 @@ const WARMUP_S = 2;
 // and the diag records stay the app's own. Scale: the frame is FRAME_H_M metres tall, which keeps the fixture's
 // motion (hands rise 0.5 frame heights) below the detector's motion-only "real swing" profile (rise >= 0.45 m), so
 // the audio click is what separates a real swing from a practice swing - the gate tests audio fusion.
-const FRAME_H_M = 0.8;
-function installPoseStandIn({ frameH, code }) {
+export const FRAME_H_M = 0.8;
+export function installPoseStandIn({ frameH, code }) {
   globalThis.__GSL_E2E__ = {
     frames: 0, found: 0, log: [], codes: [],
     async pose(bitmap, t_s, _model, o) {

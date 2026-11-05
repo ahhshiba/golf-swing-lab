@@ -1,24 +1,46 @@
-// main.js — boot: state store + screen switcher (no URL routing), media/devtools modules (optional, feature-
-// detected), IndexedDB repository, navigator.storage.persist(), service worker + update banner, #app-ready.
+// main.js — boot: state store + screen switcher (no URL routing), IndexedDB repository (5 s timeout), i18n, icon
+// sprite, global error handlers, top stack + tab bar, lazily mounted screens, service worker + update banner,
+// #app-ready. PRODUCT-SPEC §2.1 (navigation, focus/title), §4.1 (handlers, boot watchdog), §5 PF-1 (cold start).
+//
+// Cold start (PF-1): the boot graph is main.js + the first screen (home, which hosts onboarding) and the small
+// core modules below; scripts/build.mjs modulepreloads exactly that graph. Every other screen module is imported and
+// mounted on its first show; the media/devtools layers (capture/, import/, pose/, pipeline/, workers/ …) and the
+// session controller load right after #app-ready, and a screen that needs them (setup, live, import, diag, teach,
+// developer) waits for them before its first show.
 
-import { createStore, createNavigator, initialState, SCREENS } from './state.js';
+import { createStore, createNavigator, initialState, ALL_SCREENS, TABS, TABBAR_HIDDEN, tabOf } from './state.js';
 import { openRepository } from './store/core.js';
 import { idbBackend } from './store/idb.js';
-import { requestPersist } from './store/quota.js';
-import { createSessionController } from './session/controller.js';
 import { loadSettings } from './session/settings.js';
 import { createUpdater } from './ui/update.js';
-import { mountHome } from './ui/home.js';
-import { mountVenue } from './ui/venue.js';
-import { mountSetup } from './ui/setup.js';
-import { mountLive } from './ui/live.js';
-import { mountImport } from './ui/import.js';
-import { mountShot } from './ui/shot.js';
-import { mountHistory } from './ui/history.js';
-import { mountDiag } from './ui/diag.js';
-import { mountSettings } from './ui/settings.js';
-import { mountAbout } from './ui/about.js';
-import { activeEventModel } from './session/models.js';
+import { initI18n, t, msg, has, plural, onMissing, onLocaleChange, getLocale, i18nComplete } from './i18n/index.js';
+import { DEFAULT_UNITS } from './i18n/units.js';
+import { injectSprite, icon } from './ui/icons.js';
+import { toast } from './ui/components.js';
+import * as diagRecord from './diag/record.js';
+import * as build from './version.js';
+
+/** screen id → [module (relative to this file), mount export]. Missing modules render a "not available" state. */
+export const SCREEN_MODULES = Object.freeze({
+  home: ['./ui/home.js', 'mountHome'],
+  venue: ['./ui/venue.js', 'mountVenue'],
+  setup: ['./ui/setup.js', 'mountSetup'],
+  live: ['./ui/live.js', 'mountLive'],
+  import: ['./ui/import.js', 'mountImport'],
+  shot: ['./ui/shot.js', 'mountShot'],
+  history: ['./ui/history.js', 'mountHistory'],
+  diag: ['./ui/diag.js', 'mountDiag'],
+  settings: ['./ui/settings.js', 'mountSettings'],
+  about: ['./ui/about.js', 'mountAbout'],
+  venues: ['./ui/venues.js', 'mountVenues'],
+  teach: ['./ui/teach.js', 'mountTeach'],
+  privacy: ['./ui/settings.js', 'mountPrivacy'],
+  help: ['./ui/settings.js', 'mountHelp'],
+  licences: ['./ui/settings.js', 'mountLicences'],
+  developer: ['./ui/settings.js', 'mountDeveloper'],
+});
+/** Screens whose first show waits for the media/devtools modules and the session controller. */
+const NEEDS_DEPS = new Set(['setup', 'live', 'import', 'diag', 'teach', 'developer']);
 
 // Modules owned by media / devtools (docs/app-architecture.md §4, §6). Missing ones leave a disabled state.
 const OPTIONAL = Object.freeze({
@@ -37,11 +59,21 @@ const OPTIONAL = Object.freeze({
   visionClient: './workers/client.js',
 });
 
-const MOUNTS = { home: mountHome, venue: mountVenue, setup: mountSetup, live: mountLive, import: mountImport, shot: mountShot, history: mountHistory, diag: mountDiag, settings: mountSettings, about: mountAbout };
+export const REPO_TIMEOUT_MS = 5000;
+const UNSAVED_FLAG = 'gsl.boot.unsaved';
+const ERROR_RING = 200;
 
-async function loadOptional() {
-  const deps = {};
+/** Is a module (path relative to this file) part of this build? Unknown (unbuilt tree) → true. */
+function present(rel) {
+  const list = build.PRESENT_MODULES;
+  if (!Array.isArray(list)) return true;
+  return list.includes(rel.replace(/^\.\//, ''));
+}
+
+/** Fill `deps` in place (the controller and the screens keep the same object). */
+async function loadOptional(deps) {
   await Promise.all(Object.entries(OPTIONAL).map(async ([k, p]) => {
+    if (!present(p)) { deps[k] = null; return; }
     try { deps[k] = await import(p); } catch (_) { deps[k] = null; }
   }));
   return deps;
@@ -54,27 +86,163 @@ function setPath(obj, path, value) {
   o[parts.at(-1)] = value;
 }
 
+/** data-i18n="key" → textContent, data-i18n-aria-label="key" → aria-label (static shell in index.html). */
+function applyStatic(doc = document) {
+  for (const el of doc.querySelectorAll('[data-i18n]')) if (has(el.dataset.i18n)) el.textContent = t(el.dataset.i18n);
+  for (const el of doc.querySelectorAll('[data-i18n-aria-label]')) if (has(el.dataset.i18nAriaLabel)) el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
+}
+
+const THEME_META = [];
+/** settings.theme → <html data-theme> ('auto' leaves it unset: CSS follows prefers-color-scheme / prefers-contrast). */
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'light' || theme === 'dark' || theme === 'sun') root.dataset.theme = theme;
+  else delete root.dataset.theme;
+  // status-bar / browser chrome colour follows the page background of the chosen theme
+  try {
+    if (!THEME_META.length) for (const m of document.querySelectorAll('meta[name="theme-color"]')) THEME_META.push([m, m.getAttribute('content')]);
+    const bg = root.dataset.theme ? getComputedStyle(root).getPropertyValue('--bg').trim() : '';
+    for (const [m, initial] of THEME_META) m.setAttribute('content', bg || initial);
+  } catch (_) { /* no CSSOM */ }
+}
+
+/** Normalise anything thrown into { code, params, detail, stack, where, screen, at }. Never throws. */
+export function normaliseError(err, ctx, screen) {
+  let code = 'INTERNAL';
+  try {
+    const c = err?.code ?? err?.name;
+    if (typeof c === 'string' && /^[A-Z][A-Z0-9_]+$/.test(c)) code = c;
+    else if (err?.name === 'QuotaExceededError') code = 'QUOTA_EXCEEDED';
+  } catch (_) { /* odd value */ }
+  let detail = '';
+  try { detail = String(err?.message ?? err ?? '').slice(0, 500); } catch (_) { detail = ''; }
+  let stack;
+  try { stack = typeof err?.stack === 'string' ? err.stack.slice(0, 2000) : undefined; } catch (_) { stack = undefined; }
+  let params = {};
+  try { params = (err && typeof err.params === 'object' && err.params) || {}; } catch (_) { params = {}; }
+  return { code, params, detail, stack, where: ctx?.where ?? 'app', screen: screen ?? null, at: new Date().toISOString() };
+}
+
+/** Errors the browser raises that are not app failures (never toasted, still recorded). */
+const BENIGN_RE = /ResizeObserver loop|^Script error\.?$/;
+
+function withTimeout(p, ms, code) {
+  let timer;
+  return Promise.race([p, new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error(`${code} after ${ms} ms`), { code })), ms); })]).finally(() => clearTimeout(timer));
+}
+
+function readUnsavedFlag() {
+  try { return sessionStorage.getItem(UNSAVED_FLAG) === '1'; } catch (_) { return false; }
+}
+function clearUnsavedFlag() {
+  try { sessionStorage.removeItem(UNSAVED_FLAG); } catch (_) { /* blocked storage */ }
+}
+
+function fmtElapsed(ms) {
+  const m = Math.max(0, Math.floor(ms / 60000));
+  return m < 60 ? plural('time.minutes', m) : t('time.hours_minutes', { h: Math.floor(m / 60), m: m % 60 });
+}
+
 async function boot() {
   const store = createStore(initialState());
   const nav = createNavigator(store);
-  const deps = await loadOptional();
+  const deps = {};
   const localDiag = {};
   const record = (path, value) => {
     setPath(localDiag, path, value);
-    try { deps.diagRecord?.record?.(path, value); } catch (_) { /* best effort */ }
+    try { diagRecord.record(path, value); } catch (_) { /* best effort */ }
   };
-  let version = 'dev';
-  let settings = loadSettings();
 
+  // ---- global error handlers first (§4.1), so even a failing boot step is reported ----
+  const errorLog = [];
+  const errorSinks = new Set();
+  const events = [];
+  const logEvent = (e) => {
+    const ev = { at: e.at, kind: 'error', code: e.code, where: e.where, screen: e.screen, detail: e.detail };
+    try {
+      if (typeof diagRecord.logEvent === 'function') { diagRecord.logEvent(ev); return; }
+      events.push(ev);
+      if (events.length > ERROR_RING) events.splice(0, events.length - ERROR_RING);
+      record('events', events);
+    } catch (_) { /* diag is best effort */ }
+  };
+  const errors = {
+    log: () => [...errorLog],
+    /** platform (D) subscribes its crash-log ring here: fn({ code, params, detail, stack, where, screen, at }) -> off */
+    onReport: (fn) => { errorSinks.add(fn); return () => errorSinks.delete(fn); },
+    /** Record (diag events[] + crash log sinks) and show an error toast unless ctx.silent. Never throws. */
+    report(err, ctx = {}) {
+      try {
+        const e = normaliseError(err, ctx, store.get().screen);
+        errorLog.push(e);
+        if (errorLog.length > ERROR_RING) errorLog.splice(0, errorLog.length - ERROR_RING);
+        try { record('errors.last', { code: e.code, where: e.where, detail: e.detail, at: e.at, count: errorLog.length }); } catch (_) { /* best effort */ }
+        logEvent(e);
+        for (const fn of [...errorSinks]) { try { fn(e); } catch (_) { /* a sink must not break reporting */ } }
+        const benign = BENIGN_RE.test(e.detail);
+        if (!ctx.silent && !benign) toast.error(has(`error.${e.code}`) ? t(`error.${e.code}`, e.params) : t('error.INTERNAL'), { slot: ctx.slot ?? currentErrorSlot() });
+        return e;
+      } catch (_) {
+        return null;
+      }
+    },
+  };
+  window.addEventListener('error', (ev) => { errors.report(ev.error ?? ev.message, { where: 'global' }); });
+  window.addEventListener('unhandledrejection', (ev) => { errors.report(ev.reason, { where: 'global' }); });
+  const currentErrorSlot = () => document.querySelector(`[data-screen="${store.get().screen}"] [data-error-slot]`) ?? undefined;
+
+  let settings = loadSettings();
+  applyTheme(settings.theme);
+  await initI18n({ locale: settings.locale }).catch((e) => { record('i18n.error', String(e?.message ?? e)); return null; });
+  try { injectSprite(document); } catch (_) { /* no sprite: icons render empty */ }
+  applyStatic(document);
+  let swVersion = null;
+  const missing = [];
+  onMissing((key) => { if (missing.length < 200) { missing.push(key); record('i18n.missing', [...missing]); } });
+
+  // errors captured by boot-watchdog.js before this module ran
+  for (const e of window.__gslBoot?.errors ?? []) errors.report(Object.assign(new Error(e.message), { stack: e.stack }), { where: 'boot', silent: true });
+
+  let depsP = null;
+  let controllerP = null;
   const app = {
     store, nav, deps, record, localDiag, repo: null, current: null, updater: null,
-    version: () => version,
+    version: () => build.APP_VERSION ?? swVersion ?? 'unbuilt',
+    build: Object.freeze({ version: build.APP_VERSION, semver: build.APP_SEMVER, id: build.APP_BUILD, devResearch: build.DEV_RESEARCH, bundledEventModel: build.BUNDLED_EVENT_MODEL }),
     settings: () => settings,
-    updateSettings: (s) => { settings = s; },
+    updateSettings: (s) => { settings = s; applyTheme(s?.theme); },
     vision: null,
+    // PRODUCT-SPEC §8.0.4
+    t,
+    toast,
+    units: () => settings?.units ?? DEFAULT_UNITS,
+    locale: () => getLocale(),
+    screenTitle: (id) => t(`screen.${id}.title`),
+    applyTheme,
+    /** Replaced by the updater's precache tracker (ui/update.js) when a service worker exists; else nothing is ready. */
+    offline: { ready: () => false, progress: () => ({ done: 0, total: 0, bytes: 0 }), onProgress: () => () => {} },
+    errors,
+    /** Resolves once the media/devtools modules and the session controller are loaded (they load after #app-ready). */
+    ready: () => Promise.all([depsP ?? loadLate(), controllerP]).then(() => app),
   };
+
   // vision worker client (media, docs/app-architecture.md §5): created on first use, GPU → CPU inside the worker
-  if (deps.visionClient?.createVisionClient) {
+  let vcReady = null;
+  async function pushEventModel(vc) {
+    vcReady = vc;
+    if (typeof vc?.setModel !== 'function') return;
+    try {
+      const { activeEventModel } = await import('./session/models.js');
+      const m = await activeEventModel(app.repo);
+      const r = await vc.setModel(m ? m.json : null, m ? m.bin : null);
+      record('events.model', { source: m ? 'imported' : 'default', version: m?.version ?? null, ok: r?.ok ?? null });
+    } catch (e) {
+      record('events.model', { source: 'error', error: String(e?.message ?? e) });
+    }
+  }
+  app.applyEventModel = async () => { if (vcReady) await pushEventModel(vcReady); };
+  const bindVision = () => {
+    if (!deps.visionClient?.createVisionClient || app.vision) return;
     let vcP = null;
     app.vision = () => {
       if (!vcP) {
@@ -88,48 +256,210 @@ async function boot() {
       }
       return vcP;
     };
-  }
+  };
 
-  // P9: the worker uses the owner's imported event model when there is one ({ type: 'set_model' }); otherwise it
-  // keeps its own default (the bundled model, or the rules in a --no-bundled-model build).
-  let vcReady = null;
-  async function pushEventModel(vc) {
-    vcReady = vc;
-    if (typeof vc?.setModel !== 'function') return;
+  // e2e seam (docs/e2e-hooks.md): the harness sets globalThis.__GSL_E2E__ before boot; the app never does
+  if (globalThis.__GSL_E2E__ && typeof globalThis.__GSL_E2E__ === 'object') globalThis.__GSL_E2E__.app = app;
+
+  // ---- repository (IndexedDB, R3): the app still runs without it, results are then not saved ----
+  const unsaved = readUnsavedFlag();
+  if (unsaved) {
+    record('store.error', 'unsaved mode (chosen on the start-up error screen)');
+  } else {
     try {
-      const m = await activeEventModel(app.repo);
-      const r = await vc.setModel(m ? m.json : null, m ? m.bin : null);
-      record('events.model', { source: m ? 'imported' : 'default', version: m?.version ?? null, ok: r?.ok ?? null });
+      app.repo = await withTimeout(openRepository(idbBackend()), REPO_TIMEOUT_MS, 'REPO_UNAVAILABLE');
+      store.set({ repoReady: true });
     } catch (e) {
-      record('events.model', { source: 'error', error: String(e?.message ?? e) });
+      app.repo = null;
+      record('store.error', String(e?.message ?? e));
+      errors.report(Object.assign(new Error(String(e?.message ?? e)), { code: 'REPO_UNAVAILABLE' }), { where: 'boot', silent: true });
     }
   }
-  app.applyEventModel = async () => { if (vcReady) await pushEventModel(vcReady); };
 
-  // repository (IndexedDB) — the app still runs without it, results are then not saved
-  try {
-    app.repo = await openRepository(idbBackend());
-    store.set({ repoReady: true });
-  } catch (e) {
-    record('store.error', String(e?.message ?? e));
+  // ---- session controller: loaded after #app-ready; early calls wait for it (same object afterwards) ----
+  const ctl = { real: null };
+  let resolveCtl;
+  controllerP = new Promise((r) => { resolveCtl = r; });
+  app.controller = new Proxy({}, {
+    get(_, k) {
+      if (ctl.real) { const v = ctl.real[k]; return typeof v === 'function' ? v.bind(ctl.real) : v; }
+      if (k === 'then') return undefined;
+      return (...a) => controllerP.then((c) => (typeof c[k] === 'function' ? c[k](...a) : c[k]));
+    },
+  });
+  async function loadController() {
+    try {
+      const { createSessionController } = await import('./session/controller.js');
+      ctl.real = createSessionController({ store, repo: app.repo, deps, record, appVersion: () => app.version() });
+    } catch (e) {
+      errors.report(e, { where: 'boot.controller', silent: true });
+      ctl.real = null;
+    }
+    resolveCtl(ctl.real);
+    return ctl.real;
   }
-  app.controller = createSessionController({ store, repo: app.repo, deps, record, appVersion: () => version });
+  function loadLate() {
+    if (!depsP) {
+      depsP = loadOptional(deps).then((d) => { bindVision(); return d; });
+      loadController();
+    }
+    return depsP;
+  }
 
-  // screens
+  // ---- screens: mounted on first show ----
+  const roots = Object.fromEntries(ALL_SCREENS.map((id) => [id, document.querySelector(`[data-screen="${id}"]`)]));
   const screens = {};
-  for (const id of SCREENS) {
-    const root = document.querySelector(`[data-screen="${id}"]`);
-    screens[id] = root ? MOUNTS[id](root, app) : null;
+  const mounting = {};
+  function unavailable(root, id) {
+    root.replaceChildren();
+    const h1 = document.createElement('h1');
+    h1.tabIndex = -1;
+    h1.textContent = app.screenTitle(id);
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = t('app.screen.unavailable');
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'back btn btn-secondary btn-md';
+    back.textContent = t('common.back');
+    back.addEventListener('click', () => nav.back());
+    root.append(back, h1, p);
+    return { show() {} };
   }
+  function ensureScreen(id) {
+    if (screens[id]) return Promise.resolve(screens[id]);
+    if (!mounting[id]) {
+      mounting[id] = (async () => {
+        const root = roots[id];
+        const spec = SCREEN_MODULES[id];
+        if (!root || !spec) return (screens[id] = { show() {} });
+        if (NEEDS_DEPS.has(id)) await app.ready();
+        // the rare screens' catalog part (build.mjs LAZY_I18N_NAMESPACES) loads in the background; home and onboarding
+        // use none of it, every other screen may (settings → help/privacy/licences, shot → teach labels)
+        if (id !== 'home' && id !== 'onboarding') await i18nComplete();
+        let mod = null;
+        if (present(spec[0])) {
+          try { mod = await import(spec[0]); } catch (e) { errors.report(e, { where: `mount.${id}`, silent: true }); }
+        }
+        const mount = mod?.[spec[1]] ?? mod?.default ?? null;
+        if (typeof mount !== 'function') return (screens[id] = unavailable(root, id));
+        try {
+          // third argument: options some screens take when mounted as their own screen (venues header, teach back)
+          screens[id] = mount(root, app, { header: true, onBack: () => nav.back() }) ?? { show() {} };
+        } catch (e) {
+          errors.report(e, { where: `mount.${id}` });
+          screens[id] = unavailable(root, id);
+        }
+        return screens[id];
+      })();
+    }
+    return mounting[id];
+  }
+
+  // ---- title + focus on every navigation (A11Y-1) ----
   let shown = null;
+  let showSeq = 0;
+  const setTitle = (id) => { document.title = `${app.screenTitle(id)} – ${t('app.name')}`; };
+  const openers = []; // openers[depth] = element focused when the screen at stack depth `depth` was left
+  const focusScreen = (s, back) => {
+    const o = s.restoreFocus ?? (back ? openers[s.stack.length] : null);
+    const target = o && o.isConnected && !o.closest?.('[hidden]') ? o : roots[s.screen]?.querySelector('h1');
+    if (!target) return;
+    if (target.tagName === 'H1' && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    try { target.focus({ preventScroll: true }); } catch (_) { /* detached */ }
+  };
+  let prevDepth = 0;
+  let currentTab = 'practice';
   const showScreen = (s) => {
-    if (shown === s.screen) return;
+    if (shown === s.screen) return Promise.resolve();
+    const seq = ++showSeq;
+    const depth = s.stack?.length ?? 0;
+    const back = depth < prevDepth;
+    if (depth > prevDepth) openers[depth - 1] = document.activeElement;
+    prevDepth = depth;
     screens[shown]?.hide?.();
     for (const el of document.querySelectorAll('[data-screen]')) el.hidden = el.dataset.screen !== s.screen;
     shown = s.screen;
+    // the top stack (session bar, banners) sits above the live screen: it follows live's forced dark (§1.1, not sun)
+    const stack = document.getElementById('top-stack');
+    if (stack) { if (s.screen === 'live' && settings?.theme !== 'sun') stack.dataset.liveTheme = 'dark'; else delete stack.dataset.liveTheme; }
+    currentTab = tabOf(s.screen, currentTab);
     window.scrollTo(0, 0);
-    Promise.resolve(screens[s.screen]?.show?.(s.params ?? {})).catch((e) => console.warn('screen', s.screen, e));
+    setTitle(s.screen);
+    renderTabbar(s);
+    return ensureScreen(s.screen)
+      .then((scr) => (seq === showSeq ? scr?.show?.(s.params ?? {}) : null))
+      .then(() => { if (seq === showSeq) focusScreen(s, back); }, (e) => errors.report(e, { where: `show.${s.screen}` }));
   };
+  /** Re-show the current screen in place (new params, locale change); focus that the re-render dropped goes to its h1. */
+  const reshow = (id) => Promise.resolve(screens[id]?.show?.(store.get().params ?? {})).then(() => {
+    const a = document.activeElement;
+    if (id === shown && (!a || a === document.body || !a.isConnected)) focusScreen({ screen: id, stack: store.get().stack ?? [], restoreFocus: null }, false);
+  }, (e) => errors.report(e, { where: `show.${id}` }));
+  onLocaleChange(() => {
+    applyStatic(document);
+    buildTabbar();
+    if (shown) {
+      setTitle(shown);
+      reshow(shown);
+    }
+    renderBars(store.get());
+  });
+
+  // ---- top stack (visual-m1): one sticky wrapper; its height → --topbar-h; the tab bar's → --tabbar-h ----
+  const topStack = document.getElementById('top-stack');
+  const tabbar = document.getElementById('tabbar');
+  const rootStyle = document.documentElement.style;
+  const measure = () => {
+    if (topStack) {
+      const visible = [...topStack.children].some((c) => !c.hidden);
+      topStack.classList.toggle('has-content', visible);
+      document.documentElement.classList.toggle('has-topstack', visible);
+      rootStyle.setProperty('--topbar-h', `${visible ? Math.ceil(topStack.getBoundingClientRect().height) : 0}px`);
+    }
+    if (tabbar) rootStyle.setProperty('--tabbar-h', `${tabbar.hidden ? 0 : Math.ceil(tabbar.getBoundingClientRect().height)}px`);
+  };
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(() => measure());
+    if (topStack) ro.observe(topStack);
+    if (tabbar) ro.observe(tabbar);
+  }
+
+  // ---- tab bar (§2.1): Practice · History · Settings; hidden on setup, live, onboarding ----
+  function buildTabbar() {
+    if (!tabbar) return;
+    tabbar.replaceChildren(...Object.keys(TABS).map((id) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tab';
+      b.dataset.tab = id;
+      b.dataset.testid = `tabbar-${id}`;
+      const label = document.createElement('span');
+      label.className = 'tab-label';
+      label.textContent = t(`nav.tab.${id}`);
+      b.append(icon(id === 'practice' ? 'target' : id), label);
+      b.addEventListener('click', () => {
+        const root = TABS[id];
+        if (store.get().screen === root) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+        nav.root(root);
+      });
+      return b;
+    }));
+    renderTabbar(store.get());
+  }
+  function renderTabbar(s) {
+    if (!tabbar) return;
+    const onboarding = s.screen === 'home' && roots.home?.classList.contains('is-onboarding');
+    tabbar.hidden = TABBAR_HIDDEN.includes(s.screen) || !s.booted || Boolean(onboarding);
+    for (const b of tabbar.querySelectorAll('.tab')) {
+      if (b.dataset.tab === currentTab) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    }
+    measure();
+  }
+
+  // home hosts onboarding (B: class is-onboarding on its root): the tab bar hides while it runs
+  if (roots.home && typeof MutationObserver === 'function') new MutationObserver(() => renderTabbar(store.get())).observe(roots.home, { attributes: true, attributeFilter: ['class'] });
 
   // P19 calibration-health prompts
   const hp = document.getElementById('health-prompts');
@@ -138,55 +468,100 @@ async function boot() {
     const list = Array.isArray(s.healthPrompts) ? s.healthPrompts : [];
     hp.hidden = list.length === 0;
     const ul = hp.querySelector('.hp-list');
-    if (ul) ul.replaceChildren(...list.map((p) => { const li = document.createElement('li'); li.className = p.level === 'warn' ? 'warn' : ''; li.dataset.prompt = p.id; li.textContent = p.text; return li; }));
+    if (ul) ul.replaceChildren(...list.map((p) => { const li = document.createElement('li'); li.className = p.level === 'warn' ? 'warn' : ''; li.dataset.prompt = p.id; li.textContent = p.text ?? msg(p.msg ?? (p.code ? p : '')); return li; }));
+    measure();
   };
   hp?.querySelector('.hp-dismiss')?.addEventListener('click', () => store.set({ healthPrompts: [] }));
 
-  // global session bar (P17) and update banner (P8)
+  // global session bar (P17, UX-15), repo banner (R3) and update banner (P8)
   const bar = document.getElementById('session-bar');
   const banner = document.getElementById('update-banner');
+  const repoBanner = document.getElementById('repo-banner');
+  let shotsThisSession = 0;
+  /** UX-15: the controller's status line belongs to setup (and to a lost camera); elsewhere the bar summarises the
+   *  session (view · shots · elapsed), so a setup message never lingers on other screens. */
+  const sessionText = (s) => {
+    const own = s.screen === 'setup' || s.cameraInterrupted;
+    if (own && s.status && typeof s.status === 'object' && s.status.code) return msg(s.status);
+    if (own && typeof s.status === 'string' && s.status) return s.status;
+    const view = s.session?.view ?? s.view;
+    const started = Date.parse(s.session?.started_at ?? '');
+    const params = { view: has(`view.${view}`) ? t(`view.${view}`) : '', n: shotsThisSession, elapsed: Number.isFinite(started) ? fmtElapsed(Date.now() - started) : '' };
+    const text = shotsThisSession > 0 ? t('app.session.practising_n', params) : t('app.session.practising', params);
+    return text.split(' · ').map((x) => x.trim()).filter(Boolean).join(' · '); // an empty part (no view / elapsed yet) leaves no dangling ·
+  };
   const renderBars = (s) => {
     if (bar) {
       bar.hidden = !s.sessionActive;
       const txt = bar.querySelector('.bar-text');
-      if (txt) txt.textContent = s.status || '練習進行中';
+      if (txt && s.sessionActive) txt.textContent = sessionText(s);
       const re = bar.querySelector('.bar-reopen');
       if (re) re.hidden = !s.cameraInterrupted;
     }
     if (banner) {
       banner.hidden = !s.updateAvailable;
-      banner.textContent = s.updatePending && s.sessionActive ? '有新版本：練習結束後會更新' : '有新版本，點此更新';
+      banner.textContent = s.updatePending && s.sessionActive ? t('app.update.deferred') : t('app.update.available');
     }
+    if (repoBanner) repoBanner.hidden = !s.booted || s.repoReady;
+    measure();
   };
+  repoBanner?.querySelector('.repo-reload')?.addEventListener('click', () => { clearUnsavedFlag(); location.reload(); });
   bar?.querySelector('.bar-reopen')?.addEventListener('click', () => {
     app.controller.reopenCamera().then(() => screens[shown]?.attachStream?.()); // sync call from the click
   });
+  let elapsedTimer = null;
   store.subscribe((s, prev) => {
-    if (s.screen !== prev.screen || s.params !== prev.params) { if (s.screen !== prev.screen) showScreen(s); else Promise.resolve(screens[s.screen]?.show?.(s.params ?? {})).catch(() => {}); }
+    if (s.sessionActive && !prev.sessionActive) shotsThisSession = 0;
+    if (s.sessionActive && s.lastShotId && s.lastShotId !== prev.lastShotId) shotsThisSession++;
+    if (s.screen !== prev.screen) showScreen(s);
+    else if (s.params !== prev.params) reshow(s.screen);
     renderBars(s);
     if (s.healthPrompts !== prev.healthPrompts) renderHealth(s);
     if (prev.sessionActive && !s.sessionActive) app.updater?.sessionEnded();
+    if (s.sessionActive && !elapsedTimer) elapsedTimer = setInterval(() => renderBars(store.get()), 15000);
+    if (!s.sessionActive && elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
   });
   for (const b of document.querySelectorAll('[data-go]')) b.addEventListener('click', () => nav.go(b.dataset.go));
-
-  // storage persistence (never throws)
-  requestPersist(navigator).then((r) => {
-    record('storage.persisted', r.persisted);
-    record('storage.usage', r.usage);
-    record('storage.quota', r.quota);
-  });
 
   // service worker + update flow (never reloads while state.sessionActive)
   const sw = navigator.serviceWorker;
   if (sw && location.protocol !== 'file:') {
     app.updater = createUpdater({ store, reload: () => location.reload() });
+    if (app.updater.offline) app.offline = app.updater.offline; // D's precache tracker (PRODUCT-SPEC §8.0.4, R11/PF-1)
     banner?.addEventListener('click', () => {
       const r = app.updater.request();
-      if (r === 'deferred') banner.textContent = '有新版本：練習結束後會更新';
+      if (r === 'deferred') banner.textContent = t('app.update.deferred');
     });
     sw.addEventListener('message', (ev) => {
-      if (ev.data?.type === 'VERSION') { version = ev.data.version; record('app_version', version); record('precache_complete', ev.data.precache_complete ?? null); }
+      if (ev.data?.type === 'VERSION') { swVersion = ev.data.version; record('app_version', swVersion); record('precache_complete', ev.data.precache_complete ?? null); }
     });
+  }
+  record('standalone', Boolean(matchMedia?.('(display-mode: standalone)').matches || navigator.standalone));
+  record('build', { version: build.APP_VERSION, dev_research: build.DEV_RESEARCH, bundled_event_model: build.BUNDLED_EVENT_MODEL });
+
+  store.set({ booted: true });
+  buildTabbar();
+  await showScreen(store.get());
+  renderBars(store.get());
+  if (window.__gslBoot?.shown) {
+    window.__gslBoot.recover?.();
+    for (const el of document.querySelectorAll('[data-screen]')) el.hidden = el.dataset.screen !== shown;
+    renderTabbar(store.get());
+  }
+  const ready = document.createElement('div');
+  ready.id = 'app-ready';
+  ready.hidden = true;
+  ready.dataset.repo = app.repo ? '1' : '0';
+  document.body.append(ready);
+
+  // ---- after #app-ready: heavy layers, controller, storage persistence, service worker registration ----
+  loadLate();
+  import('./store/quota.js').then(({ requestPersist }) => requestPersist(navigator)).then((r) => {
+    record('storage.persisted', r.persisted);
+    record('storage.usage', r.usage);
+    record('storage.quota', r.quota);
+  }).catch((e) => record('storage.error', String(e?.message ?? e)));
+  if (app.updater) {
     sw.register('./sw.js', { scope: './' }).then((reg) => {
       app.updater.attach(reg, sw);
       record('sw_registered', true);
@@ -195,20 +570,13 @@ async function boot() {
       sw.addEventListener('controllerchange', ask);
     }).catch((e) => record('sw_error', String(e?.message ?? e)));
   }
-  record('standalone', Boolean(matchMedia?.('(display-mode: standalone)').matches || navigator.standalone));
-
-  store.set({ booted: true });
-  showScreen(store.get());
-  renderBars(store.get());
-  const ready = document.createElement('div');
-  ready.id = 'app-ready';
-  ready.hidden = true;
-  document.body.append(ready);
+  return app;
 }
 
 boot().catch((e) => {
+  try { window.__gslBoot?.fail?.('error', e); } catch (_) { /* watchdog missing */ }
   const el = document.getElementById('boot-error');
-  if (el) { el.hidden = false; el.textContent = `啟動失敗：${e?.message ?? e}`; }
+  if (el && el.hidden) { el.hidden = false; el.textContent = `${has('app.boot.failed.title') ? t('app.boot.failed.title') : 'App'}: ${e?.code ?? 'INTERNAL'}`; }
   const ready = document.createElement('div');
   ready.id = 'app-ready';
   ready.hidden = true;

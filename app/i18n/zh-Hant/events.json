@@ -1,0 +1,18 @@
+{
+  "source.rules": "規則偵測",
+  "source.tcn": "你的事件模型",
+  "source.rules_fallback": "規則偵測（{reason}）",
+  "fallback.tcn_no_card": "模型沒有模型卡",
+  "fallback.tcn_card_third_party": "模型的訓練資料不能使用",
+  "fallback.tcn_owner_gate": "模型還沒通過你的驗證門檻",
+  "fallback.tcn_view": "模型沒有涵蓋這個角度",
+  "fallback.tcn_low_visibility": "畫面中的人不夠清楚",
+  "fallback.tcn_low_impact_p": "模型對擊球時間沒把握",
+  "fallback.tcn_not_used": "模型沒有給出結果",
+  "fallback.tcn_output_invalid": "模型輸出不正確",
+  "fallback.tcn_error": "模型執行失敗",
+  "time_scale.corrected": "慢動作影片：已把速度放慢 {k} 倍的時間軸校正回真實時間。",
+  "time_scale.corrected._context": "Shown on a shot analysed from a slow-motion export; {k} is 4 or 8.",
+  "conf.low": "這個事件時間不太確定，可以手動調整。",
+  "conf.ok": "事件時間可信度：{pct}"
+}

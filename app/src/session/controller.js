@@ -14,8 +14,16 @@
 //       2. capture.openCamera()                       (one getUserMedia, video + audio)
 //       3. new AudioContext().resume()
 //       4. navigator.wakeLock.request('screen')
+//   controller.requestPermissions() -> Promise<{ camera, microphone, motion }>   onboarding (PRODUCT-SPEC §8.0.9): MUST
+//     be called synchronously from a click; asks motion first, then one getUserMedia (video + audio) whose tracks are
+//     stopped right away. Each value 'granted'|'denied'|'busy'|'missing'|'unsupported'.
 //   controller.retryMotion()       second chance for the motion permission (own button, P17)
-//   controller.reopenCamera()      after an interruption (track ended), sync from a click; counts gum_calls
+//   controller.reopenCamera()      after an interruption (track ended), sync from a click; counts gum_calls; on success
+//     every onStreamChange listener gets the new MediaStream (R1: the live screen re-attaches its frame tap/recorder)
+//   controller.onStreamChange(fn) -> unsubscribe
+//   controller.setClub(club) / controller.club()   the club the next live job uses ({ type, length_m, ... })
+//   controller.analysisQueue       { on(fn) -> off, emit(ev), last() }: live analysis jobs { queued, started, done,
+//     eta_s, dropped? } (pipeline/live.js onQueue feeds emit; the live screen shows 「排隊中」 and the ETA)
 //   controller.changeAngle(view)   P16: keep the stream, new preset, back to setup (timer restarts)
 //   controller.lock({ calibration, evaluation, forced, corners?, luma? }) -> Promise<preset>   C9
 //     (P19: also re-solves the mat size from `corners` + the preset height and resets the 20-shot health counter,
@@ -25,11 +33,22 @@
 //   controller.health() -> { state, prompts }   current P19 bookkeeping and prompts (state.healthPrompts)
 //   controller.releaseCamera()     high-speed mode: give the camera to the built-in camera app (C10 / P5)
 //   controller.reportLive({ latency_s, dropped_frac }) -> thermal decision (P18)
-//   controller.saveShot(shot, { clipBlob?, poseSeq? }) -> Promise<shot>   attributes session warnings, stores it
+//   controller.saveShot(shot, { clipBlob?, poseSeq? }) -> Promise<shot>   attributes session warnings, stores it.
+//     R2/R7: the clip is skipped when navigator.storage.estimate() leaves < DEFAULT_POLICY.minFreeBytes free, and a
+//     QuotaExceededError retries without the clip (store/core.js repo.saveShot); either way the shot gets
+//     RC.CLIP_NOT_SAVED, state.lowSpace = true and state.lastSave = { shot_id, ok, clipSaved, poseSaved, reason }.
+//     Full disk even without the clip -> rejects with code QUOTA_EXCEEDED. Errors thrown here carry .code.
+//     The returned shot also carries the outcome as non-enumerable fields: shot.ok, shot.clipSaved, shot.poseSaved,
+//     shot.reason (not part of the shot record: JSON.stringify / validateShot / structuredClone ignore them).
 //   controller.endSession() -> Promise<void>
 //   controller.setupTimer          calib/timer.js timer of the current angle
 //   controller.media()             { stream, videoTrack, audioTrack, settings, audioCtx }
 //   controller.warnings()          session-level reason codes (RC.*) attributed to every saved shot
+//
+// state.status is { code, params } | null (catalog namespace `session`: session.status.*); state.cameraError is
+// { code: CAMERA_DENIED | CAMERA_BUSY | CAMERA_MISSING | NO_MEDIA_DEVICES } | null after a failed camera open.
+// Live capture is requested at 1280x720 (PF-5: 1080p live costs ~1 GB renderer memory; the 240 fps import path is
+// unaffected).
 
 import { RC } from '../contract/reason-codes.js';
 import { addWarning, attributeWarnings } from '../contract/shot.js';
@@ -39,11 +58,33 @@ import { createSetupTimer } from '../calib/timer.js';
 import { createPreset, updatePreset } from '../calib/preset.js';
 import { createThermalGuard } from './thermal.js';
 import { newId, nowIso } from './ids.js';
-import { estimateStorage, planCleanup } from '../store/quota.js';
+import { estimateStorage, planCleanup, clipSpaceCheck } from '../store/quota.js';
 import { matSizeFromCalibration } from '../calib/checks.js';
 import { loadHealth, noteShot, noteHealthCheck, healthPrompts } from './health.js';
 
-const CAMERA_OPTS = Object.freeze({ width: 1920, height: 1080, frameRate: 60, facingMode: 'environment', audio: true });
+export const CAMERA_OPTS = Object.freeze({ width: 1280, height: 720, frameRate: 60, facingMode: 'environment', audio: true });
+
+const st = (code, params = {}) => ({ code: `session.status.${code}`, params });
+
+/** getUserMedia rejection -> 'denied' | 'busy' | 'missing' | 'unsupported' (PRODUCT-SPEC §4.2, R8). */
+export function classifyCameraError(e) {
+  const n = e && (e.name || e.code || e.message) ? String(e.name || e.code || e.message) : '';
+  if (/NotAllowed|Security|Permission|denied/i.test(n)) return 'denied';
+  if (/NotReadable|TrackStart|Abort|busy|in use/i.test(n)) return 'busy';
+  if (/NotFound|DevicesNotFound|Overconstrained/i.test(n)) return 'missing';
+  if (/NotSupported|NO_MEDIA_DEVICES|TypeError/i.test(n)) return 'unsupported';
+  return 'denied';
+}
+
+export const CAMERA_ERROR_CODES = Object.freeze({ denied: 'CAMERA_DENIED', busy: 'CAMERA_BUSY', missing: 'CAMERA_MISSING', unsupported: 'NO_MEDIA_DEVICES' });
+
+function codedError(code, detail, params) {
+  const e = new Error(detail ? `${code}: ${detail}` : code);
+  e.code = code;
+  e.detail = detail ?? '';
+  if (params) e.params = params;
+  return e;
+}
 
 function settle(p) {
   return Promise.resolve(p).then((value) => ({ status: 'fulfilled', value }), (reason) => ({ status: 'rejected', reason }));
@@ -68,6 +109,11 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
   let sessionWarnings = new Set();
   let thermal = createThermalGuard();
   let listeners = [];
+  let trackSub = null; // one subscription to deps.camera.onTrackEnded for the controller's life
+  const streamListeners = new Set();
+  let club = null;
+  let streamChanges = 0;
+  let clipsNotSaved = 0;
   const ctl = { setupTimer: createSetupTimer() };
   const ver = () => (typeof appVersion === 'function' ? appVersion() : appVersion);
 
@@ -91,7 +137,7 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
     try {
       if (deps.camera?.openCamera) return deps.camera.openCamera({ ...CAMERA_OPTS });
       const md = nav?.mediaDevices;
-      if (!md || typeof md.getUserMedia !== 'function') return Promise.reject(new Error('NO_MEDIA_DEVICES'));
+      if (!md || typeof md.getUserMedia !== 'function') return Promise.reject(Object.assign(new Error('NO_MEDIA_DEVICES'), { name: 'NotSupportedError' }));
       gumCallsLocal += 1;
       return md.getUserMedia({
         video: { facingMode: CAMERA_OPTS.facingMode, width: { ideal: CAMERA_OPTS.width }, height: { ideal: CAMERA_OPTS.height }, frameRate: { ideal: CAMERA_OPTS.frameRate } },
@@ -145,11 +191,15 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
 
   function applyCamera(r) {
     if (r.status === 'rejected') {
-      perms({ camera: 'denied', microphone: 'unknown' });
+      const kind = classifyCameraError(r.reason);
+      perms({ camera: kind, microphone: 'unknown' });
+      store.set({ cameraError: { code: CAMERA_ERROR_CODES[kind] } });
       rec('gum.calls', gumCalls());
       rec('gum.error', errName(r.reason));
+      rec('gum.error_kind', kind);
       return false;
     }
+    store.set({ cameraError: null });
     const m = r.value ?? {};
     media = { ...media, stream: m.stream ?? null, videoTrack: m.videoTrack ?? null, audioTrack: m.audioTrack ?? null, settings: m.settings ?? {} };
     const s = media.settings ?? {};
@@ -181,10 +231,14 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
 
   // ---- P17 interruptions ----
 
+  let interruptions = 0;
   function onTrackEnded() {
     if (!store.get().sessionActive) return;
-    store.set({ cameraInterrupted: true, status: '相機已中斷（切到其他 App、來電或鎖屏）。點「重新開啟相機」繼續。' });
+    if (store.get().cameraInterrupted) return;
+    interruptions += 1;
+    store.set({ cameraInterrupted: true, status: st('camera_lost') });
     rec('interruptions.track_ended', true);
+    rec('interruptions.count', interruptions);
   }
 
   function onVisibility() {
@@ -200,8 +254,9 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
 
   function watchTracks() {
     if (deps.camera?.onTrackEnded) {
+      if (trackSub) return; // camera.js reports every track of the current stream: subscribe once
       const off = deps.camera.onTrackEnded((info) => { if (!info || info.kind !== 'audio') onTrackEnded(); });
-      if (typeof off === 'function') listeners.push(off);
+      trackSub = typeof off === 'function' ? off : () => {};
       return;
     }
     const t = media.videoTrack;
@@ -218,16 +273,39 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
     }
   }
 
-  // ---- P18 storage guard: below 500 MB free, stop keeping raw clips ----
+  // ---- P18 / R7 storage guard: below DEFAULT_POLICY.minFreeBytes free, stop keeping raw clips ----
   async function checkSpace() {
     try {
       const est = await estimateStorage(nav);
       const plan = planCleanup({ usage: est.usage, quota: est.quota, clips: [], practiceActive: true });
       if (plan.lowSpace) {
-        store.set({ lowSpace: true, status: '儲存空間不足 500MB：這次練習不保存原始影片（數據照常保存）。' });
+        store.set({ lowSpace: true, status: st('low_space', { freeMb: Math.round((est.quota - est.usage) / 1048576) }) });
         rec('storage.low_space', true);
       } else store.set({ lowSpace: false });
     } catch (_) { /* unknown: keep recording */ }
+  }
+
+  let shotsSinceSpaceCheck = 0;
+  /** Before each clip save (and every 10 shots): may this clip be kept? Sets / clears state.lowSpace. */
+  async function clipAllowed(clipBytes) {
+    shotsSinceSpaceCheck += 1;
+    try {
+      const est = await estimateStorage(nav, { timeoutMs: 1500 });
+      const c = clipSpaceCheck(est, { clipBytes });
+      if (c.lowSpace !== Boolean(store.get().lowSpace) || shotsSinceSpaceCheck >= 10) {
+        shotsSinceSpaceCheck = 0;
+        rec('storage.low_space', c.lowSpace);
+        if (Number.isFinite(c.free)) rec('storage.freeMb', Math.round(c.free / 1048576));
+      }
+      if (c.lowSpace) {
+        if (!store.get().lowSpace) store.set({ lowSpace: true, status: st('low_space', { freeMb: Math.round((c.free ?? 0) / 1048576) }) });
+        return false;
+      }
+      if (store.get().lowSpace && c.free !== null) store.set({ lowSpace: false });
+      return true;
+    } catch (_) {
+      return !store.get().lowSpace;
+    }
   }
 
   // ---- public API ----
@@ -252,7 +330,7 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
       session_id: newId('sess'), venue_id: venue?.venue_id ?? null, preset_id: preset?.preset_id ?? null,
       view, mode, created_at: nowIso(), app_version: ver(),
     };
-    store.set({ sessionActive: true, session, view, status: '正在取得權限…', cameraInterrupted: false, touches: 0 });
+    store.set({ sessionActive: true, session, view, status: st('requesting'), cameraInterrupted: false, cameraError: null });
     watchDocument();
     return (async () => {
       const [m, c, a, w] = await Promise.all([settle(motionP), settle(cameraP), settle(audio.p), settle(wakeP)]);
@@ -261,12 +339,15 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
       const audioState = applyAudio(a);
       const wake = applyWake(w);
       ctl.setupTimer.record('C2', Math.max(t0, now()));
-      const permissions = { motion, camera: cameraOk ? 'granted' : 'denied', microphone: media.audioTrack ? 'granted' : 'denied', audio: audioState, wakeLock: wake };
+      const camState = cameraOk ? 'granted' : (store.get().permissions?.camera ?? 'denied');
+      const permissions = { motion, camera: camState, microphone: media.audioTrack ? 'granted' : 'denied', audio: audioState, wakeLock: wake };
       const fullSession = { ...session, permissions, gum_calls: gumCalls(), warnings: [...sessionWarnings] };
-      store.set({ session: fullSession, status: cameraOk ? '權限已取得，開始架設。' : '無法使用相機：只能用高速模式（匯入影片）。' });
+      store.set({ session: fullSession, status: cameraOk ? st('ready') : st('camera_unavailable', { reason: camState }) });
       await checkSpace();
       if (repo) { try { await repo.sessions.put(fullSession); } catch (e) { rec('store.error', errName(e)); } }
-      return { ok: cameraOk, permissions, session: fullSession };
+      const out = { ok: cameraOk, permissions, session: fullSession };
+      if (!cameraOk) out.error = { code: CAMERA_ERROR_CODES[camState] ?? 'CAMERA_DENIED' };
+      return out;
     })();
   };
 
@@ -275,19 +356,82 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
     return settle(p).then(applyMotion);
   };
 
+  ctl.requestPermissions = function requestPermissions() {
+    // same order as startPractice (motion first, then the camera), nothing awaited before both are invoked
+    const motionP = invokeMotion();
+    let camP;
+    try {
+      const md = nav?.mediaDevices;
+      camP = md && typeof md.getUserMedia === 'function'
+        ? md.getUserMedia({ video: { facingMode: CAMERA_OPTS.facingMode }, audio: true })
+        : Promise.reject(Object.assign(new Error('NO_MEDIA_DEVICES'), { name: 'NotSupportedError' }));
+    } catch (e) { camP = Promise.reject(e); }
+    rec('onboarding.permission_request', true);
+    return Promise.all([settle(motionP), settle(camP)]).then(([m, c]) => {
+      const motionState = applyMotion(m);
+      const motion = motionState === 'unavailable' ? 'unsupported' : motionState;
+      let camera;
+      let microphone;
+      if (c.status === 'fulfilled') {
+        const stream = c.value;
+        camera = (stream.getVideoTracks?.() ?? []).length ? 'granted' : 'missing';
+        microphone = (stream.getAudioTracks?.() ?? []).length ? 'granted' : 'missing';
+        for (const t of stream.getTracks?.() ?? []) { try { t.stop(); } catch (_) { /* ignore */ } }
+      } else {
+        camera = classifyCameraError(c.reason);
+        microphone = camera === 'unsupported' ? 'unsupported' : 'denied';
+        rec('gum.error', errName(c.reason));
+      }
+      perms({ camera, microphone, motion });
+      const out = { camera, microphone, motion };
+      rec('onboarding.permissions', out);
+      return out;
+    });
+  };
+
+  ctl.onStreamChange = function onStreamChange(fn) {
+    streamListeners.add(fn);
+    return () => streamListeners.delete(fn);
+  };
+
   ctl.reopenCamera = function reopenCamera() {
     const p = invokeCamera(); // sync from the click (user activation)
     return settle(p).then((r) => {
       const ok = applyCamera(r);
       rec('interruptions.reopened', gumCalls());
-      store.set({ cameraInterrupted: !ok, status: ok ? '相機已重新開啟。' : '相機仍無法使用。' });
+      store.set({ cameraInterrupted: !ok, status: ok ? st('camera_reopened') : st('camera_still_lost', { reason: store.get().permissions?.camera ?? 'denied' }) });
+      if (ok && media.stream) {
+        streamChanges += 1;
+        rec('interruptions.stream_changes', streamChanges);
+        for (const fn of [...streamListeners]) { try { fn(media.stream); } catch (_) { /* a listener must not break the reopen */ } }
+      }
       return ok;
     });
   };
 
+  ctl.setClub = function setClub(c) {
+    club = c && typeof c === 'object' ? { ...c } : null;
+    rec('live.club', club ? { type: club.type ?? null, length_m: club.length_m ?? null } : null);
+    return club;
+  };
+  ctl.club = () => (club ? { ...club } : null);
+
+  // live analysis queue events (PF-2): pipeline/live.js onQueue -> analysisQueue.emit; screens subscribe with on()
+  const queueListeners = new Set();
+  let lastQueue = { queued: 0, started: 0, done: 0, eta_s: null };
+  ctl.analysisQueue = {
+    on(fn) { queueListeners.add(fn); return () => queueListeners.delete(fn); },
+    emit(ev) {
+      lastQueue = { ...lastQueue, ...(ev ?? {}) };
+      rec('live.queue', lastQueue);
+      for (const fn of [...queueListeners]) { try { fn({ ...lastQueue }); } catch (_) { /* UI */ } }
+    },
+    last: () => ({ ...lastQueue }),
+  };
+
   ctl.changeAngle = function changeAngle(view, preset = null) {
     const s = store.get();
-    if (!s.sessionActive) throw new Error('changeAngle: no session');
+    if (!s.sessionActive) throw codedError('INTERNAL', 'changeAngle: no session');
     ctl.setupTimer = createSetupTimer();
     ctl.setupTimer.record('start', now());
     store.set({ view, session: { ...s.session, view, preset_id: preset?.preset_id ?? null }, presetId: preset?.preset_id ?? null });
@@ -361,17 +505,17 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
     if (deps.camera?.closeCamera) { try { deps.camera.closeCamera(); } catch (_) { /* ignore */ } }
     for (const t of media.stream?.getTracks?.() ?? []) { try { t.stop(); } catch (_) { /* ignore */ } }
     media = { ...media, stream: null, videoTrack: null, audioTrack: null };
-    store.set({ status: '已釋放相機：請用內建相機錄慢動作，再回來「匯入影片」。' });
+    store.set({ status: st('camera_released') });
   };
 
   ctl.reportLive = function reportLive(sample) {
     const d = thermal.push(sample);
     if (d.action === 'degrade') {
       sessionWarnings.add(RC.THERMAL_DEGRADED);
-      store.set({ thermal: { degraded: true, model: d.model, sampling: d.sampling }, status: '手機發熱或太慢：已改用 lite 模型、抽幀加倍。' });
+      store.set({ thermal: { degraded: true, model: d.model, sampling: d.sampling }, status: st('thermal_degraded') });
       rec('thermal.degraded', true);
     } else if (d.action === 'stop_live') {
-      store.set({ status: '即時模式仍然太慢：建議停止即時模式，改用高速模式（錄影後匯入）。' });
+      store.set({ status: st('thermal_stop_live') });
       rec('thermal.stop_live', true);
     }
     if (Number.isFinite(d.p95_s)) rec('live.latency_p95_s', d.p95_s);
@@ -396,17 +540,42 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
     const v = validateShot(shot);
     if (!v.ok) {
       rec('store.invalid_shot', formatErrors(v.errors));
-      throw new Error(`結果不符合 golf-shot/1：${formatErrors(v.errors)}`);
+      throw codedError('INTERNAL', `shot does not match golf-shot/1: ${formatErrors(v.errors)}`);
     }
     if (!repo) return shot;
-    const ops = [{ op: 'put', store: 'shots', record: shot }];
-    if (poseSeq) ops.push({ op: 'put', store: 'poses', record: { shot_id: shot.shot_id, session_id: shot.session_id, created_at: shot.created_at, ...poseSeq } });
-    if (clipBlob && !s.lowSpace) {
-      const clip = makeClipRecord({ clip_id: shot.capture?.clip_ref ?? newId('clip'), shot_id: shot.shot_id, session_id: shot.session_id, created_at: shot.created_at, blob: clipBlob, mime: mime ?? clipBlob.type ?? 'video/mp4' });
-      ops.push({ op: 'put', store: 'clips', record: clip });
+    const pose = poseSeq ? { shot_id: shot.shot_id, session_id: shot.session_id, created_at: shot.created_at, ...poseSeq } : null;
+    const clip = clipBlob
+      ? makeClipRecord({ clip_id: shot.capture?.clip_ref ?? newId('clip'), shot_id: shot.shot_id, session_id: shot.session_id, created_at: shot.created_at, blob: clipBlob, mime: mime ?? clipBlob.type ?? 'video/mp4' })
+      : null;
+    const keepClip = clip ? await clipAllowed(clip.bytes) : false;
+    const dropClip = (x) => (x.quality && Array.isArray(x.quality.warnings) ? addWarning(x, RC.CLIP_NOT_SAVED) : x);
+    let r;
+    try {
+      r = await repo.saveShot({ shot, pose, clip, skipClip: !keepClip, onClipDropped: dropClip });
+    } catch (e) {
+      rec('store.error', errName(e));
+      throw codedError(typeof e?.code === 'string' && /^[A-Z][A-Z0-9_]+$/.test(e.code) ? e.code : 'INTERNAL', String(e?.message ?? e));
     }
-    await repo.batch(ops);
-    store.set({ lastShotId: shot.shot_id });
+    const lastSave = { shot_id: shot.shot_id, ok: r.ok, clipSaved: r.clipSaved, poseSaved: r.poseSaved, reason: r.reason ?? r.error ?? null };
+    rec('store.last_save', lastSave);
+    if (!r.ok) {
+      store.set({ lowSpace: true, lastSave, status: st('storage_full') });
+      throw codedError('QUOTA_EXCEEDED', 'no space left even without the clip');
+    }
+    shot = r.shot;
+    const patch = { lastShotId: shot.shot_id, lastSave };
+    if (clip && !r.clipSaved) {
+      patch.lowSpace = true;
+      patch.status = st('clip_not_saved');
+      clipsNotSaved += 1;
+      rec('storage.clips_not_saved', clipsNotSaved);
+    }
+    store.set(patch);
+    // the repo outcome rides on the returned shot as NON-enumerable fields (§8.0.8 { ok, clipSaved, reason }): callers
+    // that treat the result as the shot (live screen) are unaffected, the shot's JSON / schema / clone never see them
+    for (const [k, v] of Object.entries({ ok: true, clipSaved: r.clipSaved, poseSaved: r.poseSaved, reason: r.reason ?? null })) {
+      Object.defineProperty(shot, k, { value: v, enumerable: false, configurable: true, writable: true });
+    }
     // P19: every 20 shots → health-check prompt
     const hs = noteShot(storage);
     if (hs.shots_since_check >= 20) {
@@ -421,6 +590,7 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
   ctl.endSession = async function endSession() {
     for (const off of listeners) { try { off(); } catch (_) { /* ignore */ } }
     listeners = [];
+    if (trackSub) { try { trackSub(); } catch (_) { /* ignore */ } trackSub = null; }
     ctl.releaseCamera();
     try { await wakeLock?.release?.(); } catch (_) { /* ignore */ }
     wakeLock = null;
@@ -428,7 +598,7 @@ export function createSessionController({ store, repo = null, env = {}, deps = {
     media = { stream: null, videoTrack: null, audioTrack: null, settings: null, audioCtx: null };
     const s = store.get();
     if (repo && s.session) { try { await repo.sessions.put({ ...s.session, ended_at: nowIso() }); } catch (_) { /* ignore */ } }
-    store.set({ sessionActive: false, session: null, status: '練習結束。', cameraInterrupted: false });
+    store.set({ sessionActive: false, session: null, status: st('ended'), cameraInterrupted: false });
   };
 
   return ctl;

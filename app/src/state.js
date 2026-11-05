@@ -1,13 +1,36 @@
 // state.js — tiny app state store + screen switcher (no URL routing: never location / history APIs).
 // Pure: no DOM, no timers. main.js binds it to the screen roots (data-screen="<id>").
 //
-//   SCREENS                              ordered screen ids (docs/app-architecture.md §2)
+//   SCREENS                              ordered core screen ids (docs/app-architecture.md §2)
+//   SUB_SCREENS                          screens added by PRODUCT-SPEC §2 (venues, teach, privacy, help, licences,
+//                                        developer); mounted lazily by main.js when their module exists. Onboarding
+//                                        runs inside home (B), which hides the tab bar while it shows
+//   ALL_SCREENS                          SCREENS + SUB_SCREENS (what nav.go accepts)
+//   TABS, tabOf(screen, prevTab?)        bottom tab bar: tab id → root screen; which tab a screen belongs to
+//   TABBAR_HIDDEN                        screens without the tab bar (setup, live; and home while it shows onboarding)
 //   createStore(initial?) -> store       { get(), set(patch | fn), subscribe(fn) -> unsubscribe }
-//   createNavigator(store) -> nav        { go(screen, params?), back(), current(), stack() }
+//   createNavigator(store) -> nav        { go(screen, params?, { opener }?), back(), root(screen), current(), stack() }
+//                                        opener (any value, usually the tapped element) comes back as
+//                                        state.restoreFocus after back() returns to that screen (A11Y-1)
 //   canApplyUpdate(state) -> boolean     P8: never reload while a practice session is active
 //   initialState()                       the default app state
 
 export const SCREENS = Object.freeze(['home', 'venue', 'setup', 'live', 'import', 'shot', 'history', 'diag', 'settings', 'about']);
+export const SUB_SCREENS = Object.freeze(['venues', 'teach', 'privacy', 'help', 'licences', 'developer']);
+export const ALL_SCREENS = Object.freeze([...SCREENS, ...SUB_SCREENS]);
+
+/** PRODUCT-SPEC §2.1: Practice · History · Settings (tab id → its root screen). */
+export const TABS = Object.freeze({ practice: 'home', history: 'history', settings: 'settings' });
+export const TABBAR_HIDDEN = Object.freeze(['setup', 'live']);
+const TAB_OF = Object.freeze({
+  home: 'practice', venue: 'practice', setup: 'practice', live: 'practice', import: 'practice',
+  history: 'history', teach: 'history',
+  settings: 'settings', diag: 'settings', about: 'settings', venues: 'settings', privacy: 'settings', help: 'settings', licences: 'settings', developer: 'settings',
+});
+/** The tab a screen belongs to; a screen reachable from several tabs (shot) keeps the tab it was opened from. */
+export function tabOf(screen, prevTab = 'practice') {
+  return TAB_OF[screen] ?? (Object.hasOwn(TABS, prevTab) ? prevTab : 'practice');
+}
 
 /** Screens that belong to a running practice session (leaving them does not end the session). */
 export const SESSION_SCREENS = Object.freeze(['setup', 'live', 'import', 'shot']);
@@ -26,7 +49,8 @@ export function initialState() {
     venueId: null,
     presetId: null,
     view: 'face_on',
-    status: '', // status line text (Traditional Chinese)
+    status: '', // status line: { code, params } (PRODUCT-SPEC §8.0.6) or a legacy string; '' / null = none
+    restoreFocus: null, // set by nav.back(): the opener given to nav.go() for the screen being returned to
     permissions: { motion: 'unknown', camera: 'unknown', microphone: 'unknown', wakeLock: 'unknown' },
     lastShotId: null,
     touches: 0,
@@ -60,18 +84,27 @@ export function createStore(initial = initialState()) {
 /** Screen navigation as state transitions with an in-memory back stack (max 20 entries). */
 export function createNavigator(store) {
   return {
-    go(screen, params = {}) {
-      if (!SCREENS.includes(screen)) throw new RangeError(`unknown screen '${screen}'`);
+    go(screen, params = {}, { opener = null } = {}) {
+      if (!ALL_SCREENS.includes(screen)) throw new RangeError(`unknown screen '${screen}'`);
       const s = store.get();
       if (s.screen === screen) { store.set({ params }); return; }
-      const stack = [...s.stack, { screen: s.screen, params: s.params }].slice(-20);
-      store.set({ screen, params, stack });
+      const entry = opener ? { screen: s.screen, params: s.params, opener } : { screen: s.screen, params: s.params };
+      const stack = [...s.stack, entry].slice(-20);
+      store.set({ screen, params, stack, restoreFocus: null });
     },
     back(fallback = 'home') {
       const s = store.get();
       const stack = [...s.stack];
       const prev = stack.pop();
-      store.set(prev ? { screen: prev.screen, params: prev.params, stack } : { screen: fallback, params: {}, stack: [] });
+      store.set(prev ? { screen: prev.screen, params: prev.params, stack, restoreFocus: prev.opener ?? null } : { screen: fallback, params: {}, stack: [], restoreFocus: null });
+    },
+    /** Tab bar: show a tab's root screen with a fresh back stack (back from it falls back to home). */
+    root(screen, params = {}) {
+      if (!ALL_SCREENS.includes(screen)) throw new RangeError(`unknown screen '${screen}'`);
+      const s = store.get();
+      const stack = screen === 'home' ? [] : [{ screen: 'home', params: {} }];
+      if (s.screen === screen) { store.set({ params, stack }); return; }
+      store.set({ screen, params, stack, restoreFocus: null });
     },
     current: () => store.get().screen,
     stack: () => store.get().stack.map((e) => e.screen),

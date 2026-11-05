@@ -82,11 +82,12 @@ test('dropTestDue (K11): never → due; 29 days → not; 30 days → due; isoToM
   assert.equal(dropTestDue('2026-10-05T00:00:00Z', '2026-11-04T00:00:00Z').due, true);
 });
 
-test('calibHealth: prompts in Chinese; drop-test reminder only in high-speed mode', () => {
+test('calibHealth: prompts are { id, level, code, params } (no prose, PRODUCT-SPEC §3.4); drop-test reminder only in high-speed mode', () => {
   const r = calibHealth({ shots_since_check: 20, venue: { mat_L: 1.5, mat_W: 1.25 }, solved_mat: { mat_L: 1.6, mat_W: 1.25 }, locked_luma: 100, current_luma: 150, last_drop_test_at: null, now: '2026-11-04T00:00:00Z', mode: 'highspeed' });
   assert.deepEqual(r.prompts.map((p) => p.id), ['health_due', 'mat_changed', 'brightness', 'drop_test']);
-  assert.ok(r.prompts.every((p) => /[一-鿿]/.test(p.text)));
-  assert.match(r.prompts[1].text, /可能換了墊子/);
+  assert.ok(r.prompts.every((p) => typeof p.code === 'string' && p.code.startsWith('health.prompt.') && p.params && typeof p.params === 'object'));
+  assert.ok(r.prompts.every((p) => !/[一-鿿]/.test(JSON.stringify(p))));
+  assert.equal(r.prompts[1].code, 'health.prompt.mat_changed');
   assert.equal(r.rebuild_background, true);
   assert.deepEqual(r.reason_codes, [RC.CALIB_STALE]);
   const live = calibHealth({ shots_since_check: 3, last_drop_test_at: null, now: '2026-11-04T00:00:00Z', mode: 'live' });
@@ -135,7 +136,7 @@ test('controller: lock re-solves the mat against the preset height (P15 prompt) 
   for (let i = 0; i < 5; i++) noteShot(storage);
   await ctl.lock({ calibration: fx.calibration, evaluation: { light: 'green', reason_codes: [] }, forced: true, venue, view: 'face_on', W: cam.W, H: cam.H, preset, corners, luma: 110 });
   assert.deepEqual(store.get().healthPrompts.map((p) => p.id), ['mat_changed']);
-  assert.match(store.get().healthPrompts[0].text, /可能換了墊子/);
+  assert.equal(store.get().healthPrompts[0].code, 'health.prompt.mat_changed');
   assert.equal(loadHealth(storage).shots_since_check, 0);
   assert.equal(loadHealth(storage).locked_luma, 110);
   // brightness: 40 % darker than the locked frame → warning + background rebuild flag

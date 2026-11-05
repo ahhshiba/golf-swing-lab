@@ -1,0 +1,10 @@
+{
+  "title": "Disclaimer",
+  "estimates": "The numbers are estimates for practice. This app is not a certified launch monitor.",
+  "carry": "Carry comes from a model: spin is not measured (a typical value for the club is used) and wind is ignored.",
+  "ranges": "The ± after a number is a 95% confidence interval: the true value is inside that range about 95% of the time. A number that cannot be measured shows — with the reason; it is never guessed.",
+  "views": "Numbers measured from different camera angles are not directly comparable; comparisons say so.",
+  "safety.title": "Safety",
+  "safety.tripod": "Put the tripod outside the swing path, ideally behind the bay partition. Make a practice swing first to check you cannot hit it.",
+  "safety.people": "Make sure nobody is near you before you swing, and don't look at the phone while swinging."
+}

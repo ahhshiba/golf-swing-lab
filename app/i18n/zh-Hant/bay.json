@@ -1,0 +1,14 @@
+{
+  "verdict.ideal": "打位深度理想",
+  "verdict.usable": "打位深度可用",
+  "verdict.usable_short": "打位偏淺",
+  "verdict.not_guaranteed": "打位太淺",
+  "body.ideal": "手機離球 {D}，手機高度 {h} 以下，往目標側移 {shift}。",
+  "body.usable": "手機離球 {D}，手機高度不超過 {h}，往目標側移 {shift}。",
+  "body.usable_short": "手機離球 {D}，手機高度不超過 {h}。一號木球速很快時，球的數字可能量不到。",
+  "body.not_guaranteed": "正面角度的球數據不保證準：建議改用後方或高斜角後方。",
+  "short.ideal": "這個打位可以照標準位置架。",
+  "short.usable_short": "打位偏淺：手機要放低一點，快速的一號木可能量不到球。",
+  "short.usable": "打位深度可用：手機不要架太高。",
+  "short.not_guaranteed": "打位太淺：正面的球數據可能不準，建議改用後方角度。"
+}

@@ -283,9 +283,10 @@ export function dropTestDue(lastDropTestAt, nowIso, days = HEALTH_LIMITS.drop_te
 
 /**
  * All P19 checks at once. in: { shots_since_check, venue, solved_mat, locked_luma, current_luma, last_drop_test_at,
- * now, mode }. Returns { prompts: [{ id, level: 'info'|'warn', text }], rebuild_background, reason_codes, checks }.
- * Prompt ids: 'health_due', 'mat_changed', 'brightness', 'drop_test'. The drop-test reminder is only for the
- * high-speed mode (the test needs a 240 fps clip).
+ * now, mode }. Returns { prompts: [{ id, level: 'info'|'warn', code, params }], rebuild_background, reason_codes,
+ * checks }. Prompt ids: 'health_due', 'mat_changed', 'brightness', 'drop_test'. `code` is the catalog key of the
+ * message (`health.prompt.*`, rendered with msg()/t(code, params)); params are plain numbers (percentages rounded to
+ * 0.1, days floored). The drop-test reminder is only for the high-speed mode (the test needs a 240 fps clip).
  */
 export function calibHealth(inp = {}) {
   const checks = {
@@ -294,14 +295,16 @@ export function calibHealth(inp = {}) {
     brightness: brightnessCheck(inp.locked_luma, inp.current_luma),
     drop: dropTestDue(inp.last_drop_test_at, inp.now),
   };
+  const pct = (x) => Math.round(1000 * x) / 10;
   const prompts = [];
-  if (checks.shots.due) prompts.push({ id: 'health_due', level: 'info', text: `已打 ${checks.shots.shots_since} 球：建議做一次校正健檢（回到架設確認墊角與機位）。` });
-  if (checks.mat.changed) {
-    const pct = (x) => `${(100 * x).toFixed(1)}%`;
-    prompts.push({ id: 'mat_changed', level: 'warn', text: `可能換了墊子：重解的墊子尺寸和場地紀錄差 長 ${pct(checks.mat.rel_L)}、寬 ${pct(checks.mat.rel_W)}（超過 1%）。請重量墊子並重新建立場地（P1）。` });
+  const add = (id, level, code, params) => prompts.push({ id, level, code: `health.prompt.${code}`, params });
+  if (checks.shots.due) add('health_due', 'info', 'health_due', { n: checks.shots.shots_since });
+  if (checks.mat.changed) add('mat_changed', 'warn', 'mat_changed', { dL: pct(checks.mat.rel_L), dW: pct(checks.mat.rel_W), lim: pct(HEALTH_LIMITS.mat_size_rel) });
+  if (checks.brightness.changed) add('brightness', 'warn', 'brightness', { pct: Math.round(100 * checks.brightness.rel), lim: Math.round(100 * HEALTH_LIMITS.brightness_rel) });
+  if (checks.drop.due && inp.mode === 'highspeed') {
+    if (checks.drop.days_since === null) add('drop_test', 'info', 'drop_test_never', {});
+    else add('drop_test', 'info', 'drop_test', { days: Math.floor(checks.drop.days_since) });
   }
-  if (checks.brightness.changed) prompts.push({ id: 'brightness', level: 'warn', text: `畫面亮度和校正時差 ${(100 * checks.brightness.rel).toFixed(0)}%（超過 30%）：光線改變，背景模型會重建；若結果異常請重新校正。` });
-  if (checks.drop.due && inp.mode === 'highspeed') prompts.push({ id: 'drop_test', level: 'info', text: checks.drop.days_since === null ? '還沒做過落球測試：建議做一次（驗證比例尺與時間基準，約 1 分鐘）。' : `距離上次落球測試已 ${Math.floor(checks.drop.days_since)} 天：建議每月做一次。` });
   return {
     prompts,
     rebuild_background: checks.brightness.rebuild_background,

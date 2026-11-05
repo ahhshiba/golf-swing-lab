@@ -7,7 +7,9 @@
 //     preset id is missing on either side (a missing id cannot prove the same setup). For sets it is present unless
 //     both sets consist of exactly one and the same preset.
 //   notes: [{ kind: 'view_mismatch' | 'club_mismatch' | 'mixed_views' | 'mixed_clubs' | 'mixed_presets' | 'empty_set'
-//             | 'small_sample', text }] with a Traditional Chinese text for the user.
+//             | 'small_sample', params }] — codes only (PRODUCT-SPEC §3.4); the UI renders t('compare.note.<kind>', …).
+//             params: view_mismatch { a, b } (view ids), club_mismatch { a, b } (club types, null = unknown),
+//             empty_set { side: 'A' | 'B' }, the others {}.
 //   like_for_like: true only when there are no warnings and no notes.
 //   metrics: { [metric id]: entry } in the order of metric-ids.js (ids unknown to that list follow, sorted).
 //     shots entry: { id, unit, a, b, delta, delta_ci95, significant, status }
@@ -40,8 +42,6 @@ export function tCritical95(df) {
   return 1.98;
 }
 
-const VIEW_LABEL = { face_on: '正面', dtl: '後方（DTL）', high_behind: '高斜角後方' };
-const viewLabel = (v) => VIEW_LABEL[v] ?? String(v ?? '未知');
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
 const nanToNull = (x) => (Number.isFinite(x) ? x : null);
 
@@ -117,10 +117,10 @@ export function compareShots(a, b) {
     warnings.push(RC.PRESET_MISMATCH);
   }
   if (ia.view !== ib.view) {
-    notes.push({ kind: 'view_mismatch', text: `兩球的拍攝角度不同（${viewLabel(ia.view)} 對 ${viewLabel(ib.view)}），每個角度能量到的指標不一樣` });
+    notes.push({ kind: 'view_mismatch', params: { a: ia.view, b: ib.view } });
   }
   if (ia.club_type !== ib.club_type) {
-    notes.push({ kind: 'club_mismatch', text: `兩球用的球桿不同（${ia.club_type ?? '未知'} 對 ${ib.club_type ?? '未知'}），球速、距離不能直接比` });
+    notes.push({ kind: 'club_mismatch', params: { a: ia.club_type, b: ib.club_type } });
   }
   const metrics = {};
   for (const id of metricIds([a, b])) metrics[id] = diffMetric(id, a.metrics?.[id], b.metrics?.[id]);
@@ -201,31 +201,58 @@ export function compareSets(listA, listB) {
   const da = describeSet(listA);
   const db = describeSet(listB);
   if (da.n === 0 || db.n === 0) {
-    notes.push({ kind: 'empty_set', text: `${da.n === 0 ? 'A' : 'B'} 組沒有任何球，沒有東西可比` });
+    notes.push({ kind: 'empty_set', params: { side: da.n === 0 ? 'A' : 'B' } });
   } else {
     const same = da.preset_ids.length === 1 && db.preset_ids.length === 1 &&
       present(da.preset_ids[0]) && da.preset_ids[0] === db.preset_ids[0];
     if (!same) warnings.push(RC.PRESET_MISMATCH);
     if (da.preset_ids.length > 1 || db.preset_ids.length > 1) {
-      notes.push({ kind: 'mixed_presets', text: '同一組球來自不同的機位預設，組內的數字本身就混了不同架設' });
+      notes.push({ kind: 'mixed_presets', params: {} });
     }
     if (da.views.length > 1 || db.views.length > 1) {
-      notes.push({ kind: 'mixed_views', text: '同一組球混了不同的拍攝角度，平均值沒有意義' });
+      notes.push({ kind: 'mixed_views', params: {} });
     } else if (da.views[0] !== db.views[0]) {
-      notes.push({ kind: 'view_mismatch', text: `兩組的拍攝角度不同（${viewLabel(da.views[0])} 對 ${viewLabel(db.views[0])}），每個角度能量到的指標不一樣` });
+      notes.push({ kind: 'view_mismatch', params: { a: da.views[0], b: db.views[0] } });
     }
     if (da.club_types.length > 1 || db.club_types.length > 1) {
-      notes.push({ kind: 'mixed_clubs', text: '同一組球混了不同的球桿，平均值沒有意義' });
+      notes.push({ kind: 'mixed_clubs', params: {} });
     } else if (da.club_types[0] !== db.club_types[0]) {
-      notes.push({ kind: 'club_mismatch', text: `兩組用的球桿不同（${da.club_types[0] ?? '未知'} 對 ${db.club_types[0] ?? '未知'}），球速、距離不能直接比` });
+      notes.push({ kind: 'club_mismatch', params: { a: da.club_types[0], b: db.club_types[0] } });
     }
   }
   const metrics = {};
   if (da.n > 0 && db.n > 0) {
     for (const id of metricIds([...listA, ...listB])) metrics[id] = diffSets(id, summarize(listA, id), summarize(listB, id));
     if (Object.values(metrics).some((m) => m.status === 'compared' && m.delta_ci95 === null)) {
-      notes.push({ kind: 'small_sample', text: '有些指標某一組少於 2 球，只能看差多少，沒辦法判斷差異是不是運氣' });
+      notes.push({ kind: 'small_sample', params: {} });
     }
   }
   return { kind: 'sets', a: da, b: db, like_for_like: warnings.length === 0 && notes.length === 0, warnings, notes, metrics };
+}
+
+// ------------------------------------------------------------------------------------- plain-language diff
+
+/**
+ * The compared metrics as a list for a plain-language summary (PRODUCT-SPEC §2.3 History › Compare), most notable
+ * first: [{ id, unit, delta, direction: 'higher' | 'lower' | 'same', significant: true | false | null }].
+ * Significant differences come first (largest |delta| / half-width), then the rest in metric-id order. Codes only;
+ * the UI words it ("tempo ratio 0.3 higher, beyond the usual spread").
+ */
+export function diffSummary(result) {
+  const rows = [];
+  let order = 0;
+  for (const m of Object.values(result?.metrics ?? {})) {
+    order++;
+    if (m.status !== 'compared' || !finite(m.delta)) continue;
+    const half = m.delta_ci95 ? (m.delta_ci95[1] - m.delta_ci95[0]) / 2 : null;
+    rows.push({
+      id: m.id, unit: m.unit, delta: m.delta,
+      direction: m.delta > 0 ? 'higher' : (m.delta < 0 ? 'lower' : 'same'),
+      significant: m.significant,
+      score: m.significant && half > 0 ? Math.abs(m.delta) / half : 0,
+      order,
+    });
+  }
+  rows.sort((x, y) => (Number(Boolean(y.significant)) - Number(Boolean(x.significant))) || (y.score - x.score) || (x.order - y.order));
+  return rows.map(({ score, order: o, ...r }) => r);
 }

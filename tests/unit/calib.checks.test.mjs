@@ -124,3 +124,41 @@ test('staleCheck (>2 px → CALIB_STALE), cornerDrift, ballWidthCheck', () => {
   assert.equal(ballWidthCheck(23.8, 22.4).ok, false);
   assert.deepEqual(ballWidthCheck(11.5, 11.5).failures.map((f) => f.check), ['ball_min_px']);
 });
+
+// ---- WP-B (PRODUCT-SPEC §3.4): health prompts are { id, level, code, params } only — wording lives in the catalogs
+import { calibHealth as calibHealthB } from '../../app/src/calib/checks.js';
+import { readFileSync as readB } from 'node:fs';
+
+test('calibHealth prompts carry catalog codes + numeric params, no prose; both locales word every code', () => {
+  const r = calibHealthB({ shots_since_check: 20, venue: { mat_L: 1.5, mat_W: 1.25 }, solved_mat: { mat_L: 1.6, mat_W: 1.25 }, locked_luma: 100, current_luma: 150, last_drop_test_at: null, now: '2026-11-04T00:00:00Z', mode: 'highspeed' });
+  assert.deepEqual(r.prompts.map((p) => p.id), ['health_due', 'mat_changed', 'brightness', 'drop_test']);
+  for (const p of r.prompts) {
+    assert.deepEqual(Object.keys(p).sort(), ['code', 'id', 'level', 'params']);
+    assert.match(p.code, /^health\.prompt\.[a-z_]+$/);
+    for (const v of Object.values(p.params)) assert.equal(typeof v, 'number');
+    assert.ok(!/[一-鿿]/.test(JSON.stringify(p)));
+  }
+  assert.deepEqual(r.prompts[1].params, { dL: 6.7, dW: 0, lim: 1 });
+  assert.deepEqual(r.prompts[2].params, { pct: 50, lim: 30 });
+  assert.equal(r.prompts[3].code, 'health.prompt.drop_test_never');
+  const later = calibHealthB({ last_drop_test_at: '2026-09-01T00:00:00Z', now: '2026-11-04T00:00:00Z', mode: 'highspeed' });
+  assert.deepEqual(later.prompts.map((p) => [p.code, p.params.days]), [['health.prompt.drop_test', 64]]);
+  for (const loc of ['zh-Hant', 'en']) {
+    const cat = JSON.parse(readB(new URL(`../../app/i18n/${loc}/health.json`, import.meta.url), 'utf8'));
+    for (const p of [...r.prompts, ...later.prompts]) {
+      const v = cat[p.code.replace(/^health\./, '')];
+      assert.equal(typeof v, 'string', `${loc}: ${p.code}`);
+      for (const k of Object.keys(p.params)) assert.ok(v.includes(`{${k}}`), `${loc} ${p.code} lacks {${k}}`);
+    }
+  }
+  const zh = JSON.parse(readB(new URL('../../app/i18n/zh-Hant/health.json', import.meta.url), 'utf8'));
+  assert.match(zh['prompt.mat_changed'], /可能換了墊子/);
+});
+
+test('every evaluate() check name has a plain calib.check label in both locales', () => {
+  const names = ['abs_yaw_deg', 'abs_pitch_deg', 'abs_roll_deg', 'abs_Y_m', 'min_D_m', 'preset_view', 'rel_yaw_deg', 'rel_pitch_deg', 'rel_roll_deg', 'rel_D_m', 'rel_X_m', 'rel_Y_m', 'rel_h_m', 'rmse_px', 'edge_residual_px', 'f_format', 'ghost_px', 'corners_in_frame', 'ball_width', 'ball_min_px', 'frames_budget'];
+  for (const loc of ['zh-Hant', 'en']) {
+    const cat = JSON.parse(readB(new URL(`../../app/i18n/${loc}/calib.json`, import.meta.url), 'utf8'));
+    for (const n of names) assert.equal(typeof cat[`check.${n}`], 'string', `${loc} calib.check.${n}`);
+  }
+});
