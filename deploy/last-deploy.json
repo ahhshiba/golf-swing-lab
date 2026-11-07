@@ -1,8 +1,8 @@
 {
-  "version": "0.2.0+ec90647ec8",
-  "commit": "9f3aec1878b5c26c8fd50557a2b7be7895afaa3d",
-  "deployed_at": "2026-11-05T05:34:47.142Z",
+  "version": "0.3.0+1b4deb6f45",
+  "commit": "920aab1df12b31545057276efab70cee67db3231",
+  "deployed_at": "2026-11-07T07:50:28.739Z",
   "bundled_event_model": false,
-  "source_head": "caaeb50448a8b0d12e35a244389ee397908ff7a7",
+  "source_head": "9f429da43912088571ecd3c7de186c70c7cce533",
   "url": "https://ahhshiba.github.io/golf-swing-lab/"
 }
