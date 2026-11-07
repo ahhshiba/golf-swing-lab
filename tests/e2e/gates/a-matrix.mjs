@@ -1,16 +1,18 @@
 // Gate a-matrix (PRODUCT-SPEC §8.7 step 4, A11Y-3): the full screenshot matrix (tests/e2e/screenshot_matrix.mjs) as a
-// verify gate — 10 screens × 390/430 portrait (setup and live also 844×390 landscape) × light/dark/sun × zh-Hant/en
-// × text 100 % and 200 %. 0 findings of every kind is required: hscroll, overlap, obscured (live pill / hero tiles /
-// count / club / toolbar and setup title / primary / instruction uncovered and unclipped as first shown, at 200 % too),
-// truncation, word-break, spec-codes, cjk, hero; no external request and no page error. Runs in its own server and
-// browser (about 2 minutes); screenshots go to $GSL_SHOTS_DIR/matrix or the OS temp dir.
+// verify gate — its default screen set (LAUNCH-MONITOR-SPEC §5.3-4: the 10 shell screens, drills / drill / stats /
+// gapping and the states shot:tiles|side|top|3d|video, drills:setup, drill:result|active = 22 entries) × 390/430 portrait
+// (setup and live also 844×390 landscape) × light/dark/sun × zh-Hant/en × text 100 % and 200 % = 552 states. 0 findings of
+// every kind is required: hscroll, overlap, obscured (live pill / hero tiles / count / club / toolbar and setup
+// title / primary / instruction uncovered and unclipped as first shown, at 200 % too), truncation, word-break, spec-codes, cjk, hero, state; no external request and no page error. Runs in its own server
+// and browser (several minutes); screenshots go to $GSL_SHOTS_DIR/matrix or the OS temp dir.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT } from '../lib.mjs';
 
-export const meta = { id: 'a-matrix', title: 'screenshot matrix: 264 states, 0 overlap / obscured / truncation / word-break findings (200 % text)', timeoutMs: 600000 };
+const MIN_STATES = 552;
+export const meta = { id: 'a-matrix', title: `screenshot matrix: ${MIN_STATES} states, 0 overlap / obscured / truncation / word-break findings (200 % text)`, timeoutMs: 1800000 };
 
 export async function run(ctx) {
   const out = path.join(process.env.GSL_SHOTS_DIR || path.join(os.tmpdir(), 'gsl-e2e-shots'), 'matrix');
@@ -29,6 +31,6 @@ export async function run(ctx) {
   if (code !== 0 || !summary || summary.with_findings !== 0) {
     throw new Error(`screenshot matrix exit ${code}${summary ? `, ${summary.with_findings} of ${summary.states} states with findings` : ''}\n${text.trim().split('\n').slice(-24).join('\n')}`);
   }
-  if (summary.states < 264) throw new Error(`screenshot matrix ran ${summary.states} states, expected 264`);
+  if (summary.states < MIN_STATES) throw new Error(`screenshot matrix ran ${summary.states} states, expected ${MIN_STATES}`);
   return `${summary.states} states, 0 findings (${Object.entries(summary.checks).map(([k, n]) => `${k} ${n}`).join(', ')}) → ${out}`;
 }

@@ -49,7 +49,9 @@ test('rcReferences finds RC.NAME uses only', () => {
 test('check_contract passes on the real tree', async () => {
   const { problems, info } = await runChecks();
   assert.deepEqual(problems, []);
-  assert.ok(info.some((i) => /valid \+ \d+ bad fixtures/.test(i)));
+  assert.ok(info.some((i) => /valid \+ \d+ bad golf-shot\/1 fixtures/.test(i)));
+  assert.ok(info.some((i) => /valid \+ [7-9]\d* bad golf-shot\/2 fixtures/.test(i)), info.join('; '));
+  assert.ok(info.includes('38 reason codes'));
 });
 
 test('node scripts/check_contract.mjs exits 0', () => {
@@ -64,7 +66,7 @@ test('node scripts/check_contract.mjs exits 0', () => {
 async function withRoot(mutate) {
   const dir = mkdtempSync(join(tmpdir(), 'gsl-contract-'));
   try {
-    for (const p of ['package.json', 'app/src/contract', 'app/src/geom', 'app/i18n/zh-Hant/reason.json', 'schema', 'tests/fixtures/shots', 'scripts/check_contract.mjs']) {
+    for (const p of ['package.json', 'app/src/contract', 'app/src/geom', 'app/i18n/zh-Hant/reason.json', 'app/i18n/en/reason.json', 'schema', 'tests/fixtures/shots', 'scripts/check_contract.mjs']) {
       mkdirSync(dirname(join(dir, p)), { recursive: true });
       cpSync(join(ROOT, p), join(dir, p), { recursive: true });
     }
@@ -164,5 +166,28 @@ test('fixture problems: valid one broken, bad one passing, wrong expectation, to
   const g = await withRoot((d) => put(d, 'tests/fixtures/shots/oops.json', '{}'));
   assert.ok(g.problems.some((p) => p.includes('must start with valid_ or bad_')), g.problems.join('\n'));
   const h = await withRoot((d) => rmSync(join(d, 'tests/fixtures/shots/valid_high_behind_240.json')));
-  assert.ok(h.problems.some((p) => p.includes('no valid fixture for view high_behind')), h.problems.join('\n'));
+  assert.ok(h.problems.some((p) => p.includes('no valid v1 fixture for view high_behind')), h.problems.join('\n'));
+});
+
+// ---------------------------------------------------------------------------------------- golf-shot/2 (LM-A drop 1)
+
+test('golf-shot/2: schema v2 drift, a v2 bad fixture that does not name its rule, a broken v2 fixture, a missing .fix', async () => {
+  const a = await withRoot((d) => edit(d, 'schema/shot-v2.schema.json', (t) => t.replace('"spin_rate_rpm"', '"spin_rpm"')));
+  assert.ok(a.problems.some((p) => p.includes('shot-v2.schema.json: metric id spin_rate_rpm appears 0 times')), a.problems.join('\n'));
+  const b = await withRoot((d) => edit(d, 'schema/shot-v2.schema.json', (t) => t.replace('"MIGRATED_V1"', '"MIGRATED"')));
+  assert.ok(b.problems.some((p) => p.includes('shot-v2.schema.json: reasonCode differs')), b.problems.join('\n'));
+  // the v1 schema stays golf-shot/1: the new codes must not be added to it
+  const c = await withRoot((d) => edit(d, 'schema/shot-v1.schema.json', (t) => t.replace('"SLOWMO_CORRECTED"', '"SLOWMO_CORRECTED", "MIGRATED_V1"')));
+  assert.ok(c.problems.some((p) => p.includes('shot-v1.schema.json: reasonCode differs')), c.problems.join('\n'));
+  const e = await withRoot((d) => edit(d, 'tests/fixtures/shots/v2/bad_flight_t_increasing.json', (t) => t.replace('"_expect": "flight_t_increasing"', '"_expect": "must be greater"').replace('bad_flight_t_increasing', 'x')));
+  assert.deepEqual(e.problems, [], 'the _expect substring may differ from the rule, the rule name must still be in the error');
+  const f = await withRoot((d) => {
+    const from = join(d, 'tests/fixtures/shots/v2/bad_flight_t_increasing.json');
+    writeFileSync(join(d, 'tests/fixtures/shots/v2/bad_some_other_rule.json'), readFileSync(from, 'utf8'));
+  });
+  assert.ok(f.problems.some((p) => p.includes('bad_some_other_rule.json failed, but no error names its rule "some_other_rule"')), f.problems.join('\n'));
+  const g = await withRoot((d) => edit(d, 'tests/fixtures/shots/v2/valid_face_on_240.json', (t) => t.replace('"model": "lm-1"', '"model": ""')));
+  assert.ok(g.problems.some((p) => p.includes('v2/valid_face_on_240.json should be valid')), g.problems.join('\n'));
+  const h = await withRoot((d) => edit(d, 'app/i18n/en/reason.json', (t) => { const o = JSON.parse(t); delete o['MIGRATED_V1.fix']; return JSON.stringify(o); }));
+  assert.ok(h.problems.some((p) => p.includes('MIGRATED_V1 has no en reason.json key MIGRATED_V1.fix')), h.problems.join('\n'));
 });

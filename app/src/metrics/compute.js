@@ -1,9 +1,11 @@
-// computeMetrics: pose + events + calibration -> { [metric id]: Metric } for every id of the golf-shot/1 contract
-// (CAFCR F2 rows 1–20). Rows 1–13 are computed here per view; every 不可 cell is an honest null with the F2 reason
+// computeMetrics: pose + events + calibration -> { [metric id]: Metric } for every id of the golf-shot/2 contract
+// (CAFCR F2 rows 1–20 + LAUNCH-MONITOR-SPEC rows 21–34). Rows 1–13 are computed here per view; every 不可 cell is an honest null with the F2 reason
 // code. Rows 14–20 (club / ball): face_on club_speed_mps below 200 fps is estimated here from pose (metrics/club.js,
 // F2 row 14 "30–60fps 低 ±25%"); every other allowed cell of rows 14–20 needs a ball / club-head track, which this
 // function does not receive, so it is null + not_computed + TRACK_TOO_SHORT here and pipeline/assemble.js replaces
-// it with the physics result (face_on 16–20 and 14 at ≥ 200 fps; high_behind 15 and 18). Pure.
+// it with the physics result (face_on 16–20 and 14 at ≥ 200 fps; high_behind 15 and 18) and the launch-monitor
+// derivation (physics/lm: rows 21–34, face_on carry, high_behind 14 / 16 / 19). Rows 21–34 get the same placeholder
+// here. Pure.
 
 import { RC } from '../contract/reason-codes.js';
 import { METRIC_IDS } from '../contract/enums.js';

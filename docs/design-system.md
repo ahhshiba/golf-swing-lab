@@ -68,6 +68,16 @@ attribute and the media queries pick dark (`prefers-color-scheme: dark`) or sun 
 repeat the explicit values exactly (unit test). The live screen sets `data-live-theme="dark"` on its root unless the
 theme is sun.
 
+### 2a. Launch-monitor tokens (LAUNCH-MONITOR-SPEC §4.2, LM-A drop 1)
+
+`--fs-metric-xl` (`clamp(max(44px, 2rem), 11.3vw, 3.5rem)` × `--hero-scale`: ≥ 44 px at 390 px, grows with the width; the floor follows rem (64 px at 200 %) so numbers stay bigger than their
+labels), `--fs-metric`, `--t-metric` (sun 800); `--tile-bg`, `--tile-border` (+ `--tile-border-color`; sun 2 px);
+`--viz-bg`, `--viz-axis`, `--viz-grid`, `--viz-text`, `--viz-series-1…8` (club series, `CLUBS` order; every series also
+has a glyph), `--viz-ci-alpha` (sun 0: outline instead of fill), `--viz-target`, `--viz-tracer`, `--viz-tracer-halo`.
+Canvas code reads them only through `viz/palette.js` `vizPalette(el)`; `check_tokens` rule `js-hex-colour` flags hex
+literals in `src/viz/**` and `src/ui/**` (WARN until integration). Data screens (shot, stats, gapping, drill) are dark
+while the theme is auto.
+
 ## 3. Components (`app/src/ui/components.js`)
 
 `createComponents(doc, { t, timers })` binds a document (tests: `tests/unit/_fakedom.mjs` `fakeDocument()`,

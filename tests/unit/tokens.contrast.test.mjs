@@ -59,18 +59,55 @@ const PAIRS = [
   ['--tag-valid-fg', '--tag-valid-bg', TEXT], ['--tag-est-fg', '--tag-est-bg', TEXT], ['--tag-low-fg', '--tag-low-bg', TEXT], ['--tag-null-fg', '--tag-null-bg', TEXT],
   ['--toast-fg', '--toast-bg', TEXT], ['--on-media', '--media-bg', TEXT],
 ];
+// LAUNCH-MONITOR-SPEC §4.2: chart colours are graphics (UI 3.0) on the page background and on a card / tile surface
+const SERIES = Array.from({ length: 8 }, (_, i) => `--viz-series-${i + 1}`);
+const LM_PAIRS = [
+  ...[...SERIES, '--viz-axis', '--viz-target'].flatMap((fg) => [[fg, '--surface', UI], [fg, '--bg', UI]]),
+  ['--text', '--tile-bg', TEXT], ['--text-2', '--tile-bg', TEXT], ['--text-2', '--viz-bg', TEXT], ['--viz-axis', '--viz-bg', UI],
+];
+PAIRS.push(...LM_PAIRS);
+/** Pairs required in one theme only: the sun tile border (2 px, no fill) must stand out (§4.2). */
+const THEME_PAIRS = { sun: [['--tile-border-color', '--surface', UI], ['--tile-border-color', '--bg', UI]] };
 /** Colour tokens with no contrast requirement (decorative or not a solid colour). */
-const EXEMPT = ['--separator', '--scrim', '--scroll-shade']; // --scroll-shade: edge shadow of a scroll panel, never behind text
+const EXEMPT = ['--separator', '--scrim', '--scroll-shade', // --scroll-shade: edge shadow of a scroll panel, never behind text
+  // LAUNCH-MONITOR-SPEC §4.2: grid lines are decorative; the tracer is a two-stroke line (halo + colour) drawn on video,
+  // visible on any frame by construction; the light / dark tile border is a hairline like --separator (sun: THEME_PAIRS)
+  '--viz-grid', '--viz-tracer', '--viz-tracer-halo', '--tile-border-color',
+  // camera-frame overlays in ui/setup.js and ui/magnifier.js: drawn on video and outlined in --media-bg (theme-independent)
+  '--overlay-go', '--overlay-caution', '--overlay-stop', '--overlay-select'];
 
 test('every declared pair meets its threshold in light, dark and sun', () => {
   const fails = [];
   for (const [name, th] of Object.entries(THEMES)) {
-    for (const [fg, bg, need] of PAIRS) {
+    for (const [fg, bg, need] of [...PAIRS, ...(THEME_PAIRS[name] ?? [])]) {
       const r = ratio(th[fg], th[bg]);
       if (!(r >= need)) fails.push(`${name}: ${fg} ${th[fg]} on ${bg} ${th[bg]} = ${r.toFixed(2)} < ${need}`);
     }
   }
   assert.deepEqual(fails, []);
+});
+
+test('launch-monitor tokens (LAUNCH-MONITOR-SPEC §4.2): series, axis, target, sun tile border ≥ 3.0 on --surface and --bg in every theme (≥ 48 pairs listed)', () => {
+  const rows = [];
+  const fails = [];
+  for (const [name, th] of Object.entries(THEMES)) {
+    for (const [fg, bg, need] of [...LM_PAIRS, ...(THEME_PAIRS[name] ?? [])]) {
+      if (need !== UI || (bg !== '--surface' && bg !== '--bg')) continue;
+      const r = ratio(th[fg], th[bg]);
+      rows.push(`${name} ${fg} ${th[fg]} / ${bg} ${th[bg]} = ${r.toFixed(2)}`);
+      if (!(r >= 3.0)) fails.push(rows.at(-1));
+    }
+  }
+  console.log(`# ${rows.length} launch-monitor colour pairs\n# ${rows.join('\n# ')}`);
+  assert.ok(rows.length >= 48, `only ${rows.length} pairs`);
+  assert.ok(rows.some((r) => r.startsWith('sun --tile-border-color')), 'sun tile border listed');
+  assert.deepEqual(fails, []);
+  // the type tokens exist (sun weight 800) and every tile / viz token is defined in all three themes
+  assert.match(light['--fs-metric-xl'], /clamp\(max\(44px, 2rem\), 11\.3vw, 3\.5rem\)/);
+  assert.match(THEMES.sun['--t-metric'], /^800 /);
+  for (const [name, th] of Object.entries(THEMES)) for (const k of ['--tile-bg', '--tile-border', '--viz-bg', '--viz-ci-alpha', '--viz-tracer', '--viz-tracer-halo', ...SERIES]) assert.ok(th[k], `${name} ${k}`);
+  assert.equal(THEMES.sun['--viz-ci-alpha'], '0');
+  assert.match(THEMES.sun['--tile-border'], /^2px solid/);
 });
 
 test('spec values (§1.4) are the tokens: spot checks of the published ratios', () => {

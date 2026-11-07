@@ -8,7 +8,7 @@
 // session controller load right after #app-ready, and a screen that needs them (setup, live, import, diag, teach,
 // developer) waits for them before its first show.
 
-import { createStore, createNavigator, initialState, ALL_SCREENS, TABS, TABBAR_HIDDEN, tabOf } from './state.js';
+import { createStore, createNavigator, initialState, ALL_SCREENS, TABS, TABBAR_HIDDEN, DATA_SCREENS, tabOf } from './state.js';
 import { openRepository } from './store/core.js';
 import { idbBackend } from './store/idb.js';
 import { loadSettings } from './session/settings.js';
@@ -38,7 +38,14 @@ export const SCREEN_MODULES = Object.freeze({
   help: ['./ui/settings.js', 'mountHelp'],
   licences: ['./ui/settings.js', 'mountLicences'],
   developer: ['./ui/settings.js', 'mountDeveloper'],
+  // LAUNCH-MONITOR-SPEC §3.1 (lazy files, scripts/build.mjs LAZY_FILES)
+  drills: ['./ui/drills.js', 'mountDrills'],
+  drill: ['./ui/drill.js', 'mountDrill'],
+  stats: ['./ui/stats.js', 'mountStats'],
+  gapping: ['./ui/gapping.js', 'mountGapping'],
 });
+/** Pause between background write-back batches of migrated shots (LAUNCH-MONITOR-SPEC §2.1). */
+const MIGRATE_PAUSE_MS = 400;
 /** Screens whose first show waits for the media/devtools modules and the session controller. */
 const NEEDS_DEPS = new Set(['setup', 'live', 'import', 'diag', 'teach', 'developer']);
 
@@ -104,6 +111,55 @@ function applyTheme(theme) {
     const bg = root.dataset.theme ? getComputedStyle(root).getPropertyValue('--bg').trim() : '';
     for (const [m, initial] of THEME_META) m.setAttribute('content', bg || initial);
   } catch (_) { /* no CSSOM */ }
+}
+
+/**
+ * LAUNCH-MONITOR-SPEC §4.1: data screens (shot, stats, gapping, drill) are dark while the theme is auto (the live
+ * mechanism, data-live-theme on the screen root); an explicit light / dark / sun choice wins.
+ */
+function applyDataTheme(theme, roots) {
+  for (const id of DATA_SCREENS) {
+    const el = roots?.[id];
+    if (!el) continue;
+    if ((theme ?? 'auto') === 'auto') el.dataset.liveTheme = 'dark';
+    else delete el.dataset.liveTheme;
+  }
+}
+
+/** app.drill (LAUNCH-MONITOR-SPEC §5.0-8): the practice drill in progress; LM-E's screens set and read it. */
+export function createDrillState() {
+  let cur = null;
+  const subs = new Set();
+  return {
+    current: () => cur,
+    set(drill) {
+      cur = drill ?? null;
+      for (const fn of [...subs]) { try { fn(cur); } catch (_) { /* a listener must not break the others */ } }
+      return cur;
+    },
+    onChange(fn) { subs.add(fn); return () => subs.delete(fn); },
+  };
+}
+
+/**
+ * app.e2e (LAUNCH-MONITOR-SPEC §5.0-13): named screen states for tests/e2e/screenshot_matrix.mjs (--screens shot:tiles).
+ * A screen module registers `fn` (async, gets the app) that puts its screen into that state after it is shown.
+ */
+export function createE2EStates() {
+  const states = new Map();
+  return {
+    registerState(screen, name, fn) {
+      if (typeof screen !== 'string' || typeof name !== 'string' || typeof fn !== 'function') throw new TypeError('registerState(screen, name, async fn)');
+      states.set(`${screen}:${name}`, fn);
+    },
+    states: () => [...states.keys()].sort(),
+    has: (screen, name) => states.has(`${screen}:${name}`),
+    async runState(screen, name, ...args) {
+      const fn = states.get(`${screen}:${name}`);
+      if (!fn) throw Object.assign(new Error(`no e2e state ${screen}:${name}`), { code: 'E2E_STATE_MISSING' });
+      return fn(...args);
+    },
+  };
 }
 
 /** Normalise anything thrown into { code, params, detail, stack, where, screen, at }. Never throws. */
@@ -205,12 +261,15 @@ async function boot() {
 
   let depsP = null;
   let controllerP = null;
+  let roots = {};
   const app = {
     store, nav, deps, record, localDiag, repo: null, current: null, updater: null,
     version: () => build.APP_VERSION ?? swVersion ?? 'unbuilt',
     build: Object.freeze({ version: build.APP_VERSION, semver: build.APP_SEMVER, id: build.APP_BUILD, devResearch: build.DEV_RESEARCH, bundledEventModel: build.BUNDLED_EVENT_MODEL }),
     settings: () => settings,
-    updateSettings: (s) => { settings = s; applyTheme(s?.theme); },
+    updateSettings: (s) => { settings = s; applyTheme(s?.theme); applyDataTheme(s?.theme, roots); },
+    drill: createDrillState(),
+    e2e: createE2EStates(),
     vision: null,
     // PRODUCT-SPEC §8.0.4
     t,
@@ -307,7 +366,8 @@ async function boot() {
   }
 
   // ---- screens: mounted on first show ----
-  const roots = Object.fromEntries(ALL_SCREENS.map((id) => [id, document.querySelector(`[data-screen="${id}"]`)]));
+  roots = Object.fromEntries(ALL_SCREENS.map((id) => [id, document.querySelector(`[data-screen="${id}"]`)]));
+  applyDataTheme(settings.theme, roots);
   const screens = {};
   const mounting = {};
   function unavailable(root, id) {
@@ -556,6 +616,14 @@ async function boot() {
 
   // ---- after #app-ready: heavy layers, controller, storage persistence, service worker registration ----
   loadLate();
+  // golf-shot/1 → golf-shot/2 write-back, one short transaction per batch (LAUNCH-MONITOR-SPEC §2.1)
+  if (app.repo && typeof app.repo.migrateBatch === 'function') {
+    const step = () => app.repo.migrateBatch().then((r) => {
+      record('store.migrate', r);
+      if (r.migrated > 0 && r.remaining > 0) setTimeout(step, MIGRATE_PAUSE_MS);
+    }).catch((e) => record('store.migrate_error', String(e?.message ?? e)));
+    setTimeout(step, MIGRATE_PAUSE_MS);
+  }
   import('./store/quota.js').then(({ requestPersist }) => requestPersist(navigator)).then((r) => {
     record('storage.persisted', r.persisted);
     record('storage.usage', r.usage);

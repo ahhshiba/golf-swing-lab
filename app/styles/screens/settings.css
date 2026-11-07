@@ -30,7 +30,10 @@
 [data-screen="settings"] .segmented, [data-screen="developer"] .segmented { flex-wrap: wrap; }
 [data-screen="settings"] .segmented-opt, [data-screen="developer"] .segmented-opt { flex: 1 1 4.5em; overflow-wrap: normal; word-break: keep-all; hyphens: auto; }
 .segmented-opt[aria-disabled="true"] { color: var(--text-3); }
-.set-group .chip-row { margin: 0 calc(-1 * var(--s-4)); padding: var(--s-1) var(--s-4); scroll-padding: 0 var(--s-4); }
+.set-group .chip-row { flex-wrap: wrap; overflow: visible; margin: 0; padding: var(--s-1) 0; } /* Club: wraps, so every club and the chosen one are visible */
+.set-group .chip-row-opt[aria-checked="true"]::before { content: "✓"; content: "✓" / ""; margin-inline-end: var(--s-1); }
+.set-group .sr-label { font-weight: 600; } /* a switch label weighs the same as the field labels around it */
+:lang(zh) .set-group-title { text-transform: none; }
 .list-group .list-row { min-height: var(--row-min); }
 
 /* ------------------------------------------------------------------ Privacy / Help / About / Licences */

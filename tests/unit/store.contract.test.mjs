@@ -11,6 +11,8 @@ import { exportJSON, importJSON, exportCSV, CSV_COLUMNS, ImportError, resolveDef
 import { compareShots } from '../../app/src/store/compare.js';
 import { METRIC_IDS } from '../../app/src/store/metric-ids.js';
 import { openMem, dumpRepo, hasChinese } from './store.fixtures.mjs';
+import { migrateShot } from '../../app/src/contract/migrate.js';
+import { validateShot } from '../../app/src/contract/validate.js';
 
 let contract = null;
 let enums = null;
@@ -68,7 +70,9 @@ test('contract fixtures: export -> clear -> import with the real validator is ex
   assert.equal(res.validator, 'contract');
   assert.deepEqual(res.warnings, []);
   assert.equal(res.total.added, shots.length);
-  assert.deepStrictEqual(await dumpRepo(repo), before);
+  // exported (and so re-imported) as golf-shot/2: every other byte is unchanged (LAUNCH-MONITOR-SPEC §2.1)
+  assert.deepStrictEqual(await dumpRepo(repo), { ...before, shots: before.shots.map((x) => migrateShot(x).shot) });
+  for (const s of await repo.list('shots')) assert.equal(validateShot(s).ok, true, s.shot_id);
   assert.ok((await repo.shots.list()).some((s) => s.history), 'the revised fixture keeps its history');
 });
 

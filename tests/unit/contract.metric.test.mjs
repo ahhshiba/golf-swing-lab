@@ -24,7 +24,13 @@ test('metricValue accepts ci95 only, sigma only, or both', () => {
 
 test('metricValue accepts every value validity and every origin', () => {
   for (const validity of VALUE_VALIDITIES) assert.equal(metricValue({ ...base(), validity }).validity, validity);
-  for (const value_origin of VALUE_ORIGINS) assert.equal(metricValue({ ...base(), value_origin }).value_origin, value_origin);
+  // golf-shot/2: a model origin needs its model reason code (LAUNCH-MONITOR-SPEC §2.2 model_code_required)
+  const MODEL = ['dplane', 'spin_model', 'flight_model', 'prior'];
+  for (const value_origin of VALUE_ORIGINS) {
+    const codes = MODEL.includes(value_origin) ? [RC.FLIGHT_MODELLED] : [];
+    assert.equal(metricValue({ ...base(), value_origin, reason_codes: codes }).value_origin, value_origin);
+  }
+  for (const value_origin of MODEL) assert.throws(() => metricValue({ ...base(), value_origin }), /model_code_required/);
 });
 
 test('metricValue converts typed-array ci95, dedupes and accepts a single reason code', () => {

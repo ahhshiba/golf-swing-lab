@@ -54,5 +54,9 @@
   "restore.error.bad_field": "備份檔有損毀的部分。",
   "restore.error.invalid": "備份裡有 {n} 筆資料不正確。",
   "restore.error.too_big": "檔案太大（超過 2 GB）。",
-  "restore.error.nothing_written": "沒有寫入任何資料。"
+  "restore.error.nothing_written": "沒有寫入任何資料。",
+  "seg.label": "檢視方式",
+  "seg.list": "每一球",
+  "seg.stats": "統計",
+  "seg.gapping": "距離表"
 }

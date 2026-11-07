@@ -1,10 +1,10 @@
-// ui/shot.js — the shot card (package C; PRODUCT-SPEC §2.3 Results, V02 / UX-08 / V03 / UX-09 / UX-16).
-// Tiers: hero strip per view (shot-hero) · one Notice for shared reasons · grouped compact tiles (揮桿節奏 / 身體 /
-// 桿頭與球) · disclosure of what was not measured (shot-unmeasured) · replay + event correction with undo, revision
-// list and a confirm before leaving unsaved edits · actions (star, delete with undo, share/export, glossary).
+// ui/shot.js — the results screen (PRODUCT-SPEC §2.3; LAUNCH-MONITOR-SPEC §3.2, LM-D). Thin shell part: the top row,
+// hero visual, data tiles, tile editor and recompute live in the lazy ui/tiles.js. Below them: one Notice for shared
+// reasons · grouped compact tiles not already shown · disclosure of what was not measured (shot-unmeasured) · replay +
+// event correction with undo, revision list and a confirm before leaving unsaved edits · actions (star, delete, share).
 // The owner-label mode (P14) uses the teach editor on this one shot.
 //
-// Pure exports (tests): labelStartEvents, buildLabel, recomputeShot, heroIdsFor, splitMetrics.
+// Pure exports (tests): labelStartEvents, buildLabel, recomputeShot, splitMetrics.
 import { h, clear } from './dom.js';
 import * as C from './components.js';
 import { t, has, fmtDateTime, plural } from '../i18n/index.js';
@@ -22,13 +22,7 @@ import { shotOps, shareOrDownload, fileStamp } from './history.js';
 import { createLabelEditor } from './teach.js';
 
 const TEMPO_IDS = Object.freeze(['backswing_s', 'downswing_s', 'tempo_ratio']);
-
-/** Hero metrics per view and mode (PRODUCT-SPEC §2.3 Results › 1). */
-export function heroIdsFor(view, mode) {
-  if (view === 'dtl') return ['tempo_ratio', 'spine_forward_tilt_deg', 'hand_plane_dev_m'];
-  if (view === 'high_behind') return ['tempo_ratio', 'club_path_deg'];
-  return mode === 'live' ? ['tempo_ratio', 'club_speed_mps'] : ['carry_m', 'ball_speed_mps', 'club_speed_mps'];
-}
+const STATES = ['tiles', 'side', 'top', '3d', 'video'];
 
 export const GROUPS = Object.freeze({
   tempo: Object.freeze(['backswing_s', 'downswing_s', 'tempo_ratio']),
@@ -42,12 +36,11 @@ const isNull = (m) => !m || m.value === null || m.value === undefined || !Number
 
 /**
  * Split a shot's metrics for the card: { hero: [id], groups: { tempo|body|ball: [id] }, unmeasured: [id],
- * shared: [code], unique: { id: [code] } }. A reason is "shared" when it is a whole-shot warning or appears on ≥ 2
- * measured metrics; it is then shown once in the Notice and not on the tiles.
+ * shared: [code], unique: { id: [code] } }; hero = the ids already shown as data tiles. A reason is "shared" when it is
+ * a whole-shot warning or appears on ≥ 2 measured metrics; it is then shown once in the Notice and not on the tiles.
  */
-export function splitMetrics(shot) {
+export function splitMetrics(shot, hero = []) {
   const metrics = shot?.metrics ?? {};
-  const hero = heroIdsFor(shot?.capture?.view, shot?.capture?.mode);
   const ids = METRIC_IDS.filter((id) => id in metrics);
   const measured = ids.filter((id) => !isNull(metrics[id]));
   const unmeasured = ids.filter((id) => isNull(metrics[id]) && !hero.includes(id));
@@ -142,15 +135,22 @@ function tileItem(id, metric, size, units, reasons = []) {
   return h('li', { class: `tile-item${isNull(metric) ? ' null' : ''}`, 'data-metric': id }, tile);
 }
 
+let tilesMod = null;
+
 export function mountShot(root, app) {
   let replay = null;
+  let lm = null;
+  let ready = null;
   let data = null;
   let mode = 'result';
   let editor = null;
   let fromImport = false;
   const ops = shotOps(app);
 
+  for (const st of STATES) app.e2e?.registerState('shot', st, async () => { await ready; return lm?.state(st) ?? false; });
+
   async function load(params) {
+    tilesMod ??= await import('./tiles.js');
     const id = params.shot?.shot_id ?? params.shot_id;
     if (!app.repo || !id) return { shot: params.shot ?? null };
     const shot = (await app.repo.shots.get(id)) ?? params.shot ?? null;
@@ -271,6 +271,7 @@ export function mountShot(root, app) {
   function render() {
     replay?.destroy(); replay = null;
     editor?.destroy(); editor = null;
+    lm?.destroy(); lm = null;
     const shot = data?.shot;
     if (!shot) {
       clear(root, header(t('screen.shot.title')), C.emptyState({ icon: 'alert', title: t('shot.missing.title'), body: t('shot.missing.body'), action: { label: t('screen.history.title'), onClick: () => app.nav.go('history') } }));
@@ -279,11 +280,15 @@ export function mountShot(root, app) {
     if (mode === 'label') { renderLabelMode(); return; }
     const units = app.units?.() ?? undefined;
     const metrics = shot.metrics ?? {};
-    const sp = splitMetrics(shot);
-
-    // 1. hero strip
-    const hero = h('ul.shot-hero', { 'data-testid': 'shot-hero', 'aria-label': t('shot.hero.label') },
-      sp.hero.map((id) => tileItem(id, metrics[id], 'hero', units, isNull(metrics[id]) ? (metrics[id]?.reason_codes ?? []).slice(0, 1) : sp.unique[id] ?? [])));
+    // 1. top row, hero visual, data tiles, recompute (ui/tiles.js)
+    lm = tilesMod.createResults({
+      app, shot, clip: data.clip, units,
+      go: (id) => { if (!replay?.dirty()) app.nav.go('shot', { shot_id: id, from: fromImport ? 'import' : undefined }); else leave(); },
+      onSaved: (next, key, p) => { data = { ...data, shot: next }; render(); C.toast.info(t(`tiles.${key}`, p)); },
+      onPreview: async (other, tab) => { data = { ...data, shot: other, clip: null, poseSeq: null }; render(); await lm?.selectTab(tab); return true; },
+    });
+    // no flight: the hero already shows the swing tempo card, so the result list below does not repeat it
+    const sp = splitMetrics(shot, [...lm.ids(), ...(lm.tempoShown ? TEMPO_IDS : [])]);
     // 2. notices
     const shared = sp.shared.map(reasonLong);
     const notes = shared.length ? C.notice({ variant: 'caution', title: plural('shot.notices.title', shared.length), items: shared, collapsible: true, testid: 'shot-notices' }) : null;
@@ -328,10 +333,9 @@ export function mountShot(root, app) {
 
     // one .metric-list container: the e2e hook of the results card (every metric is a [data-metric] item inside)
     clear(root,
-      header(t('screen.shot.title'), starButton(shot)),
-      metaLine(shot),
-      next,
-      h('div.metric-list.shot-metrics', {}, hero, notes, modeSwitch(), ...sections, unmeasured),
+      header(t('screen.shot.title'), [lm.nav, starButton(shot)]),
+      next, lm.top, lm.viz, lm.tiles, lm.rederive,
+      h('div.metric-list.shot-metrics', {}, notes, modeSwitch(), ...sections, unmeasured),
       replayCard, actions);
   }
 
@@ -340,12 +344,16 @@ export function mountShot(root, app) {
       mode = params.mode === 'label' ? 'label' : 'result';
       fromImport = params.from === 'import';
       clear(root, header(t('screen.shot.title')), h('p.hint', t('common.loading')));
-      try { data = await load(params); render(); } catch (e) {
+      lm?.destroy(); lm = null;
+      let done;
+      ready = new Promise((r) => { done = r; });
+      try { data = await load(params); render(); done(); } catch (e) {
+        done();
         app.errors?.report?.(e, { where: 'shot.load', silent: true });
         clear(root, header(t('screen.shot.title')), C.emptyState({ icon: 'alert', title: t('shot.load_failed.title'), body: t('shot.load_failed.body'), action: { label: t('common.retry'), onClick: () => this.show(params) } }));
       }
     },
-    hide() { replay?.destroy(); replay = null; editor?.destroy(); editor = null; },
+    hide() { replay?.destroy(); replay = null; editor?.destroy(); editor = null; lm?.destroy(); lm = null; },
     dirty: () => Boolean(replay?.dirty()),
   };
 }

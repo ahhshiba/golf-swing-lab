@@ -332,6 +332,7 @@ html.has-topstack main { padding-top: var(--s-2); }
   display: inline-flex; align-items: center; gap: var(--s-1); min-height: 22px; padding: 0 6px;
   border-radius: var(--r-sm); font: var(--t-caption); letter-spacing: .02em; white-space: nowrap;
 }
+.vtag-glyph { font-size: .85em; line-height: 1; }
 .vtag-valid { background: var(--tag-valid-bg); color: var(--tag-valid-fg); }
 .vtag-est { background: var(--tag-est-bg); color: var(--tag-est-fg); }
 .vtag-low { background: var(--tag-low-bg); color: var(--tag-low-fg); }
@@ -351,6 +352,28 @@ html.has-topstack main { padding-top: var(--s-2); }
 .tile-compact .mt-unit { font-size: .6em; }
 .mt-ci { font: var(--t-footnote); color: var(--text-2); }
 .metric-tile.is-null .mt-num { color: var(--text-3); }
+
+/* ------------------------------------------------------------------ DataTile (LAUNCH-MONITOR-SPEC §3.2, §4.2) */
+.data-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); }
+@media (min-width: 600px) { .data-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 600px) and (orientation: landscape) { .data-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.data-tile {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0;
+  padding: var(--s-3); background: var(--tile-bg); border: var(--tile-border); border-radius: var(--r-md);
+  color: var(--text); font: var(--t-body); text-align: start;
+}
+button.data-tile { min-height: var(--hit-min); cursor: pointer; }
+.dt-label { font: var(--t-caption); color: var(--text-2); letter-spacing: .02em; overflow-wrap: break-word; max-width: 100%; }
+.dt-mark.vtag { justify-self: start; min-height: 0; line-height: 1.35; }
+.data-tile .dt-mark .dt-est { font: inherit; color: inherit; }
+.data-tile .mt-ci { white-space: nowrap; }
+.dt-value { display: flex; align-items: baseline; flex-wrap: wrap; gap: .08em; max-width: 100%; font: var(--t-metric); font-variant-numeric: tabular-nums; color: var(--text); }
+.dt-value .mt-unit { font-size: var(--unit-scale); }
+.dt-est { font: var(--t-caption); color: var(--text-2); }
+.dt-reason { font: var(--t-footnote); color: var(--text-3); overflow-wrap: anywhere; }
+.data-tile.is-null .mt-num { color: var(--text-3); }
+/* data screens dark while the theme is auto (main.js applyDataTheme; the whole page follows via tokens.css :has) */
+[data-screen][data-live-theme="dark"] { background: var(--bg); color: var(--text); }
 
 /* ------------------------------------------------------------------ StatePill */
 .state-pill {

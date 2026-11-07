@@ -62,6 +62,10 @@
 //                       handedness?, seed?, nMC? }) -> { metrics: { club_path_deg, launch_h_deg }, path, launch }
 //   analyzeFaceOn({ cam, ballObs, clubObs?, start, fps, club?, t_impact_guess?, view?, readout_source?,
 //                   calibration?, systematics?, seed?, nMC?, nCarry? }) -> { metrics, fit, fit2d, club, mc, carry }
+// sha256.js
+//   sha256Hex(string | bytes) -> 64 hex chars (algorithm descriptors; physics/lm model hash)
+// lm/ (lazy, not re-exported: LAUNCH-MONITOR-SPEC §5.0-3, import '../physics/lm/index.js' directly)
+//   deriveLaunchMonitor(input) -> { metrics, flight, tracks, algorithm }   rederive(shot, opts)   clubProfile(...)
 
 export * from './shutter.js';
 export * from './aero.js';
@@ -78,3 +82,4 @@ export * from './clubpath.js';
 export * from './launch_h.js';
 export * from './clubspeed_pose.js';
 export * from './pipeline.js';
+export * from './sha256.js';

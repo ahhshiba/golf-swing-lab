@@ -1,0 +1,2 @@
+/* screens/viz.css — viz components (LM-C; docs/viz.md §1). Intentionally 0 rules: linked from index.html, so every
+   byte is shell. The 3D canvas sets touch-action from JS; screens size their canvases in their own CSS. */

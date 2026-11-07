@@ -5,11 +5,14 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   RC, newShot, emptyMetrics, bumpRevision, addWarning, attributeWarnings, validateShot, validateMetric, metricValue,
-  metricNull, ContractError, METRIC_IDS, METRIC_UNITS, SETUP_LEVEL_CODES, BALL_CLUB_IDS, SCHEMA_ID,
+  metricNull, ContractError, METRIC_IDS, METRIC_UNITS, SETUP_LEVEL_CODES, BALL_CLUB_IDS, SCHEMA_ID, migrateShot,
+  LM_METRIC_IDS,
 } from '../../app/src/contract/index.js';
 
 const FX = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/shots');
 const load = (name) => JSON.parse(readFileSync(join(FX, `${name}.json`), 'utf8'));
+/** The golf-shot/1 fixture as golf-shot/2 (newShot writes v2). */
+const loadV2 = (name) => migrateShot(load(name)).shot;
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const texts = (r) => r.errors.map((e) => `${e.path}: ${e.msg}`);
 
@@ -19,7 +22,7 @@ function initFrom(shot) {
   return rest;
 }
 
-test('emptyMetrics: all 22 ids as not_computed placeholders with NOT_IMPLEMENTED', () => {
+test('emptyMetrics: all 36 ids as not_computed placeholders with NOT_IMPLEMENTED', () => {
   const m = emptyMetrics();
   assert.deepEqual(Object.keys(m), [...METRIC_IDS]);
   for (const id of METRIC_IDS) {
@@ -43,21 +46,34 @@ test('newShot fills defaults and leaves un-defaultable fields to the validator',
   assert.equal(s.preset_id, null);
   assert.deepEqual(s.quality, { pose_mean_vis: null, frames_analyzed: 0, frames_dropped: 0, audio_onset: null, touches: 0, warnings: [] });
   assert.deepEqual(Object.keys(s.metrics), [...METRIC_IDS]);
+  assert.equal(s.flight, null);
+  assert.equal(s.tracks, null);
+  assert.equal(s.practice, null);
   assert.ok(!('history' in s));
   const missing = validateShot(s).errors.filter((e) => e.msg === 'required field is missing').map((e) => e.path).sort();
   assert.deepEqual(missing, ['algorithms', 'app_version', 'calibration', 'capture', 'club', 'created_at', 'events', 'handedness', 'session_id', 'shot_id']);
   assert.equal(validateShot(s).errors.length, missing.length);
 });
 
-test('newShot reproduces every valid fixture exactly (round trip)', () => {
+test('newShot reproduces every valid fixture exactly (round trip; golf-shot/1 fixtures as migrated to golf-shot/2)', () => {
   for (const name of ['valid_face_on_240', 'valid_dtl_30', 'valid_high_behind_240', 'valid_face_on_setup_unverified']) {
-    const fx = load(name);
+    const fx = loadV2(name);
     const s = newShot(initFrom(fx));
     assert.deepEqual(s, fx, name);
     assert.deepEqual(texts(validateShot(s)), [], name);
+    // newShot without lm ids / algorithms.lm fills the same placeholders a migration would, except the reason code
+    const { lm, ...algs } = fx.algorithms; // eslint-disable-line no-unused-vars
+    const metrics = Object.fromEntries(Object.entries(fx.metrics).filter(([id]) => !LM_METRIC_IDS.includes(id)));
+    const bare = newShot({ ...initFrom(fx), algorithms: algs, metrics });
+    assert.deepEqual(bare.algorithms.lm, fx.algorithms.lm, name);
+    for (const id of LM_METRIC_IDS) assert.deepEqual(bare.metrics[id].reason_codes, [RC.NOT_IMPLEMENTED]);
   }
-  const rev = load('valid_face_on_revised');
+  const rev = loadV2('valid_face_on_revised');
   assert.deepEqual(newShot({ ...initFrom(rev), revision: rev.revision }), rev);
+  for (const f of ['valid_face_on_240', 'valid_high_behind_240', 'valid_dtl_30']) {
+    const fx = JSON.parse(readFileSync(join(FX, 'v2', `${f}.json`), 'utf8'));
+    assert.deepEqual(newShot(initFrom(fx)), fx, `v2/${f}`);
+  }
 });
 
 test('newShot: partial metrics replace placeholders, unknown ids and fields throw', () => {
@@ -95,7 +111,7 @@ test('addWarning: setup-level code is attributed to every affected metric that h
   assert.equal(JSON.stringify(s0), snapshot, 'input untouched');
   assert.deepEqual(s.quality.warnings, [RC.TRACK_MAY_BE_SHORT, RC.SETUP_UNVERIFIED]);
   assert.deepEqual(texts(validateShot(s)), []);
-  for (const id of METRIC_IDS) {
+  for (const id of Object.keys(s0.metrics)) {
     const before = s0.metrics[id];
     const after = s.metrics[id];
     const affected = BALL_CLUB_IDS.includes(id) && before.value !== null;

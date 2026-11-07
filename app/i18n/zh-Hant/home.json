@@ -46,5 +46,8 @@
   "dev.timer_C0": "腳架架好了",
   "dev.timer_C1": "位置擺好了",
   "dev.timer_done": "計時已記錄",
-  "dev.timer_hint": "裝腳架前先按，架設時間才會包含擺腳架。"
+  "dev.timer_hint": "裝腳架前先按，架設時間才會包含擺腳架。",
+  "drills": "練習模式",
+  "drills_hint": "目標距離、距離表測驗、固定題目測驗",
+  "drills_resume": "進行中：已完成 {done}/{total}"
 }

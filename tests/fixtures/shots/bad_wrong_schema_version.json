@@ -1,6 +1,6 @@
 {
   "_expect": "schema must be",
-  "schema": "golf-shot/2",
+  "schema": "golf-shot/9",
   "shot_id": "shot-fx-bad-wrong-schema-version",
   "session_id": "sess-fx-0001",
   "venue_id": "venue-fx-bay-7",

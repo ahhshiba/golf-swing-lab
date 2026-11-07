@@ -1,4 +1,4 @@
-// pipeline/assemble.js: one golf-shot/1 per view / frame rate, honest nulls from the registry, shot-level time
+// pipeline/assemble.js: one golf-shot/2 per view / frame rate, honest nulls from the registry, shot-level time
 // checks, warning attribution, contract validity of every output. The face_on 240 case runs the real chain on
 // rendered frames (tests/synth/e2e.js), the others skip the frame rendering.
 import test from 'node:test';
@@ -9,8 +9,9 @@ import { highBehindShot, highBehindInput, clubSpeedSwing, clubSpeedInput } from 
 import { ContractError } from '../../app/src/contract/validate.js';
 import { RC } from '../../app/src/contract/reason-codes.js';
 import { METRIC_IDS, EVENTS } from '../../app/src/contract/enums.js';
-import { REGISTRY, cellFor } from '../../app/src/metrics/registry.js';
+import { REGISTRY, cellFor, nullCodeFor } from '../../app/src/metrics/registry.js';
 import { assertContract } from './pipeline.helpers.mjs';
+import { LM_PARAMS } from '../../app/src/physics/lm/index.js';
 
 const SETS = m4Specs({ seed: 1, quick: true });
 
@@ -68,12 +69,14 @@ test('dtl 60 fps: all ball rows null with VIEW_DEPTH_AXIS; dtl pose rows compute
   assert.equal(shot.metrics.spine_side_tilt_deg.value, null);
 });
 
-test('high_behind 240 without ball frames: ball speed null + VIEW_DEPTH_AXIS; club path / launch_h TRACK_TOO_SHORT', () => {
+test('high_behind 240 without ball frames: ball speed null; club path / launch_h TRACK_TOO_SHORT', () => {
   const b = buildE2EShot(SETS.high_behind[0]);
   const { shot } = assembleShot(b.input);
   assertContract(shot);
   assert.equal(shot.metrics.ball_speed_mps.value, null);
-  assert.ok(shot.metrics.ball_speed_mps.reason_codes.includes(RC.VIEW_DEPTH_AXIS));
+  // the high_behind ball-speed cell is 低 (LAUNCH-MONITOR-SPEC §1.3-2, physics/lm): no club-head track -> honest null
+  assert.ok(shot.metrics.ball_speed_mps.reason_codes.length > 0);
+  assert.equal(shot.flight, null);
   assert.deepEqual(shot.metrics.club_path_deg.reason_codes, [RC.TRACK_TOO_SHORT]);
   assert.deepEqual(shot.metrics.launch_h_deg.reason_codes, [RC.TRACK_TOO_SHORT]);
   assert.ok(shot.metrics.head_lift_z_m.reason_codes.includes(RC.VIEW_DEPTH_AXIS));
@@ -94,11 +97,22 @@ test('high_behind 240 with club-head and ball tracks: club path and launch_h low
     assert.ok(Math.abs(l.value - s.truth.launch_h_deg) < 4 * l.sigma + 0.2, `${i} psi ${l.value} vs ${s.truth.launch_h_deg} σ ${l.sigma}`);
     assert.ok(p.sigma > 0.5 && p.sigma < 5 && l.sigma > 0.1 && l.sigma < 3);
     assert.ok(debug.high_behind && debug.high_behind.path.n_used >= 2);
-    // the other ball rows stay 不可 from this view
-    for (const id of ['ball_speed_mps', 'launch_v_deg', 'carry_m', 'smash_factor', 'club_speed_mps']) {
+    // the 不可 ball rows stay null with their code; the cells LAUNCH-MONITOR-SPEC §1.3-2 turned into 低 (club speed,
+    // ball speed, carry) come from physics/lm: low_confidence with the prior codes, never better than the cell
+    for (const id of ['launch_v_deg', 'smash_factor']) {
       assert.equal(shot.metrics[id].value, null, id);
-      assert.deepEqual(shot.metrics[id].reason_codes, [REGISTRY[id].nullCode], id);
+      assert.deepEqual(shot.metrics[id].reason_codes, [nullCodeFor(id, 'high_behind')], id);
     }
+    for (const id of ['club_speed_mps', 'ball_speed_mps', 'carry_m', 'face_angle_deg', 'spin_axis_deg', 'carry_side_m']) {
+      const m = shot.metrics[id];
+      assert.equal(m.validity, 'low_confidence', `${id} ${JSON.stringify(m)}`);
+      assert.ok(m.ci95[0] <= m.value && m.value <= m.ci95[1] && m.sigma > 0, id);
+    }
+    assert.ok(shot.metrics.ball_speed_mps.reason_codes.includes(RC.SMASH_ASSUMED));
+    assert.ok(shot.metrics.carry_m.reason_codes.includes(RC.LAUNCH_V_ASSUMED) && shot.metrics.carry_m.reason_codes.includes(RC.FLIGHT_MODELLED));
+    for (const id of ['apex_m', 'spin_rate_rpm']) assert.equal(shot.metrics[id].value, null, id);
+    assert.ok(shot.flight && Math.abs(shot.flight.landing.x_m - shot.metrics.carry_m.value) <= 0.5 && shot.flight.band);
+    assert.equal(shot.algorithms.lm.version, LM_PARAMS.version);
   }
 });
 
@@ -164,7 +178,14 @@ test('no allowed F2 cell returns NOT_IMPLEMENTED, in any view / frame rate, with
     }
   }
   // the registry itself: every allowed cell of rows 14–20 is one of the cells produced somewhere
-  const produced = { face_on: ['club_speed_mps', 'ball_speed_mps', 'launch_v_deg', 'carry_m', 'smash_factor'], dtl: [], high_behind: ['club_path_deg', 'launch_h_deg'] };
+  // rows 14–20 by physics/ (analyzeFaceOn, analyzeHighBehind) and the launch-monitor cells by physics/lm
+  const produced = {
+    face_on: ['club_speed_mps', 'ball_speed_mps', 'launch_v_deg', 'carry_m', 'smash_factor', 'attack_angle_deg', 'dynamic_loft_deg',
+      'spin_loft_deg', 'spin_rate_rpm', 'total_m', 'apex_m', 'landing_angle_deg', 'hang_time_s'],
+    dtl: [],
+    high_behind: ['club_path_deg', 'launch_h_deg', 'club_speed_mps', 'ball_speed_mps', 'carry_m', 'face_angle_deg', 'face_to_path_deg',
+      'spin_axis_deg', 'total_m', 'carry_side_m', 'total_side_m', 'curve_m'],
+  };
   for (const id of METRIC_IDS.filter((x) => REGISTRY[x].row >= 14)) {
     for (const view of ['face_on', 'dtl', 'high_behind']) {
       if (REGISTRY[id].views[view] !== 'not') assert.ok(produced[view].includes(id), `${view} ${id} allowed but not produced`);

@@ -16,6 +16,10 @@ const ZOOM = 2; // loupe CSS px per source-image px (the loupe canvas has 2 back
 const LOUPE_CSS = 132;
 const REPEAT_DELAY_MS = 400;
 const REPEAT_EVERY_MS = 70;
+/** Overlay colour from the design tokens (tokens.css --overlay-* / --media-bg / --on-media; the same in every theme). */
+export function overlayColour(name, fallback) {
+  try { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback; } catch (_) { return fallback; }
+}
 
 /** Draw any CanvasImageSource into a new W×H canvas. */
 export function snapshot(source, W, H) {
@@ -86,15 +90,15 @@ export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
     if (corners.every(Boolean)) polygon(ctx, corners, 'rgba(0,200,120,0.95)', s, false);
     corners.forEach((c, i) => {
       if (!c) return;
-      ctx.fillStyle = i === sel ? '#ffcc00' : '#00c878';
+      ctx.fillStyle = i === sel ? overlayColour('--overlay-select', 'gold') : overlayColour('--overlay-go', 'green');
       ctx.beginPath();
       ctx.arc(c[0], c[1], (i === sel ? 6 : 5) * s, 0, 2 * Math.PI);
       ctx.fill();
       ctx.lineWidth = s;
-      ctx.strokeStyle = '#000';
+      ctx.strokeStyle = overlayColour('--media-bg', 'black');
       ctx.stroke();
-      ctx.fillStyle = '#fff';
-      ctx.strokeStyle = '#000';
+      ctx.fillStyle = overlayColour('--on-media', 'white');
+      ctx.strokeStyle = overlayColour('--media-bg', 'black');
       ctx.lineWidth = 3 * s;
       ctx.font = `bold ${12 * s}px sans-serif`;
       ctx.strokeText(String(i + 1), c[0] + 7 * s, c[1] - 7 * s);
@@ -127,10 +131,10 @@ export function createCornerPicker({ onChange = () => {}, ghost = null } = {}) {
     const ctx = loupe.getContext('2d');
     const half = loupe.width / (2 * 2 * ZOOM);
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#000';
+    ctx.fillStyle = overlayColour('--media-bg', 'black');
     ctx.fillRect(0, 0, loupe.width, loupe.height);
     ctx.drawImage(frame, u - half, v - half, 2 * half, 2 * half, 0, 0, loupe.width, loupe.height);
-    ctx.strokeStyle = '#ff3b30';
+    ctx.strokeStyle = overlayColour('--overlay-stop', 'red');
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(loupe.width / 2, 0); ctx.lineTo(loupe.width / 2, loupe.height);

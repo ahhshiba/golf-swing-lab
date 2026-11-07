@@ -3,7 +3,16 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as C from '../../app/src/contract/index.js';
+import * as C0 from '../../app/src/contract/index.js';
+
+// This file checks the FROZEN golf-shot/1 schema (still used for imported legacy shots) against the golf-shot/1 lists.
+// golf-shot/2 (schema/shot-v2.schema.json): tests/unit/lm.contract.v2.test.mjs.
+const C = {
+  ...C0, SCHEMA_ID: C0.SCHEMA_V1, METRIC_IDS: C0.METRIC_IDS_V1, VALUE_ORIGINS: C0.VALUE_ORIGINS_V1,
+  REASON_CODES: Object.fromEntries(C0.REASON_CODE_LIST_V1.map((k) => [k, k])), ALGORITHM_KEYS: C0.ALGORITHM_KEYS_V1,
+  SHOT_REQUIRED_KEYS: C0.SHOT_REQUIRED_KEYS_V1,
+  METRIC_UNITS: Object.fromEntries(C0.METRIC_IDS_V1.map((id) => [id, C0.METRIC_UNITS[id]])),
+};
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const schemaText = readFileSync(join(ROOT, 'schema/shot-v1.schema.json'), 'utf8');

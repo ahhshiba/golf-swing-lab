@@ -36,6 +36,10 @@
 // metric-ids.js   METRIC_IDS (interfaces.md section 9 order)
 // labels.js (pure) makeLabelRecord({ shot_id, events, labelled_at, fps, previous? }) validateLabel(rec) LABEL_SOURCE LabelError
 //   (schema v2 stores: labels[shot_id] owner annotations P14, models[slot] imported event models P9)
+// stats.js (pure, LM-F; LAUNCH-MONITOR-SPEC §5.0-5) summarize(values, sigmas) gapping(shots, opts)
+//   compareSessions(aShots, bShots, ids) isMishit(x, all)
+// core.js additions (LM-A drop 1, schema v4): drills store (repo.drills.{get,put,list}), repo.migrateBatch(n),
+//   shots.get / shots.list / queryShots return golf-shot/2 (golf-shot/1 migrated on read)
 
 export * from './core.js';
 export * from './mem.js';
@@ -45,3 +49,4 @@ export * from './compare.js';
 export * from './quota.js';
 export * from './metric-ids.js';
 export * from './labels.js';
+export * from './stats.js'; // LAUNCH-MONITOR-SPEC §5.0-5 (LM-F; lazy file, not in the boot graph)

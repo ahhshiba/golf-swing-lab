@@ -220,9 +220,19 @@ async function main() {
   const nShots = results.length + assumed.length;
   gate('every shot passes validateShot', nValid === nShots, `${nValid}/${nShots}`);
   const other = [...by('dtl'), ...by('high_behind')];
-  const viewOk = other.filter((r) => r.m && r.m.ball_speed_mps.value === null && r.m.ball_speed_mps.codes.includes(cellFor('ball_speed_mps', r.view, 240).code));
-  gate('dtl + high_behind: ball_speed null with the registry code', other.length > 0 && viewOk.length === other.length,
-    `${viewOk.length}/${other.length} (code ${cellFor('ball_speed_mps', 'dtl', 240).code})`);
+  // a 不可 cell (dtl) is null with the registry code; an allowed cell (high_behind 低 since LAUNCH-MONITOR-SPEC §1.3-2,
+  // produced by LM-B physics/lm) is an honest null with a reason or a number no better than its cell
+  const RANK = { valid: 0, estimated: 1, low_confidence: 2 };
+  const cellOk = (r) => {
+    const c = cellFor('ball_speed_mps', r.view, 240);
+    const m = r.m?.ball_speed_mps;
+    if (!m) return false;
+    if (c.validity === null) return m.value === null && m.codes.includes(c.code);
+    return m.value === null ? m.codes.length > 0 : RANK[m.validity] >= RANK[c.validity];
+  };
+  const viewOk = other.filter(cellOk);
+  gate('dtl + high_behind: ball_speed per registry cell (不可: null + its code)', other.length > 0 && viewOk.length === other.length,
+    `${viewOk.length}/${other.length} (dtl code ${cellFor('ball_speed_mps', 'dtl', 240).code}, high_behind ${cellFor('ball_speed_mps', 'high_behind', 240).validity})`);
   // ---- cells: high_behind club path + launch direction, face_on pose club speed (tests/synth/cells.js)
   const hb = by('cells_hb');
   const cs = by('cells_cs');

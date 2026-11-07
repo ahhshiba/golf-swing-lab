@@ -10,7 +10,7 @@ import { h, clear } from './dom.js';
 import { button, screenHeader, notice, segmented, confirmSheet, icon, filePicker } from './components.js';
 import { t, fmtNum } from '../i18n/index.js';
 import { fmtQuantity } from '../i18n/units.js';
-import { createCornerPicker, snapshot, grayOf } from './magnifier.js';
+import { createCornerPicker, snapshot, grayOf, overlayColour } from './magnifier.js';
 import { startMotion } from './sensors.js';
 import { tripodDiagram } from './tripod-diagram.js';
 import { classifyCameraError } from './onboarding.js';
@@ -197,7 +197,7 @@ export function mountSetup(root, app) {
       g.restore();
     }
     if (result?.corners) {
-      g.fillStyle = result.evaluation.light === 'green' ? '#00c878' : result.evaluation.light === 'amber' ? '#ffb000' : '#ff3b30';
+      g.fillStyle = overlayColour(result.evaluation.light === 'green' ? '--overlay-go' : result.evaluation.light === 'amber' ? '--overlay-caution' : '--overlay-stop', 'gray');
       for (const p of result.corners) { g.beginPath(); g.arc(p[0], p[1], 5 * s, 0, 2 * Math.PI); g.fill(); }
     }
     // 95 % frame box (everything must be inside it)

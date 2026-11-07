@@ -80,12 +80,36 @@ export const MODULEPRELOAD_MAX = 30;
  * it in "$lazy" and app/src/i18n/index.js fetches it in the background; main.js waits for it (i18nComplete) before it
  * mounts any screen but home/onboarding, which use none of these namespaces.
  */
-export const LAZY_FILES = Object.freeze([
+const LAZY_EXACT = Object.freeze([
   'icons/icon-512.png', 'icons/icon-maskable-512.png', // read by the install prompt (manifest) only
   'src/ui/developer.js', 'src/ui/diag.js', 'src/diag/report.js', 'src/ui/about.js', 'src/ui/licences.js',
   'src/ui/help.js', 'src/ui/privacy.js', 'src/ui/teach.js', 'src/ui/compare.js', 'src/store/compare.js',
 ]);
-export const LAZY_I18N_NAMESPACES = Object.freeze(['about', 'diag', 'help', 'legal', 'licence', 'privacy', 'teach']);
+/**
+ * Lazy path patterns (`*` = any file name within one directory): every launch-monitor screen and module
+ * (LAUNCH-MONITOR-SPEC §0 budget, §5.0-11). physics/lm is imported dynamically by the analysis path, never the boot graph.
+ */
+export const LAZY_GLOBS = Object.freeze([
+  'src/viz/*.js', 'src/ui/drills.js', 'src/ui/drill.js', 'src/ui/stats.js', 'src/ui/gapping.js', 'src/ui/tiles.js',
+  'src/practice/*.js', 'src/store/stats.js', 'src/physics/lm/*.js',
+]);
+const globRe = (g) => new RegExp(`^${g.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`);
+const LAZY_GLOB_RES = LAZY_GLOBS.map(globRe);
+/** Is an app-relative path lazy (LAZY_FILES list or a LAZY_GLOBS pattern)? */
+export function isLazyPath(rel) {
+  return LAZY_EXACT.includes(rel) || LAZY_GLOB_RES.some((re) => re.test(rel));
+}
+/** Every lazy file of this tree: the exact list plus the files of app/ that match LAZY_GLOBS (sorted). */
+export const LAZY_FILES = Object.freeze([...LAZY_EXACT, ...(() => {
+  try { return listFiles(path.join(ROOT, 'app')).filter((f) => !LAZY_EXACT.includes(f) && LAZY_GLOB_RES.some((re) => re.test(f))); } catch (_) { return []; }
+})()]);
+/**
+ * Rare screens' namespaces, plus the launch-monitor screens' (LAUNCH-MONITOR-SPEC §5.0-10; mounted after i18nComplete),
+ * plus `metric` and `reason` (LM-A drop 1, shell budget §0): only screens mounted after i18nComplete show metric labels
+ * or reason texts — home and onboarding (the boot graph) use neither (they format numbers with the `unit` namespace).
+ */
+export const LAZY_I18N_NAMESPACES = Object.freeze(['about', 'diag', 'help', 'legal', 'licence', 'privacy', 'teach',
+  'tiles', 'viz', 'drill', 'stats', 'gapping', 'metric', 'reason']);
 export const lazyCatalogUrl = (loc) => `i18n/${loc}.more.json`;
 /** Namespace catalog sources (merged by mergeCatalogs, not copied). */
 export const CATALOG_SOURCE_RE = /^i18n\/([A-Za-z-]+)\/([a-z0-9_-]+)\.json$/;
@@ -132,7 +156,7 @@ export function listFiles(dir) {
 
 export function classify(rel) {
   if (NOT_PRECACHED.includes(rel)) return 'none';
-  if (LAZY_FILES.includes(rel) || /^i18n\/[A-Za-z-]+\.more\.json$/.test(rel)) return 'asset';
+  if (isLazyPath(rel) || /^i18n\/[A-Za-z-]+\.more\.json$/.test(rel)) return 'asset';
   if (rel.startsWith('vendor/') || rel.startsWith('models/')) return RUNTIME_ONLY.includes(rel) ? 'runtime' : 'asset';
   return 'shell';
 }
@@ -455,7 +479,7 @@ export function build(opts = {}) {
   const boot = bootGraph(bytes, BOOT_ENTRIES);
   const preload = boot.slice(0, MODULEPRELOAD_MAX);
   const indexHtml = fs.readFileSync(path.join(o.app, 'index.html'), 'utf8');
-  for (const f of LAZY_FILES) {
+  for (const f of files.filter(isLazyPath)) {
     if (boot.includes(f)) throw new Error(`build.mjs: lazy file ${f} is in the boot graph (static import from ${BOOT_ENTRIES.join(', ')})`);
     if (indexHtml.includes(`"${f}"`)) throw new Error(`build.mjs: lazy file ${f} is referenced by index.html`);
   }

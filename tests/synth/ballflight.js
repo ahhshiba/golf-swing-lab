@@ -15,6 +15,11 @@ import { gauss, mulberry32, uniform } from '../../app/src/geom/rng.js';
 import { AERO_MODEL, K_AERO, RPM_TO_RAD_S, aeroCoefficients, backspinAxis } from '../../app/src/physics/aero.js';
 import { k1FromCornerFrac, rollAboutPoint, scaleAboutPoint, withK1 } from '../../app/src/physics/perturb.js';
 import { READOUT_MEDIAN_MS } from '../../app/src/physics/shutter.js';
+import { LM_PARAMS } from '../../app/src/physics/lm/params.js';
+import * as dplane from '../../app/src/physics/lm/dplane.js';
+import * as spin from '../../app/src/physics/lm/spin.js';
+import * as flight from '../../app/src/physics/lm/flight.js';
+import * as roll from '../../app/src/physics/lm/roll.js';
 
 /** Launch velocity (+ψ toward −y, i.e. right of target for a right-hander, toward the face_on camera). */
 export function launchVelocity(speed, launchVDeg, psiDeg = 0) {
@@ -357,3 +362,78 @@ export function faceOnBatch(o) {
   return out;
 }
 
+
+// ------------------------------------------------------------------------------------------------ launch monitor
+// Synthetic shots with known club delivery for physics/lm (LAUNCH-MONITOR-SPEC §5.2 LM-B; RN §5 noise injection).
+// Truth per shot (club category c, LM_PARAMS.clubs[c]): club speed = tour × U(0.85, 1.0); attack ~ the club's attack
+// prior; spin loft ~ its prior, dynamic loft = spin loft + attack; path ~ N(0, 3°), face − path ~ N(0, f2pSd);
+// the launch follows the D-plane with a per-shot ratio h(SL) + N(0, σ_h), v(SL) + N(0, σ_v) at the 3D spin loft; spin
+// = A·N(1, σ_A)·club speed·sin(SL)/r; ball speed = club speed × smash ~ the club's smash prior; spin axis from the
+// D-plane vector; flight = the RK4 of physics/lm/flight.js with the launch direction and the axis (face_on truth
+// flies with them too, the estimator cannot see them) times the model terms of LM_PARAMS.flight drawn once per shot
+// (carry scale on the landing vector, apex scale, landing-angle offset) and a roll fraction × max(0, N(1, 0.5)).
+// Measured inputs = truth + N(0, σ) with σ = LM_NOISE (RN §5; spec §1.2 1σ column), given as metrics with that σ.
+
+export const LM_NOISE = Object.freeze({
+  ball_speed_frac: 0.02, launch_v_deg: 0.3, club_speed_frac: 0.03, attack_deg: 2.0,
+  launch_h_deg: 0.35, club_path_deg: 3.0, hb_club_speed_frac: 0.17,
+});
+export const LM_CLUB_TYPES = Object.freeze(['driver', '3w', '4h', '5i', '7i', '9i', 'pw']);
+
+/**
+ * o: { rng, view: 'face_on'|'high_behind', clubType, ground = 'normal', f2pSd = 2, noise = LM_NOISE }.
+ * Returns { club, metrics (input metrics), truth, start }.
+ */
+export function lmShot(o) {
+  const { rng, view } = o;
+  const N = o.noise ?? LM_NOISE;
+  const club = { type: o.clubType, lie: o.clubType === 'driver' ? 'tee' : 'mat', tee_lift_m: o.clubType === 'driver' ? 0.03 : 0 };
+  const CP = spin.clubParams(club);
+  const T = CP.tour;
+  const MPH = 0.44704;
+  const cs = T.club_mph * MPH * uniform(rng, 0.85, 1.0);
+  const aoa = gauss(rng, CP.aoa.mean, CP.aoa.sd);
+  const sl0 = gauss(rng, CP.spin_loft.mean, CP.spin_loft.sd);
+  const dl = sl0 + aoa;
+  const path = gauss(rng, 0, 3);
+  const face = path + gauss(rng, 0, o.f2pSd ?? 2);
+  const P = LM_PARAMS.dplane;
+  const fw = dplane.forwardDplane({ face, path, dl, aoa }, { dh: gauss(rng, 0, P.sigma_h), dv: gauss(rng, 0, P.sigma_v) });
+  const spinRpm = spin.spinFromLoft(cs, fw.spin_loft, club, Math.max(0, 1 + gauss(rng, 0, spin.spinCoefSigma(club, fw.spin_loft))));
+  const smash = gauss(rng, CP.smash.mean, CP.smash.sd);
+  const ball = cs * smash;
+  const start = [0, 0, BALL_R + club.tee_lift_m];
+  const F = LM_PARAMS.flight;
+  const f = flight.fly({ speed_mps: ball, launch_v_deg: fw.launch_v, launch_h_deg: fw.launch_h, spin_rpm: Math.max(LM_PARAMS.spin.min_rpm, spinRpm), axis_deg: fw.axis, start });
+  const kc = 1 + gauss(rng, 0, F.carry_model_sigma_frac);
+  const ka = 1 + gauss(rng, 0, F.apex_model_sigma_frac);
+  const land = f.landing_deg + gauss(rng, 0, F.landing_model_sigma_deg);
+  const kr = Math.max(0, 1 + gauss(rng, 0, LM_PARAMS.roll.sigma_frac));
+  const dx = f.x * kc, dy = f.y * kc;
+  const rl = Math.hypot(dx, dy) * roll.rollFrac(land, o.ground ?? 'normal') * kr;
+  const vh = Math.hypot(f.vland[0], f.vland[1]);
+  const rx = dx + (rl * f.vland[0]) / vh, ry = dy + (rl * f.vland[1]) / vh;
+  const ps = fw.launch_h * DEG;
+  const truth = {
+    club_speed_mps: cs, attack_angle_deg: aoa, club_path_deg: path, face_angle_deg: face, face_to_path_deg: face - path,
+    dynamic_loft_deg: dl, spin_loft_deg: fw.spin_loft, spin_rate_rpm: spinRpm, spin_axis_deg: fw.axis,
+    ball_speed_mps: ball, launch_v_deg: fw.launch_v, launch_h_deg: fw.launch_h, carry_m: dx, total_m: rx,
+    carry_side_m: -dy, total_side_m: -ry, curve_m: -dx * Math.sin(ps) - dy * Math.cos(ps), apex_m: f.apex * ka,
+    landing_angle_deg: land, hang_time_s: f.t,
+  };
+  const metric = (value, sigma, validity, origin) => ({
+    value, unit: 'x', ci95: [value - 1.959964 * sigma, value + 1.959964 * sigma], sigma, validity, value_origin: origin, measured: false, reason_codes: [],
+  });
+  const metrics = {};
+  if (view === 'face_on') {
+    metrics.ball_speed_mps = metric(ball * (1 + gauss(rng, 0, N.ball_speed_frac)), ball * N.ball_speed_frac, 'estimated', 'ball_fit3d');
+    metrics.launch_v_deg = metric(fw.launch_v + gauss(rng, 0, N.launch_v_deg), N.launch_v_deg, 'estimated', 'ball_fit3d');
+    metrics.club_speed_mps = metric(cs * (1 + gauss(rng, 0, N.club_speed_frac)), cs * N.club_speed_frac, 'estimated', 'club_track');
+    metrics.attack_angle_deg = metric(aoa + gauss(rng, 0, N.attack_deg), N.attack_deg, 'low_confidence', 'club_track');
+  } else {
+    metrics.club_speed_mps = metric(cs * (1 + gauss(rng, 0, N.hb_club_speed_frac)), cs * N.hb_club_speed_frac, 'low_confidence', 'club_track');
+    metrics.launch_h_deg = metric(fw.launch_h + gauss(rng, 0, N.launch_h_deg), N.launch_h_deg, 'low_confidence', 'ball_fit3d');
+    metrics.club_path_deg = metric(path + gauss(rng, 0, N.club_path_deg), N.club_path_deg, 'low_confidence', 'club_track');
+  }
+  return { club, metrics, truth, start };
+}

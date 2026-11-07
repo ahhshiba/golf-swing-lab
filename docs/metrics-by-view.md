@@ -25,16 +25,43 @@ nullCode, fpsTiers?, depends?, runtimeCodes? }`. Cell values: `valid` (可), `es
 | 11 | `top_shaft_angle_deg` | not | estimated | not | 120 | VIEW_PLANE_MISMATCH |
 | 12 | `weight_shift_pct` | estimated | not | not | 30 | VIEW_DEPTH_AXIS |
 | 13 | `early_extension_m` | not | valid | not | 30 | VIEW_DEPTH_AXIS |
-| 14 | `club_speed_mps` | low_confidence (30–239 fps; computed from pose below 200 fps, §2b), estimated (>= 240, club-head track) | not | not | 30 | VIEW_DEPTH_AXIS |
+| 14 | `club_speed_mps` | low_confidence (30–239 fps; computed from pose below 200 fps, §2b), estimated (>= 240, club-head track) | not | low_confidence (>= 240; LM) | 30 (high_behind 240) | VIEW_DEPTH_AXIS |
 | 15 | `club_path_deg` | not | not | low_confidence | 240 | VIEW_PLANE_MISMATCH (runtime: TRACK_TOO_SHORT) |
-| 16 | `ball_speed_mps` | estimated | not | not | 200 | VIEW_DEPTH_AXIS (< 200 fps: FPS_TOO_LOW) |
+| 16 | `ball_speed_mps` | estimated | not | low_confidence (>= 240; club speed × smash prior, LM) | 200 (high_behind 240) | VIEW_DEPTH_AXIS (< 200 fps: FPS_TOO_LOW) |
 | 17 | `launch_v_deg` | estimated | not | not | 200 | VIEW_DEPTH_AXIS (< 200 fps: FPS_TOO_LOW) |
 | 18 | `launch_h_deg` | not | not | low_confidence | 200 | LAUNCH_DIR_UNOBSERVABLE |
-| 19 | `carry_m` | estimated (needs 16, 17) | not | not | 200 | DEPENDS_ON_NULL |
+| 19 | `carry_m` | estimated (needs 16, 17) | not | low_confidence (>= 240; LM) | 200 (high_behind 240) | DEPENDS_ON_NULL |
 | 20 | `smash_factor` | estimated (needs 14, 16) | not | not | 240 | DEPENDS_ON_NULL |
 
+### 1a. golf-shot/2 launch-monitor rows (docs/LAUNCH-MONITOR-SPEC.md §1.2; LM-A drop 1, 2026-11-06)
+
+The three high_behind cells marked "LM" above changed from not to low_confidence (§1.3-2; new methods, UNVERIFIED:
+they must not become estimated before a field check). Rows 21–34 are produced by `physics/lm` (LM-B); until it lands
+the pipeline leaves the allowed cells `not_computed` (TRACK_TOO_SHORT). Per-view null codes (`nullCodes`) and per-view
+minimum frame rates (`minFpsByView`) are resolved by `cellFor` / `nullCodeFor` / `minFpsFor`. A number whose
+value_origin is `dplane` / `spin_model` / `flight_model` / `prior` must carry one of DPLANE_MODEL, SPIN_MODELLED,
+FLIGHT_MODELLED, ROLL_MODELLED (contract rule `model_code_required`).
+
+| row | id | face_on | dtl | high_behind | min fps | null codes (不可) |
+|---|---|---|---|---|---|---|
+| 21 | `attack_angle_deg` | low_confidence | not | not | 240 | dtl VIEW_DEPTH_AXIS, hb VIEW_PLANE_MISMATCH |
+| 22 | `dynamic_loft_deg` | estimated | not | not | 240 | dtl VIEW_DEPTH_AXIS, hb DEPENDS_ON_NULL |
+| 23 | `face_angle_deg` | not | not | low_confidence | 240 | LAUNCH_DIR_UNOBSERVABLE |
+| 24 | `face_to_path_deg` | not | not | low_confidence | 240 | LAUNCH_DIR_UNOBSERVABLE |
+| 25 | `spin_loft_deg` | estimated | not | not | 240 | dtl VIEW_DEPTH_AXIS, hb DEPENDS_ON_NULL |
+| 26 | `spin_rate_rpm` | estimated | not | not | 240 | dtl VIEW_DEPTH_AXIS, hb DEPENDS_ON_NULL |
+| 27 | `spin_axis_deg` | not | not | low_confidence | 240 | LAUNCH_DIR_UNOBSERVABLE |
+| 28 | `total_m` | estimated | not | low_confidence | 200 (hb 240) | DEPENDS_ON_NULL |
+| 29 | `carry_side_m` | not | not | low_confidence | 240 | LAUNCH_DIR_UNOBSERVABLE |
+| 30 | `total_side_m` | not | not | low_confidence | 240 | LAUNCH_DIR_UNOBSERVABLE |
+| 31 | `curve_m` | not | not | low_confidence | 240 | LAUNCH_DIR_UNOBSERVABLE |
+| 32 | `apex_m` | estimated | not | not | 200 | dtl VIEW_DEPTH_AXIS, hb LAUNCH_V_ASSUMED |
+| 33 | `landing_angle_deg` | estimated | not | not | 200 | dtl VIEW_DEPTH_AXIS, hb LAUNCH_V_ASSUMED |
+| 34 | `hang_time_s` | estimated | not | not | 200 | dtl VIEW_DEPTH_AXIS, hb LAUNCH_V_ASSUMED |
+
 `tests/unit/metrics.registry.test.mjs` compares this cell by cell with an expected table written independently
-from CAFCR, and that table with the markdown table in `docs/CAFCR.md`.
+from CAFCR, and that table with the markdown table in `docs/CAFCR.md`; rows 21–34 and the three changed cells are
+compared with the §1.2 table of `docs/LAUNCH-MONITOR-SPEC.md` (CAFCR.md itself is not changed).
 
 ### Null precedence in `computeMetrics`
 

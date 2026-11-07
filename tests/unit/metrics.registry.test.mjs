@@ -6,9 +6,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { REGISTRY, cellFor } from '../../app/src/metrics/registry.js';
+import { REGISTRY, cellFor, nullCodeFor, minFpsFor, LM_ROW_IDS } from '../../app/src/metrics/registry.js';
 import { RC } from '../../app/src/contract/reason-codes.js';
-import { METRIC_IDS } from '../../app/src/contract/enums.js';
+import { METRIC_IDS, METRIC_IDS_V1, LM_METRIC_IDS } from '../../app/src/contract/enums.js';
 
 // F2 rows: [row, ids, face_on, dtl, high_behind, minFps, codes] with the F2 tokens 可 / 估 / 低 / 不可.
 // Row 14 face_on is fps dependent: 低 at 30–60 fps, 估 at 240 fps. Rows 16/17 face_on: 估 at >= 200 fps.
@@ -35,10 +35,15 @@ const F2 = [
 const TOKEN = { '可': 'valid', '估': 'estimated', '低': 'low_confidence', '不可': 'not' };
 const VIEWS = ['face_on', 'dtl', 'high_behind'];
 
-test('registry covers exactly the 22 contract metric ids', () => {
+// LAUNCH-MONITOR-SPEC §1.3-2: three CAFCR F2 cells changed from 不可 to 低 (high_behind, 240 fps, new methods).
+const LM_CHANGED = { club_speed_mps: { high_behind: '低' }, ball_speed_mps: { high_behind: '低' }, carry_m: { high_behind: '低' } };
+
+test('registry covers exactly the 36 contract metric ids (22 of CAFCR F2 + 14 of LAUNCH-MONITOR-SPEC §1.2)', () => {
   assert.deepEqual(Object.keys(REGISTRY).sort(), [...METRIC_IDS].sort());
   const ids = F2.flatMap((r) => r[1]);
-  assert.deepEqual(ids.sort(), [...METRIC_IDS].sort());
+  assert.deepEqual(ids.sort(), [...METRIC_IDS_V1].sort());
+  assert.deepEqual([...LM_ROW_IDS], [...LM_METRIC_IDS]);
+  assert.deepEqual(LM_METRIC_IDS.map((id) => REGISTRY[id].row), Array.from({ length: 14 }, (_, i) => 21 + i));
 });
 
 const CATALOGS = mergeCatalogs(fileURLToPath(new URL('../../app', import.meta.url)));
@@ -49,7 +54,7 @@ test('registry equals F2 cell by cell (validity per view, min fps, row, null cod
       const r = REGISTRY[id];
       assert.equal(r.views.face_on, TOKEN[fo], `${id} face_on`);
       assert.equal(r.views.dtl, TOKEN[dtl], `${id} dtl`);
-      assert.equal(r.views.high_behind, TOKEN[hb], `${id} high_behind`);
+      assert.equal(r.views.high_behind, TOKEN[LM_CHANGED[id]?.high_behind ?? hb], `${id} high_behind`);
       assert.equal(r.minFps, minFps, `${id} minFps`);
       assert.equal(r.row, row === 7 ? { shoulder_turn_deg: 7, hip_turn_deg: 8, x_factor_deg: 9 }[id] : row, `${id} row`);
       if (codes.length === 0) assert.equal(r.nullCode, null, `${id} nullCode`);
@@ -104,4 +109,76 @@ test('cellFor resolves fps tiers and minimum fps', () => {
   for (const id of METRIC_IDS) for (const v of VIEWS) assert.ok('validity' in cellFor(id, v, 240));
   assert.throws(() => cellFor('nope', 'dtl', 30), RangeError);
   assert.throws(() => cellFor('tempo_ratio', 'top_down', 30), RangeError);
+});
+
+// ---------------------------------------------------------------------------- LAUNCH-MONITOR-SPEC §1.2 (LM-A drop 1)
+// The expected cells are read from the spec's own table (240 fps): 實/推 (估) → estimated, (低) → low_confidence,
+// — → not. Row numbers there are the spec's #1–21; the ids in backticks.
+const SPEC = readFileSync(fileURLToPath(new URL('../../docs/LAUNCH-MONITOR-SPEC.md', import.meta.url)), 'utf8');
+function specCells() {
+  const sec = SPEC.slice(SPEC.indexOf('### 1.2'), SPEC.indexOf('### 1.3'));
+  const out = {};
+  const byNum = {};
+  for (const line of sec.split('\n')) {
+    const c = line.split('|').slice(1, -1).map((x) => x.trim());
+    const id = /^`([a-z0-9_]+)`$/.exec(c[1] ?? '')?.[1];
+    if (!id) continue;
+    const tok = (x) => (x.startsWith('—') ? 'not' : /低/.test(x) ? 'low_confidence' : /估/.test(x) ? 'estimated' : `?${x}`);
+    out[id] = { face_on: tok(c[3]), dtl: tok(c[4]), high_behind: tok(c[5]), codes: c[8] };
+    byNum[c[0]] = out[id];
+  }
+  // "同 #5" / "#14 的碼" = the codes of that row; a cell starting with "＋" adds to the previous row's codes
+  const rows = Object.values(out);
+  rows.forEach((r, i) => {
+    r.codes = r.codes.replace(/同 #(\d+)|#(\d+) 的碼/g, (_, a, b) => byNum[a ?? b]?.codes ?? '');
+    if (r.codes.startsWith('＋') && i > 0) r.codes = `${rows[i - 1].codes} ${r.codes}`;
+  });
+  return out;
+}
+
+test('registry equals LAUNCH-MONITOR-SPEC §1.2 at 240 fps for all 21 ball / club ids (cells and null codes)', () => {
+  const spec = specCells();
+  assert.equal(Object.keys(spec).length, 21);
+  for (const [id, row] of Object.entries(spec)) {
+    for (const view of ['face_on', 'dtl', 'high_behind']) {
+      const c = cellFor(id, view, 240);
+      if (row[view] === 'not') {
+        assert.equal(c.validity, null, `${id} ${view}`);
+        // the null code is named in the spec row (rows #9, #14, #15 keep their CAFCR code)
+        // #15 total names no dtl code: it inherits carry's (#14; CAFCR F2 row 19 DEPENDS_ON_NULL)
+        const inherited = id === 'total_m' && view === 'dtl' ? nullCodeFor('carry_m', 'dtl') : null;
+        if (LM_METRIC_IDS.includes(id)) assert.ok(row.codes.includes(c.code) || c.code === inherited, `${id} ${view}: ${c.code} not in "${row.codes}"`);
+      } else {
+        assert.equal(c.validity, row[view], `${id} ${view}`);
+      }
+    }
+  }
+  // §1.1: below 200 fps every ball / flight / D-plane id is null with FPS_TOO_LOW; face_on club speed is the exception
+  for (const id of Object.keys(spec)) {
+    for (const view of ['face_on', 'high_behind']) {
+      for (const fps of [30, 60, 120]) {
+        const c = cellFor(id, view, fps);
+        if (id === 'club_speed_mps' && view === 'face_on') assert.equal(c.validity, 'low_confidence');
+        else if (c.validity !== null) assert.fail(`${id} ${view} @${fps}: ${c.validity}`);
+        else if (REGISTRY[id].views[view] !== 'not') assert.equal(c.code, RC.FPS_TOO_LOW, `${id} ${view} @${fps}`);
+      }
+    }
+  }
+  // high_behind club speed, attack angle and club path need 240 fps (§1.1)
+  for (const id of ['club_speed_mps', 'club_path_deg']) assert.deepEqual(cellFor(id, 'high_behind', 200), { validity: null, code: RC.FPS_TOO_LOW });
+  assert.deepEqual(cellFor('attack_angle_deg', 'face_on', 200), { validity: null, code: RC.FPS_TOO_LOW });
+  assert.equal(minFpsFor('club_speed_mps', 'face_on'), 30);
+  assert.equal(minFpsFor('club_speed_mps', 'high_behind'), 240);
+  assert.equal(nullCodeFor('attack_angle_deg', 'high_behind'), RC.VIEW_PLANE_MISMATCH);
+  assert.equal(nullCodeFor('attack_angle_deg', 'dtl'), RC.VIEW_DEPTH_AXIS);
+  // the 14 new ids: dtl is null in every one (dtl has no ball data); labels exist in both catalogs
+  for (const id of LM_METRIC_IDS) {
+    assert.equal(cellFor(id, 'dtl', 240).validity, null, id);
+    for (const [loc, c] of Object.entries(CATALOGS)) for (const f of ['label', 'short', 'meaning', 'range', 'term']) assert.ok(c[`metric.${id}.${f}`], `${loc} metric.${id}.${f}`);
+  }
+});
+
+test('docs/metrics-by-view.md lists the 14 launch-monitor rows', () => {
+  const md = readFileSync(fileURLToPath(new URL('../../docs/metrics-by-view.md', import.meta.url)), 'utf8');
+  for (const id of LM_METRIC_IDS) assert.ok(md.includes(`\`${id}\``), id);
 });

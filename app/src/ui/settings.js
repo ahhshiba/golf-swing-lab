@@ -24,7 +24,7 @@ function prevTitle(app) {
   const prev = typeof last === 'string' ? last : last?.screen; // nav.stack() lists screen ids
   return prev && has(`screen.${prev}.title`) ? t(`screen.${prev}.title`) : undefined;
 }
-import { CLUBS, LIVE_METRIC_CHOICES, THEMES, loadSettings, saveSettings } from '../session/settings.js';
+import { CLUBS, LIVE_METRIC_CHOICES, THEMES, LM_GROUNDS, loadSettings, saveSettings } from '../session/settings.js';
 import * as quota from '../store/quota.js';
 import * as models from '../session/models.js';
 import * as health from '../session/health.js';
@@ -116,6 +116,9 @@ function field(C, { label, input, unit, hint, error }) {
 const errorLine = (C) => C.h('p', { class: 'set-error', role: 'alert', hidden: true });
 function showError(el, text) { el.textContent = text ?? ''; el.hidden = !text; }
 
+/** Distance-table gap limits a user may type (metres; about 1–55 yd). */
+const GAP_RANGE = [1, 50];
+
 function group(C, title, ...kids) {
   const { h } = C;
   return h('section', { class: 'set-group' }, h('h2', { class: 'set-group-title', text: title }), ...kids);
@@ -187,9 +190,35 @@ function renderRoot(ctx) {
   // ---- display ----
   const theme = C.segmented({ options: THEMES.map((v) => [v, t(`settings.theme.${v}`)]), value: st.theme, label: t('settings.theme'), testid: 'settings-theme',
     onChange: (v) => { const s = save({ theme: v }, true); app.applyTheme?.(s.theme); } });
+  // launch-monitor data (LAUNCH-MONITOR-SPEC §3.9): landing ground for the roll estimate (D5), mishits in statistics
+  const ground = C.segmented({ options: LM_GROUNDS.map((v) => [v, t(`settings.lm.ground.${v}`)]), value: st.lm.ground, label: t('settings.lm.ground'), testid: 'settings-lm-ground',
+    onChange: (v) => save({ lm: { ground: v } }) });
+  const mishits = C.switchRow({ label: t('settings.lm.mishits'), hint: t('settings.lm.mishits.hint'), checked: st.lm.excludeMishits, testid: 'settings-lm-mishits', onChange: (on) => save({ lm: { excludeMishits: on } }) });
+  // distance-table gap range (§3.8): stored in metres, typed and shown in the distance unit; min < max, both in GAP_RANGE
+  const dUnit = units.distance === 'm' ? 'm' : 'yd';
+  const gapErr = errorLine(C);
+  const showGap = (m) => String(Math.round(convert(m, 'm', dUnit) * 10) / 10);
+  const gapIns = ['gapMin', 'gapMax'].map((key) => {
+    const el = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', 'data-testid': `settings-lm-${key === 'gapMin' ? 'gap-min' : 'gap-max'}`, id: `set-${key}` });
+    el.value = showGap(st.lm[key]);
+    return el;
+  });
+  const onGap = () => {
+    const [lo, hi] = gapIns.map((el) => parseInput(el.value, dUnit));
+    if (!(lo >= GAP_RANGE[0] && hi <= GAP_RANGE[1] && lo < hi)) {
+      showError(gapErr, t('settings.lm.gap.invalid', { min: fmtQuantity(GAP_RANGE[0], 'distance', units).text, max: fmtQuantity(GAP_RANGE[1], 'distance', units).text }));
+      return;
+    }
+    showError(gapErr, null);
+    save({ lm: { gapMin: Math.round(lo * 1e4) / 1e4, gapMax: Math.round(hi * 1e4) / 1e4 } });
+  };
+  for (const el of gapIns) el.addEventListener('change', onGap);
   const display = group(C, t('settings.group.display'), h('div', { class: 'card' },
     labelled(t('settings.theme'), theme, t('settings.theme.hint')),
-    h('p', { class: 'hint set-note', text: t('settings.text_size.hint') })));
+    h('p', { class: 'hint set-note', text: t('settings.text_size.hint') })),
+  h('div', { class: 'card' }, labelled(t('settings.lm.ground'), ground, t('settings.lm.ground.hint')), mishits,
+    field(C, { label: t('settings.lm.gap_min'), input: gapIns[0], unit: unitLabel(dUnit) }),
+    field(C, { label: t('settings.lm.gap_max'), input: gapIns[1], unit: unitLabel(dUnit), hint: t('settings.lm.gap.hint'), error: gapErr })));
 
   // ---- live ----
   const metricsErr = h('p', { class: 'hint', role: 'status', 'aria-live': 'polite' });

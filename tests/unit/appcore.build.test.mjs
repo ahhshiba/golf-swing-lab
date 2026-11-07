@@ -64,6 +64,17 @@ test('build: budgets (shell ≤ 1 MB, precache ≤ 35 MB); heavy model and class
   assert.deepEqual(rA.problems, []);
   assert.ok(rA.shellBytes <= BUDGETS.shell_bytes, `shell ${rA.shellBytes}`);
   assert.ok(rA.precacheBytes <= BUDGETS.precache_bytes, `precache ${rA.precacheBytes}`);
+  // LAUNCH-MONITOR-SPEC §5.3 (integration): the final shell, read back from the written manifest, fits the 1,000,000 B
+  // budget; the budget itself (BUDGETS) never changes (the drop-1 interim cap of 969,715 B is retired)
+  const manTotals = JSON.parse(fs.readFileSync(path.join(outA, 'precache-manifest.json'), 'utf8')).totals;
+  assert.equal(manTotals.shell_bytes, rA.shellBytes);
+  assert.ok(manTotals.shell_bytes <= 1_000_000, `shell ${manTotals.shell_bytes} > 1,000,000`);
+  assert.ok(manTotals.precache_bytes <= 35_000_000, `precache ${manTotals.precache_bytes} > 35,000,000`);
+  assert.deepEqual({ ...BUDGETS }, { shell_bytes: 1_000_000, precache_bytes: 35_000_000 });
+  // the launch-monitor modules are lazy (§5.0-11): in the precache, never in the shell
+  for (const f of ['src/ui/drills.js', 'src/ui/drill.js', 'src/ui/stats.js', 'src/ui/gapping.js', 'src/viz/index.js', 'src/physics/lm/index.js', 'src/practice/drills.js', 'src/store/stats.js']) {
+    assert.ok(!rA.shell.some((e) => e.url === f) && rA.assets.some((a) => a.url === f && a.precache), f);
+  }
   const runtime = rA.assets.filter((a) => !a.precache).map((a) => a.url);
   for (const r of RUNTIME_ONLY) if (fs.existsSync(path.join(ROOT, 'app', r))) assert.ok(runtime.includes(r), r);
   const shell = rA.shell.map((e) => e.url);

@@ -44,7 +44,8 @@ function nullClub(validity, codes, extra = {}) {
 /**
  * Club-head speed. o: { cam, obs: [{ frame, t_s, u, v, conf }], start: { X }, t_impact, fps,
  *   depth_offset_m = HEAD_DEPTH_OFFSET_M, window_frames = CLUB_WINDOW_FRAMES, min_conf = 0 }.
- * Returns { ok, club_speed_mps, sigma, v_vec, n_used, validity, reason_codes, value_origin: 'club_track',
+ * Returns { ok, club_speed_mps, sigma, v_vec (chord velocity, m/s; physics/lm/attack.js reads its vertical part),
+ *   t_mid (chord mid-time relative to t_impact, s), n_used, validity, reason_codes, value_origin: 'club_track',
  *   readout_frac_per_ms (relative speed change per ms of readout error), lowfps_ci95_frac, depth_sys_frac }.
  */
 export function clubSpeed(o) {
@@ -117,6 +118,7 @@ export function clubSpeed(o) {
     club_speed_mps: speed,
     sigma,
     v_vec: v,
+    t_mid: 0.5 * (first.t + last.t),
     n_used: sel.length,
     validity: low ? 'low_confidence' : 'estimated',
     chord: bracket ? 'bracket' : 'pre_impact',

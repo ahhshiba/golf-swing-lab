@@ -19,15 +19,24 @@ test('face_on 240: rendered frames -> track -> fit3d -> a valid shot with ball s
   assertContract(shot);
   const m = shot.metrics;
   const t = b.truth;
-  assert.equal(shot.schema, 'golf-shot/1');
+  assert.equal(shot.schema, 'golf-shot/2');
   assert.equal(shot.capture.timestamps, 'container');
   assert.ok(Array.isArray(shot.capture.trim_s) && shot.capture.trim_s[0] < shot.capture.trim_s[1]);
   assert.ok(m.ball_speed_mps.value !== null, JSON.stringify(m.ball_speed_mps));
   assert.ok(Math.abs(m.ball_speed_mps.value - t.speed) / t.speed < 0.05, `speed ${m.ball_speed_mps.value} vs ${t.speed}`);
   assert.ok(Math.abs(m.launch_v_deg.value - t.launch_v_deg) < 2.5);
   assert.equal(m.ball_speed_mps.value_origin, 'ball_fit3d');
+  // carry and the flight rows come from physics/lm; no club head rendered -> no attack angle -> spin prior (SPIN_ASSUMED)
   assert.equal(m.carry_m.validity, 'estimated');
   assert.ok(m.carry_m.reason_codes.includes(RC.SPIN_ASSUMED) && m.carry_m.reason_codes.includes(RC.WIND_IGNORED));
+  assert.ok(m.carry_m.reason_codes.includes(RC.FLIGHT_MODELLED));
+  for (const id of ['total_m', 'apex_m', 'landing_angle_deg', 'hang_time_s']) assert.equal(m[id].validity, 'estimated', id);
+  assert.deepEqual(m.attack_angle_deg.reason_codes, [RC.TRACK_TOO_SHORT]);
+  assert.deepEqual(m.spin_rate_rpm.reason_codes, [RC.DEPENDS_ON_NULL]);
+  for (const id of ['face_angle_deg', 'carry_side_m', 'spin_axis_deg']) assert.ok(m[id].reason_codes.includes(RC.LAUNCH_DIR_UNOBSERVABLE), id);
+  assert.ok(shot.flight && Math.abs(shot.flight.landing.x_m - m.carry_m.value) <= 0.5 && shot.flight.samples.length <= 64);
+  assert.ok(shot.tracks && shot.tracks.view === 'face_on' && shot.tracks.ball_px.length >= 5);
+  assert.notEqual(shot.algorithms.lm.version, 'none');
   assert.equal(m.launch_h_deg.value, null);
   assert.ok(m.launch_h_deg.reason_codes.includes(RC.LAUNCH_DIR_UNOBSERVABLE));
   assert.equal(m.club_path_deg.value, null);
@@ -49,5 +58,7 @@ test('face_on 240: rendered frames -> track -> fit3d -> a valid shot with ball s
   assert.equal(r2.shot.metrics.ball_speed_mps.validity, 'low_confidence');
   assert.ok(r2.shot.metrics.ball_speed_mps.reason_codes.includes(RC.SETUP_UNVERIFIED));
   assert.equal(r2.shot.metrics.ball_speed_mps.value, m.ball_speed_mps.value, 'deterministic for the same seed');
+  assert.equal(r2.shot.metrics.carry_m.validity, 'low_confidence');
+  assert.ok(r2.shot.metrics.total_m.reason_codes.includes(RC.SETUP_UNVERIFIED));
 });
 

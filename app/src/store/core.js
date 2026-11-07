@@ -14,7 +14,13 @@
 //   trash[shot_id]     deleted_at                       (v3, soft delete: { shot_id, deleted_at, shot } = the shot
 //                                                         record moved out of `shots` unchanged; its pose, clips and
 //                                                         label stay until purgeDeleted(); restore() moves it back)
+//   drills[drill_id]   created_at, template              (v4, LAUNCH-MONITOR-SPEC §5.0-7: practice drills / tests in
+//                                                         progress or done; record shape owned by practice/drills.js)
 // Records are plain JSON-like objects; the repository never adds or changes fields (export -> import must be exact).
+// One exception (LAUNCH-MONITOR-SPEC §2.1): the shot shortcuts repo.shots.get / repo.shots.list and queryShots return
+// golf-shot/2 (a stored golf-shot/1 record is migrated on read by contract/migrate.js, loaded on first use);
+// repo.migrateBatch(n) writes up to n migrated shots back in one short transaction. The generic get / list /
+// snapshot / merge stay byte-exact (backups).
 //
 // Backend contract (async; see mem.js and idb.js):
 //   open({ version, stores, migrate }) -> { oldVersion, version }
@@ -31,7 +37,7 @@
 import { RC } from '../contract/reason-codes.js';
 
 export const DB_NAME = 'golf-swing-lab';
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 function deepFreeze(o) {
   for (const v of Object.values(o)) if (v !== null && typeof v === 'object') deepFreeze(v);
@@ -61,6 +67,8 @@ export const STORE_DEFS = deepFreeze({
   // v3 (additive): soft-deleted shots (PRODUCT-SPEC §8.0.8). The shot schema forbids extra fields, so a deleted shot
   // is moved here whole instead of being flagged.
   trash: { keyPath: 'shot_id', indexes: { deleted_at: 'deleted_at' } },
+  // v4 (additive): practice drills / tests (LAUNCH-MONITOR-SPEC §3.5, §5.0-7)
+  drills: { keyPath: 'drill_id', indexes: { created_at: 'created_at', template: 'template' } },
 });
 
 /** The stores of schema version 1 (tests open an old database with exactly these). */
@@ -73,10 +81,32 @@ export const STORE_NAMES = Object.freeze(Object.keys(STORE_DEFS));
 // v1 -> v2: only new, empty stores (labels, models); the backend creates them before migrate() runs and every v1
 // record stays as it is, so the step has no data to move. It is listed so the upgrade path is explicit.
 // v2 -> v3: the new, empty `trash` store only.
+// v3 -> v4: the new, empty `drills` store only. golf-shot/1 shots are NOT rewritten inside the upgrade (that would be one
+// long transaction over every shot): they are migrated on read and written back by migrateBatch in small batches.
 export const MIGRATIONS = Object.freeze([
   Object.freeze({ version: 2, up: async () => { /* additive: labels + models stores are created empty */ } }),
   Object.freeze({ version: 3, up: async () => { /* additive: trash store is created empty */ } }),
+  Object.freeze({ version: 4, up: async () => { /* additive: drills store is created empty */ } }),
 ]);
+
+/** Default batch size of the background write-back of migrated shots (LAUNCH-MONITOR-SPEC §2.1). */
+export const MIGRATE_BATCH = 50;
+
+let migrateModP = null;
+/** contract/migrate.js, loaded on first use (keeps it out of the cold-start graph). */
+function migrator() {
+  if (!migrateModP) migrateModP = import('../contract/migrate.js');
+  return migrateModP;
+}
+async function toV2(rec) {
+  if (rec === null || rec === undefined) return rec;
+  const { migrateShot } = await migrator();
+  return migrateShot(rec).shot;
+}
+async function allToV2(rows) {
+  const { migrateShot } = await migrator();
+  return rows.map((r) => migrateShot(r).shot);
+}
 
 // ----------------------------------------------------------------- time helpers (pure; UTC ISO-8601 <-> ms)
 // The repository never reads a clock: times come from the caller (`at`, `now`) or from backend.now() (idb.js).
@@ -282,6 +312,7 @@ export class Repository {
     this.schemaVersion = version;
     this.openedFromVersion = oldVersion;
     // Per-store shortcuts: repo.shots.get(id), repo.shots.put(rec), repo.shots.list({ index, query }) ...
+    // (repo.drills.{get,put,list} too; repo.shots.get / list return golf-shot/2, see the header)
     for (const name of Object.keys(stores)) {
       this[name] = {
         get: (id) => this.get(name, id),
@@ -293,9 +324,11 @@ export class Repository {
       };
     }
     // PRODUCT-SPEC §8.0.8 additions
+    if (this.shots) this.shots.get = async (id) => toV2(await this.get('shots', id));
+    if (this.shots && !has(stores, 'trash')) this.shots.list = async (opts) => allToV2(await this.list('shots', opts));
     if (this.shots && has(stores, 'trash')) {
       Object.assign(this.shots, {
-        list: (opts = {}) => this.listShots(opts),
+        list: async (opts = {}) => allToV2(await this.listShots(opts)),
         softDelete: (id, opts) => this.softDeleteShot(id, opts),
         restore: (id) => this.restoreShot(id),
         purgeDeleted: (opts) => this.purgeDeleted(opts),
@@ -446,7 +479,28 @@ export class Repository {
   }
 
   // Shots matching `filter` (see SHOT_FILTER_KEYS), chronological, using an index for the first selective key.
+  // Returned as golf-shot/2 (migrated on read).
   async queryShots(filter = {}) {
+    return allToV2(await this._queryShotsRaw(filter));
+  }
+
+  /**
+   * Background write-back (LAUNCH-MONITOR-SPEC §2.1): migrate up to n stored golf-shot/1 shots to golf-shot/2 and put
+   * them, in one short readwrite transaction. -> { migrated, remaining } (remaining = v1 shots still stored).
+   * The caller (main.js) repeats it with a pause until remaining is 0.
+   */
+  async migrateBatch(n = MIGRATE_BATCH) {
+    const { migrateShot, SCHEMA_V1 } = await migrator();
+    const limit = Math.max(1, Math.floor(Number(n) || MIGRATE_BATCH));
+    return this.transaction(['shots'], 'readwrite', async (tx) => {
+      const old = (await tx.getAll('shots')).filter((s) => s && s.schema === SCHEMA_V1);
+      const batch = old.slice(0, limit);
+      for (const s of batch) await tx.put('shots', migrateShot(s).shot);
+      return { migrated: batch.length, remaining: old.length - batch.length };
+    });
+  }
+
+  async _queryShotsRaw(filter = {}) {
     const f = assertShotFilter(filter);
     const scalar = (v) => typeof v === 'string' || typeof v === 'number';
     const pick = INDEXED_FILTERS.find(([key]) => scalar(f[key]));

@@ -6,7 +6,8 @@
 //               created_at, app_version, ... }, mode = 'highspeed'|'live', source = 'import'|'camera', orientation?,
 //               clip_ref = null, trim_s?: [from, to], pose_hz = 60, pose_model = 'full', pose_roi?, ball_roi?,
 //               restBall?: { u, v, w_px }, impact_pre = 30, impact_post = 60, audioOnset_t?, warnings = [], seed = 1,
-//               use_tcn = true (false: rules only even when deps.tcn is given), research_model = false }
+//               use_tcn = true (false: rules only even when deps.tcn is given), research_model = false,
+//               lm?: { ground } (settings.lm.ground: landing ground for roll / total; assembleShot input.lm.ground) }
 //   No swing found (too few pose frames, no impact event, detection error) -> WorkerError NO_SWING_FOUND: a clip
 //   without a swing never becomes a shot (PRODUCT-SPEC UX-08; options.allowNoSwing is ignored).
 //   calibration null -> placeholderCalibration() + NO_CALIBRATION, ball/club rows nulled (uncalibrated())
@@ -361,6 +362,7 @@ export async function analyzeClip(file, options = {}, deps = {}) {
       club: options.club, handedness, poseSeq: k !== 1 && poseSeq ? scalePoseTime(poseSeq, k) : poseSeq,
       events: evReal ?? {}, // {} = not detected: placeholder events, no re-detect
       ballFrames: bfReal, restBall, audioOnset_t: real(options.audioOnset_t), ids: options.ids ?? {}, warnings, seed: options.seed ?? 1,
+      lm: { ground: options.lm?.ground },
     });
   } catch (e) {
     if (e && e.code === ERR.CANCELLED) throw e;

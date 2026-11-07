@@ -3,7 +3,9 @@
    :root                          light
    :root[data-theme="dark"]       dark   (also prefers-color-scheme: dark while the theme is auto = no data-theme)
    :root[data-theme="sun"]        sun    (also prefers-contrast: more while the theme is auto)
-   [data-live-theme="dark"]       dark tokens on the live screen root (live forces dark unless the theme is sun)
+   [data-live-theme="dark"]       dark tokens on the live screen root (live forces dark unless the theme is sun) and on the
+                                  data screens shot / stats / gapping / drill while the theme is auto (LAUNCH-MONITOR-SPEC
+                                  §4.1); while such a screen shows, :root:has(...) turns the whole page dark with it
    Contrast of every declared pair: tests/unit/tokens.contrast.test.mjs. */
 
 :root {
@@ -45,6 +47,11 @@
   --lh-cjk: 1.5;
   --lh-display: 1.15;
   --unit-scale: 0.45em;
+  /* ---- launch-monitor big numbers (LAUNCH-MONITOR-SPEC §4.2): ≥ 44 px at 390 px wide (LM-D acceptance 1 needs 40,
+     the screenshot matrix's shot-hero check 44); grows with the width, not with the text size ---- */
+  --fs-metric-xl: calc(clamp(max(44px, 2rem), 11.3vw, 3.5rem) * var(--hero-scale));
+  --fs-metric: 1.75rem;
+  --t-metric: 700 var(--fs-metric-xl)/1.0 var(--font);
 
   /* ---- spacing, sizing, radii (§1.3) ---- */
   --s-1: 4px;
@@ -125,9 +132,35 @@
   --card-border: 1px solid var(--separator);
   --toast-bg: #0F1A14;
   --toast-fg: #FFFFFF;
+  /* ---- launch-monitor data screens (LAUNCH-MONITOR-SPEC §4.2): tiles and Canvas charts (read via viz/palette.js) ---- */
+  --tile-bg: #FFFFFF;
+  --tile-border-color: #C9D3CD;
+  --tile-border: 1px solid #C9D3CD;
+  --viz-bg: #FFFFFF;
+  --viz-axis: #7C8C82;
+  --viz-grid: #E6ECE8;
+  --viz-text: var(--text-2);
+  --viz-series-1: #1D5FBF;
+  --viz-series-2: #8A5700;
+  --viz-series-3: #B3261E;
+  --viz-series-4: #0B6B3F;
+  --viz-series-5: #7B3FB8;
+  --viz-series-6: #00707A;
+  --viz-series-7: #A84B00;
+  --viz-series-8: #3C4A42;
+  --viz-ci-alpha: .14;
+  --viz-target: #8A5700;
+  --viz-tracer: #FFC940;
+  --viz-tracer-halo: rgb(0 0 0 / .7);
+  /* camera-frame overlays (setup / magnifier): drawn on video, same in every theme, outlined in --media-bg */
+  --overlay-go: #00C878;
+  --overlay-caution: #FFB000;
+  --overlay-stop: #FF3B30;
+  --overlay-select: #FFCC00;
 }
 
 /* ---- dark (explicit) and the live screen root ---- */
+:root:has(#app > [data-live-theme="dark"]:not([hidden])),
 :root[data-theme="dark"],
 [data-live-theme="dark"] {
   color-scheme: dark;
@@ -174,6 +207,30 @@
   --card-border: 1px solid var(--separator);
   --toast-bg: #EAF2ED;
   --toast-fg: #07100B;
+  /* ---- launch-monitor data screens (LAUNCH-MONITOR-SPEC §4.2): tiles and Canvas charts (read via viz/palette.js) ---- */
+  --tile-bg: #111C16;
+  --tile-border-color: #24352B;
+  --tile-border: 1px solid #24352B;
+  --viz-bg: #07100B;
+  --viz-axis: #5D7A69;
+  --viz-grid: #24352B;
+  --viz-text: var(--text-2);
+  --viz-series-1: #6FA8FF;
+  --viz-series-2: #FFC940;
+  --viz-series-3: #FF7A70;
+  --viz-series-4: #7FE0A8;
+  --viz-series-5: #D59CFF;
+  --viz-series-6: #5FD3E0;
+  --viz-series-7: #FFA45C;
+  --viz-series-8: #EAF2ED;
+  --viz-ci-alpha: .18;
+  --viz-target: #FFC940;
+  --viz-tracer: #FFC940;
+  --viz-tracer-halo: rgb(0 0 0 / .7);
+  --overlay-go: #00C878;
+  --overlay-caution: #FFB000;
+  --overlay-stop: #FF3B30;
+  --overlay-select: #FFCC00;
 }
 
 /* ---- sun (explicit): white, black, 2 px borders, heavier body, bigger hero, no tints/shadows ---- */
@@ -225,6 +282,31 @@
   --card-border: 2px solid #3D4A43;
   --toast-bg: #000000;
   --toast-fg: #FFFFFF;
+  --t-metric: 800 var(--fs-metric-xl)/1.0 var(--font);
+  /* ---- launch-monitor data screens (LAUNCH-MONITOR-SPEC §4.2): tiles and Canvas charts (read via viz/palette.js) ---- */
+  --tile-bg: #FFFFFF;
+  --tile-border-color: #3D4A43;
+  --tile-border: 2px solid #3D4A43;
+  --viz-bg: #FFFFFF;
+  --viz-axis: #3D4A43;
+  --viz-grid: #C9D3CD;
+  --viz-text: var(--text-2);
+  --viz-series-1: #0B3F8C;
+  --viz-series-2: #5C3A00;
+  --viz-series-3: #8A140C;
+  --viz-series-4: #00552F;
+  --viz-series-5: #5A2490;
+  --viz-series-6: #004F57;
+  --viz-series-7: #7A3600;
+  --viz-series-8: #000000;
+  --viz-ci-alpha: 0;
+  --viz-target: #000000;
+  --viz-tracer: #FFFFFF;
+  --viz-tracer-halo: #000000;
+  --overlay-go: #00C878;
+  --overlay-caution: #FFB000;
+  --overlay-stop: #FF3B30;
+  --overlay-select: #FFCC00;
 }
 
 /* ---- auto theme (no data-theme): follow the system. Values MUST equal the explicit blocks above (unit test). ---- */
@@ -274,7 +356,31 @@
     --card-border: 1px solid var(--separator);
     --toast-bg: #EAF2ED;
     --toast-fg: #07100B;
-  }
+      /* ---- launch-monitor data screens (LAUNCH-MONITOR-SPEC §4.2): tiles and Canvas charts (read via viz/palette.js) ---- */
+    --tile-bg: #111C16;
+    --tile-border-color: #24352B;
+    --tile-border: 1px solid #24352B;
+    --viz-bg: #07100B;
+    --viz-axis: #5D7A69;
+    --viz-grid: #24352B;
+    --viz-text: var(--text-2);
+    --viz-series-1: #6FA8FF;
+    --viz-series-2: #FFC940;
+    --viz-series-3: #FF7A70;
+    --viz-series-4: #7FE0A8;
+    --viz-series-5: #D59CFF;
+    --viz-series-6: #5FD3E0;
+    --viz-series-7: #FFA45C;
+    --viz-series-8: #EAF2ED;
+    --viz-ci-alpha: .18;
+    --viz-target: #FFC940;
+    --viz-tracer: #FFC940;
+    --viz-tracer-halo: rgb(0 0 0 / .7);
+    --overlay-go: #00C878;
+    --overlay-caution: #FFB000;
+    --overlay-stop: #FF3B30;
+    --overlay-select: #FFCC00;
+}
 }
 @media (prefers-contrast: more) {
   :root:not([data-theme]) {
@@ -325,5 +431,30 @@
     --card-border: 2px solid #3D4A43;
     --toast-bg: #000000;
     --toast-fg: #FFFFFF;
-  }
+      --t-metric: 800 var(--fs-metric-xl)/1.0 var(--font);
+    /* ---- launch-monitor data screens (LAUNCH-MONITOR-SPEC §4.2): tiles and Canvas charts (read via viz/palette.js) ---- */
+    --tile-bg: #FFFFFF;
+    --tile-border-color: #3D4A43;
+    --tile-border: 2px solid #3D4A43;
+    --viz-bg: #FFFFFF;
+    --viz-axis: #3D4A43;
+    --viz-grid: #C9D3CD;
+    --viz-text: var(--text-2);
+    --viz-series-1: #0B3F8C;
+    --viz-series-2: #5C3A00;
+    --viz-series-3: #8A140C;
+    --viz-series-4: #00552F;
+    --viz-series-5: #5A2490;
+    --viz-series-6: #004F57;
+    --viz-series-7: #7A3600;
+    --viz-series-8: #000000;
+    --viz-ci-alpha: 0;
+    --viz-target: #000000;
+    --viz-tracer: #FFFFFF;
+    --viz-tracer-halo: #000000;
+    --overlay-go: #00C878;
+    --overlay-caution: #FFB000;
+    --overlay-stop: #FF3B30;
+    --overlay-select: #FFCC00;
+}
 }

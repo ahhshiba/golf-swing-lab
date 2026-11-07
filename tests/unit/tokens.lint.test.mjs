@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { lintCss, lintJs, checkTokens } from '../../scripts/check_tokens.mjs';
+import { lintCss, lintJs, lintJsHex, JS_HEX_FAILS, checkTokens } from '../../scripts/check_tokens.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/check_tokens.mjs', import.meta.url));
 const rules = (list) => list.map((f) => f.rule).sort();
@@ -31,6 +31,11 @@ test('js: inline style strings (blocked by CSP style-src) are findings; CSSOM an
   assert.deepEqual(lintJs("// el.setAttribute('style', 'x')\nconst a = 1;"), [], 'comments are ignored');
 });
 
+test('js: hex colour string literals are js-hex-colour findings (viz / ui scope; comments and CSS-looking text are not)', () => {
+  assert.deepEqual(lintJsHex("ctx.fillStyle = '#00c878'; g.strokeStyle = \"#000\"; x = `#ff3b30cc`;").map((f) => f.text), ["'#00c878'", '"#000"', '`#ff3b30cc`']);
+  assert.deepEqual(lintJsHex("// ctx.fillStyle = '#fff'\nconst id = '#app'; const s = 'a #fff b'; const n = '#12';"), []);
+});
+
 test('the real tree: no FAIL in A files (tokens.css, app.css, A JS); --strict exits with the total count', () => {
   const r = checkTokens();
   assert.deepEqual(r.findings.filter((f) => f.level === 'FAIL'), []);
@@ -38,6 +43,9 @@ test('the real tree: no FAIL in A files (tokens.css, app.css, A JS); --strict ex
   assert.equal(cli.status, 0, cli.stdout + cli.stderr);
   assert.match(cli.stdout, /check_tokens: \d+ files, 0 FAIL/);
   const strict = spawnSync(process.execPath, [SCRIPT, '--strict', '--quiet'], { encoding: 'utf8' });
-  assert.equal(strict.status, Math.min(checkTokens({ strict: true }).findings.length, 255));
+  assert.equal(strict.status, Math.min(checkTokens({ strict: true }).findings.filter((f) => f.level === 'FAIL').length, 255));
+  // the js-hex-colour rule (LAUNCH-MONITOR-SPEC §4.2) FAILS since the integration commit, and the tree has none
+  assert.equal(JS_HEX_FAILS, true);
+  assert.deepEqual(checkTokens({ strict: true }).findings.filter((f) => f.rule === 'js-hex-colour'), []);
   assert.equal(spawnSync(process.execPath, [SCRIPT, '--bogus'], { encoding: 'utf8' }).status, 64);
 });

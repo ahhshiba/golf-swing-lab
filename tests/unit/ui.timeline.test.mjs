@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assignLanes, clampFrame, checkMonotonic, nearestIndex } from '../../app/src/ui/replay.js';
-import { heroIdsFor, splitMetrics, buildLabel } from '../../app/src/ui/shot.js';
+import { splitMetrics, buildLabel } from '../../app/src/ui/shot.js';
 import { groupShots, buildFilter, fileStamp } from '../../app/src/ui/history.js';
 import fs from 'node:fs';
 
@@ -44,12 +44,10 @@ test('checkMonotonic and buildLabel return codes with params, no localized text 
   assert.deepEqual(r.params, { n: 1, events: ['finish'] });
 });
 
-test('shot card split: hero per view, unmeasured, shared reasons shown once', () => {
-  assert.deepEqual(heroIdsFor('face_on', 'highspeed'), ['carry_m', 'ball_speed_mps', 'club_speed_mps']);
-  assert.deepEqual(heroIdsFor('face_on', 'live'), ['tempo_ratio', 'club_speed_mps']);
-  assert.deepEqual(heroIdsFor('dtl'), ['tempo_ratio', 'spine_forward_tilt_deg', 'hand_plane_dev_m']);
+test('shot card split: tiles (hero) excluded below, unmeasured, shared reasons shown once', () => {
   const shot = fx('valid_face_on_240');
-  const sp = splitMetrics(shot);
+  const sp = splitMetrics(shot, ['carry_m', 'ball_speed_mps', 'club_speed_mps']);
+  assert.deepEqual(sp.hero, ['carry_m', 'ball_speed_mps', 'club_speed_mps']);
   const all = [...sp.hero, ...Object.values(sp.groups).flat(), ...sp.unmeasured];
   assert.equal(new Set(all).size, all.length, 'every metric appears once');
   for (const id of sp.unmeasured) assert.equal(shot.metrics[id].value, null);

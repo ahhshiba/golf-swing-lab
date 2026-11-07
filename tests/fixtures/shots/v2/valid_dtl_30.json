@@ -1,0 +1,638 @@
+{
+  "schema": "golf-shot/2",
+  "shot_id": "shot-fx-v2-dtl-30",
+  "session_id": "sess-fx-0002",
+  "venue_id": "venue-fx-bay-7",
+  "preset_id": "preset-fx-dtl-a",
+  "created_at": "2026-11-04T10:02:41.000+08:00",
+  "app_version": "0.1.0+fixture0000",
+  "algorithms": {
+    "pose": {
+      "version": "mediapipe-pose-landmarker-full@1.2.2",
+      "sha256": "66f237e84e8697ead88a60343b6c8296ffd104a03634cd9a5fd975947c5d7368"
+    },
+    "events": {
+      "version": "rules-1.0.0",
+      "sha256": "0730ffcf57d4e8765819fe15385cb1acc4b09975e974a5e421609fa2b58897e3"
+    },
+    "calib": {
+      "version": "calib-1.0.0",
+      "sha256": "1c588ae828a977bf5bfd89eda0af4a559c0f84d2c67b19c96d9732b3571a9af6"
+    },
+    "ball": {
+      "version": "track-ball-1.0.0",
+      "sha256": "4551711e1e9931e12c1f1646db2b0ec730edfd25ea77bd0230a33d8b75ea8cb0"
+    },
+    "fit3d": {
+      "version": "fit3d-1.0.0",
+      "sha256": "6a990bdb64d91d4407071c0aa639a64934b1fb3e11c7c255441ac94d604ce57a"
+    },
+    "carry": {
+      "version": "carry-rk4-mc500-1.0.0",
+      "sha256": "ce9ec7eb62de3d984f349a8fdae17cc9b7a5c7db5aa3af4ce291e205531f909f"
+    },
+    "lm": {
+      "version": "lm-fixture-1",
+      "sha256": "c99cf07f5cc276fc79074edc728c53dcbb5cac9af7004e47cfcad93fed2ed8dc"
+    }
+  },
+  "capture": {
+    "mode": "live",
+    "view": "dtl",
+    "source": "camera",
+    "orientation": "portrait-primary",
+    "width": 1080,
+    "height": 1920,
+    "nominal_fps": 30,
+    "effective_fps": 29.97,
+    "vfr": true,
+    "timestamps": "container",
+    "clip_ref": null,
+    "trim_s": null
+  },
+  "calibration": {
+    "method": "mat_pnp",
+    "source": "clip",
+    "f_px": 1418.954079,
+    "f_locked": true,
+    "pose": {
+      "yaw_deg": -0.3,
+      "pitch_deg": 0.2,
+      "roll_deg": -0.1,
+      "X_m": -3.25,
+      "Y_m": 0.35,
+      "h_m": 1,
+      "D_m": 3.2688
+    },
+    "pose_sigma": {
+      "yaw_deg": 0.12,
+      "pitch_deg": 0.1,
+      "roll_deg": 0.08,
+      "X_m": 0.006,
+      "Y_m": 0.011,
+      "h_m": 0.004,
+      "D_m": 0.011
+    },
+    "reproj_rmse_px": 1.2,
+    "slope_deg": 0.2,
+    "preset_dev": {
+      "yaw_deg": 0.25,
+      "pitch_deg": -0.3,
+      "roll_deg": 0.1,
+      "X_m": 0.012,
+      "Y_m": -0.008,
+      "h_m": 0.004,
+      "D_m": 0.009
+    },
+    "readout_ms": 3,
+    "readout_source": "assumed",
+    "camera": {
+      "W": 1080,
+      "H": 1920,
+      "f": 1418.954079,
+      "cx": 540,
+      "cy": 960,
+      "k1": 0,
+      "R": [
+        -0.005242048,
+        -0.999984737,
+        0.001745318,
+        0.00348146,
+        -0.001763581,
+        -0.999992385,
+        0.9999802,
+        -0.005235932,
+        0.003490651
+      ],
+      "t": [
+        0.331212684,
+        1.011924382,
+        3.248277575
+      ],
+      "readout": {
+        "ms": 3,
+        "axis": "v",
+        "dir": 1
+      }
+    }
+  },
+  "club": {
+    "type": "7i",
+    "length_m": 0.94,
+    "lie": "mat",
+    "tee_lift_m": 0,
+    "tee_lift_source": "measured"
+  },
+  "handedness": "right",
+  "events": {
+    "address": {
+      "frame": 15,
+      "t_s": 0.5,
+      "conf": 0.85,
+      "source": "tcn"
+    },
+    "toe_up": {
+      "frame": 35,
+      "t_s": 1.166667,
+      "conf": 0.85,
+      "source": "tcn"
+    },
+    "mid_backswing": {
+      "frame": 48,
+      "t_s": 1.6,
+      "conf": 0.85,
+      "source": "tcn"
+    },
+    "top": {
+      "frame": 60,
+      "t_s": 2,
+      "conf": 0.85,
+      "source": "tcn"
+    },
+    "mid_downswing": {
+      "frame": 68,
+      "t_s": 2.266667,
+      "conf": 0.85,
+      "source": "tcn"
+    },
+    "impact": {
+      "frame": 75,
+      "t_s": 2.5,
+      "conf": 0.9,
+      "source": "tcn"
+    },
+    "mid_follow_through": {
+      "frame": 82,
+      "t_s": 2.733333,
+      "conf": 0.85,
+      "source": "tcn"
+    },
+    "finish": {
+      "frame": 120,
+      "t_s": 4,
+      "conf": 0.85,
+      "source": "tcn"
+    }
+  },
+  "metrics": {
+    "backswing_s": {
+      "value": 1.5,
+      "unit": "s",
+      "ci95": [
+        1.467,
+        1.533
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "downswing_s": {
+      "value": 0.5,
+      "unit": "s",
+      "ci95": [
+        0.467,
+        0.533
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "tempo_ratio": {
+      "value": 3,
+      "unit": "ratio",
+      "ci95": [
+        2.56,
+        3.57
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "derived",
+      "measured": false,
+      "reason_codes": []
+    },
+    "head_sway_x_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "head_lift_z_m": {
+      "value": 0.012,
+      "unit": "m",
+      "ci95": [
+        -0.012,
+        0.036
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "head_depth_y_m": {
+      "value": 0.041,
+      "unit": "m",
+      "ci95": [
+        0.01,
+        0.072
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "spine_forward_tilt_deg": {
+      "value": 34.5,
+      "unit": "deg",
+      "ci95": [
+        29,
+        40
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "spine_side_tilt_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_PLANE_MISMATCH"
+      ]
+    },
+    "shoulder_turn_deg": {
+      "value": 85,
+      "unit": "deg",
+      "ci95": [
+        65,
+        105
+      ],
+      "sigma": null,
+      "validity": "low_confidence",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "hip_turn_deg": {
+      "value": 44,
+      "unit": "deg",
+      "ci95": [
+        34,
+        54
+      ],
+      "sigma": null,
+      "validity": "low_confidence",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "x_factor_deg": {
+      "value": 41,
+      "unit": "deg",
+      "ci95": [
+        22,
+        60
+      ],
+      "sigma": null,
+      "validity": "low_confidence",
+      "value_origin": "derived",
+      "measured": false,
+      "reason_codes": []
+    },
+    "hand_plane_dev_m": {
+      "value": 0.021,
+      "unit": "m",
+      "ci95": [
+        -0.01,
+        0.052
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "top_shaft_angle_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "FPS_TOO_LOW"
+      ]
+    },
+    "weight_shift_pct": {
+      "value": null,
+      "unit": "%",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "early_extension_m": {
+      "value": 0.034,
+      "unit": "m",
+      "ci95": [
+        0.01,
+        0.058
+      ],
+      "sigma": null,
+      "validity": "valid",
+      "value_origin": "pose",
+      "measured": false,
+      "reason_codes": []
+    },
+    "club_speed_mps": {
+      "value": null,
+      "unit": "m/s",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "club_track",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "club_path_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "club_track",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_PLANE_MISMATCH"
+      ]
+    },
+    "ball_speed_mps": {
+      "value": null,
+      "unit": "m/s",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "ball_fit3d",
+      "measured": false,
+      "reason_codes": [
+        "FPS_TOO_LOW",
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "launch_v_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "ball_fit3d",
+      "measured": false,
+      "reason_codes": [
+        "FPS_TOO_LOW",
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "launch_h_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "ball_fit3d",
+      "measured": false,
+      "reason_codes": [
+        "LAUNCH_DIR_UNOBSERVABLE"
+      ]
+    },
+    "carry_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_computed",
+      "value_origin": "ballistics",
+      "measured": false,
+      "reason_codes": [
+        "DEPENDS_ON_NULL"
+      ]
+    },
+    "smash_factor": {
+      "value": null,
+      "unit": "ratio",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_computed",
+      "value_origin": "derived",
+      "measured": false,
+      "reason_codes": [
+        "DEPENDS_ON_NULL"
+      ]
+    },
+    "attack_angle_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "club_track",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "dynamic_loft_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "dplane",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "face_angle_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "dplane",
+      "measured": false,
+      "reason_codes": [
+        "LAUNCH_DIR_UNOBSERVABLE"
+      ]
+    },
+    "face_to_path_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "dplane",
+      "measured": false,
+      "reason_codes": [
+        "LAUNCH_DIR_UNOBSERVABLE"
+      ]
+    },
+    "spin_loft_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "dplane",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "spin_rate_rpm": {
+      "value": null,
+      "unit": "rpm",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "spin_model",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "spin_axis_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "dplane",
+      "measured": false,
+      "reason_codes": [
+        "LAUNCH_DIR_UNOBSERVABLE"
+      ]
+    },
+    "total_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_computed",
+      "value_origin": "flight_model",
+      "measured": false,
+      "reason_codes": [
+        "DEPENDS_ON_NULL"
+      ]
+    },
+    "carry_side_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "flight_model",
+      "measured": false,
+      "reason_codes": [
+        "LAUNCH_DIR_UNOBSERVABLE"
+      ]
+    },
+    "total_side_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "flight_model",
+      "measured": false,
+      "reason_codes": [
+        "LAUNCH_DIR_UNOBSERVABLE"
+      ]
+    },
+    "curve_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "flight_model",
+      "measured": false,
+      "reason_codes": [
+        "LAUNCH_DIR_UNOBSERVABLE"
+      ]
+    },
+    "apex_m": {
+      "value": null,
+      "unit": "m",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "flight_model",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "landing_angle_deg": {
+      "value": null,
+      "unit": "deg",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "flight_model",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    },
+    "hang_time_s": {
+      "value": null,
+      "unit": "s",
+      "ci95": null,
+      "sigma": null,
+      "validity": "not_observable",
+      "value_origin": "flight_model",
+      "measured": false,
+      "reason_codes": [
+        "VIEW_DEPTH_AXIS"
+      ]
+    }
+  },
+  "quality": {
+    "pose_mean_vis": 0.88,
+    "frames_analyzed": 150,
+    "frames_dropped": 2,
+    "audio_onset": 2.53,
+    "touches": 0,
+    "warnings": []
+  },
+  "starred": false,
+  "note": "",
+  "revision": 0,
+  "flight": null,
+  "tracks": null,
+  "practice": null
+}

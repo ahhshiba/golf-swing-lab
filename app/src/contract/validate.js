@@ -1,22 +1,36 @@
-// Dependency-free validator for golf-shot/1 (CAFCR F3, docs/interfaces.md §4). Pure: no DOM, no clock, no randomness.
+// Dependency-free validator for golf-shot/2 and the legacy golf-shot/1 (CAFCR F3, docs/interfaces.md §4,
+// docs/LAUNCH-MONITOR-SPEC.md §2). Pure: no DOM, no clock, no randomness.
 //
-// It implements the parts of schema/shot-v1.schema.json the app relies on (required fields, unknown fields, enums,
-// types, ranges, metric ids and units) plus every F3 invariant that JSON Schema cannot express (ci95 bounds, the
-// warnings attribution rule, event order, camera consistency). docs/contract.md lists every rule with its message.
+// It implements the parts of schema/shot-v2.schema.json (and, for a shot whose schema is 'golf-shot/1', of the frozen
+// schema/shot-v1.schema.json) the app relies on (required fields, unknown fields, enums, types, ranges, metric ids and
+// units) plus every F3 invariant that JSON Schema cannot express (ci95 bounds, the warnings attribution rule, event
+// order, camera consistency) and the golf-shot/2 cross-field rules. docs/contract.md lists every rule with its message;
+// a golf-shot/2 rule's message ends with its rule name in parentheses, e.g. "(flight_t_increasing)".
 //
-//   validateShot(shot)   -> { ok, errors: [{ path, msg }] }
-//   validateMetric(m, id?, path?) -> errors[]        (one Metric value; `id` enables the per-metric unit check)
+//   validateShot(shot)   -> { ok, errors: [{ path, msg }] }   (golf-shot/1 shots are checked by the v1 rules)
+//   validateMetric(m, id?, path?) -> errors[]        (one Metric value, v2 rules; `id` enables the per-metric unit check)
 //   assertValid(shot)    -> shot, or throws ContractError (message = first errors, .errors = all)
 //   ContractError
 
-import { REASON_CODES } from './reason-codes.js';
+import { REASON_CODES, REASON_CODE_LIST_V1, MODEL_CODES } from './reason-codes.js';
 import {
-  SCHEMA_ID, VIEWS, EVENTS, EVENT_SOURCES, VALUE_VALIDITIES, VALIDITIES, VALUE_ORIGINS, METRIC_IDS, METRIC_UNITS,
-  SETUP_LEVEL_CODES, isAffectedBySetup, CAPTURE_MODES, CAPTURE_SOURCES, ORIENTATIONS, TIMESTAMP_KINDS, CALIB_METHODS,
-  CALIB_SOURCES, READOUT_SOURCES, POSE_KEYS, LIES, TEE_LIFT_SOURCES, HANDEDNESS, ALGORITHM_KEYS, SHOT_REQUIRED_KEYS,
-  SHOT_OPTIONAL_KEYS,
+  SCHEMA_ID, SCHEMA_V1, VIEWS, EVENTS, EVENT_SOURCES, VALUE_VALIDITIES, VALIDITIES, VALUE_ORIGINS, VALUE_ORIGINS_V1,
+  MODEL_ORIGINS, METRIC_IDS, METRIC_IDS_V1, METRIC_UNITS, SETUP_LEVEL_CODES, isAffectedBySetup, CAPTURE_MODES,
+  CAPTURE_SOURCES, ORIENTATIONS, TIMESTAMP_KINDS, CALIB_METHODS, CALIB_SOURCES, READOUT_SOURCES, POSE_KEYS, LIES,
+  TEE_LIFT_SOURCES, HANDEDNESS, ALGORITHM_KEYS, ALGORITHM_KEYS_V1, SHOT_REQUIRED_KEYS, SHOT_REQUIRED_KEYS_V1,
+  SHOT_OPTIONAL_KEYS, GROUNDS, FLIGHT_MAX_SAMPLES, TRACK_MAX_POINTS,
 } from './enums.js';
 import { isRotation } from '../geom/linalg.js';
+
+/** Per-schema lists (a v1 shot may use only what golf-shot/1 had). */
+const V2 = Object.freeze({
+  v2: true, schema: SCHEMA_ID, ids: METRIC_IDS, origins: VALUE_ORIGINS, codes: Object.keys(REASON_CODES),
+  algKeys: ALGORITHM_KEYS, required: SHOT_REQUIRED_KEYS,
+});
+const V1 = Object.freeze({
+  v2: false, schema: SCHEMA_V1, ids: METRIC_IDS_V1, origins: VALUE_ORIGINS_V1, codes: REASON_CODE_LIST_V1,
+  algKeys: ALGORITHM_KEYS_V1, required: SHOT_REQUIRED_KEYS_V1,
+});
 
 export class ContractError extends Error {
   constructor(message, errors = []) {
@@ -82,12 +96,13 @@ function checkInt(v, path, err, lo = 0) {
   return true;
 }
 
-function checkCodeList(list, path, err) {
+function checkCodeList(list, path, err, P = V2) {
   if (!Array.isArray(list)) { err(path, `must be an array of reason codes, got ${show(list)}`); return false; }
   const seen = new Set();
   list.forEach((c, i) => {
     const p = join(path, i);
     if (typeof c !== 'string' || !has(REASON_CODES, c)) err(p, `unknown reason code ${show(c)}`);
+    else if (!P.codes.includes(c)) err(p, `reason code ${c} does not exist in ${P.schema}`);
     else if (seen.has(c)) err(p, `duplicate reason code ${c}`);
     seen.add(c);
   });
@@ -96,7 +111,7 @@ function checkCodeList(list, path, err) {
 
 // ------------------------------------------------------------------------------------------------- metric
 
-function checkMetric(m, id, path, err) {
+function checkMetric(m, id, path, err, P = V2) {
   if (!isObj(m)) { err(path, 'metric must be an object'); return; }
   checkKeys(m, METRIC_KEYS, [], path, err);
   const { value, unit, ci95, sigma, validity, value_origin: origin, measured, reason_codes: codes } = m;
@@ -123,9 +138,9 @@ function checkMetric(m, id, path, err) {
   if (has(m, 'sigma') && !sigmaOk) err(at('sigma'), `sigma must be null or a finite number >= 0, got ${show(sigma)}`);
   const validityOk = VALIDITIES.includes(validity);
   if (has(m, 'validity') && !validityOk) err(at('validity'), `validity must be one of ${VALIDITIES.join('|')}, got ${show(validity)}`);
-  if (has(m, 'value_origin')) checkEnum(origin, VALUE_ORIGINS, at('value_origin'), err);
+  if (has(m, 'value_origin')) checkEnum(origin, P.origins, at('value_origin'), err);
   if (has(m, 'measured') && measured !== false) err(at('measured'), 'measured must be false (this app never claims a launch-monitor measurement)');
-  const codesOk = has(m, 'reason_codes') ? checkCodeList(codes, at('reason_codes'), err) : false;
+  const codesOk = has(m, 'reason_codes') ? checkCodeList(codes, at('reason_codes'), err, P) : false;
 
   // F3 invariants
   const hasValue = valueOk && value !== null;
@@ -142,6 +157,10 @@ function checkMetric(m, id, path, err) {
   }
   if (isNull && ci95 !== null && has(m, 'ci95')) err(at('ci95'), 'ci95 must be null when value is null');
   if (isNull && sigma !== null && has(m, 'sigma')) err(at('sigma'), 'sigma must be null when value is null');
+  // golf-shot/2: a number from a model must say which model (LAUNCH-MONITOR-SPEC §2.2, §2.3 ★)
+  if (P.v2 && hasValue && MODEL_ORIGINS.includes(origin) && codesOk && !codes.some((c) => MODEL_CODES.includes(c))) {
+    err(at('reason_codes'), `value_origin '${origin}' is a model, so reason_codes must contain one of ${MODEL_CODES.join('|')} (model_code_required)`);
+  }
 }
 
 /** Validate one Metric value. Pass the metric id to also check its fixed unit. Returns the error list. */
@@ -278,7 +297,7 @@ function checkEvents(ev, path, err) {
   }
 }
 
-function checkQuality(q, path, err) {
+function checkQuality(q, path, err, P) {
   if (!isObj(q)) { err(path, 'quality must be an object'); return; }
   checkKeys(q, ['pose_mean_vis', 'frames_analyzed', 'frames_dropped', 'audio_onset', 'touches', 'warnings'], [], path, err);
   if (has(q, 'pose_mean_vis') && q.pose_mean_vis !== null) checkNum(q.pose_mean_vis, join(path, 'pose_mean_vis'), err, 0, 1);
@@ -286,13 +305,13 @@ function checkQuality(q, path, err) {
   if (has(q, 'frames_dropped')) checkInt(q.frames_dropped, join(path, 'frames_dropped'), err, 0);
   if (has(q, 'audio_onset') && q.audio_onset !== null) checkNum(q.audio_onset, join(path, 'audio_onset'), err, 0);
   if (has(q, 'touches')) checkInt(q.touches, join(path, 'touches'), err, 0);
-  if (has(q, 'warnings')) checkCodeList(q.warnings, join(path, 'warnings'), err);
+  if (has(q, 'warnings')) checkCodeList(q.warnings, join(path, 'warnings'), err, P);
 }
 
-function checkAlgorithms(a, path, err) {
+function checkAlgorithms(a, path, err, P) {
   if (!isObj(a)) { err(path, 'algorithms must be an object'); return; }
-  checkKeys(a, ALGORITHM_KEYS, [], path, err);
-  for (const k of ALGORITHM_KEYS) {
+  checkKeys(a, P.algKeys, [], path, err);
+  for (const k of P.algKeys) {
     if (!has(a, k)) continue;
     const p = join(path, k);
     const v = a[k];
@@ -305,19 +324,108 @@ function checkAlgorithms(a, path, err) {
   }
 }
 
-function checkMetrics(ms, path, err) {
+function checkMetrics(ms, path, err, P) {
   if (!isObj(ms)) { err(path, 'metrics must be an object'); return; }
-  checkKeys(ms, METRIC_IDS, [], path, err);
-  for (const id of METRIC_IDS) if (has(ms, id)) checkMetric(ms[id], id, join(path, id), err);
+  checkKeys(ms, P.ids, [], path, err);
+  for (const id of P.ids) if (has(ms, id)) checkMetric(ms[id], id, join(path, id), err, P);
+}
+
+// ------------------------------------------------------------------------------------------------- golf-shot/2 blocks
+
+const isPoint = (p, n) => Array.isArray(p) && p.length === n && p.every(isNum);
+
+function checkFlight(f, carry, path, err) {
+  if (f === null) return;
+  if (!isObj(f)) { err(path, 'flight must be null or an object'); return; }
+  checkKeys(f, ['samples', 'landing', 'rest', 'band', 'ground', 'model'], [], path, err);
+  const at = (k) => join(path, k);
+  if (has(f, 'samples')) {
+    const s = f.samples;
+    if (!Array.isArray(s) || s.length < 2 || s.length > FLIGHT_MAX_SAMPLES) {
+      err(at('samples'), `samples must be an array of 2..${FLIGHT_MAX_SAMPLES} [t_s, x_m, y_m, z_m] points`);
+    } else {
+      s.forEach((p, i) => {
+        const pp = join(at('samples'), i);
+        if (!isPoint(p, 4)) { err(pp, 'sample must be [t_s, x_m, y_m, z_m] of finite numbers'); return; }
+        if (i > 0 && isPoint(s[i - 1], 4) && !(p[0] > s[i - 1][0])) err(pp, `t ${p[0]} must be greater than the previous sample's ${s[i - 1][0]} (flight_t_increasing)`);
+        if (p[3] < -0.01) err(pp, `z ${p[3]} m is below the ground (z >= -0.01) (flight_z_above_ground)`);
+      });
+    }
+  }
+  if (has(f, 'landing')) {
+    const l = f.landing;
+    if (!isObj(l)) err(at('landing'), 'landing must be { x_m, y_m, t_s }');
+    else {
+      checkKeys(l, ['x_m', 'y_m', 't_s'], [], at('landing'), err);
+      for (const k of ['x_m', 'y_m']) if (has(l, k)) checkNum(l[k], join(at('landing'), k), err);
+      if (has(l, 't_s')) checkNum(l.t_s, join(at('landing'), 't_s'), err, 0);
+    }
+  }
+  if (has(f, 'rest') && f.rest !== null) {
+    if (!isObj(f.rest)) err(at('rest'), 'rest must be null or { x_m, y_m }');
+    else {
+      checkKeys(f.rest, ['x_m', 'y_m'], [], at('rest'), err);
+      for (const k of ['x_m', 'y_m']) if (has(f.rest, k)) checkNum(f.rest[k], join(at('rest'), k), err);
+    }
+  }
+  if (has(f, 'band') && f.band !== null) {
+    if (!isObj(f.band)) err(at('band'), 'band must be null or { side_lo, side_hi }');
+    else {
+      checkKeys(f.band, ['side_lo', 'side_hi'], [], at('band'), err);
+      for (const k of ['side_lo', 'side_hi']) {
+        if (has(f.band, k) && !(Array.isArray(f.band[k]) && f.band[k].every((p) => isPoint(p, 2)))) err(join(at('band'), k), `${k} must be an array of [x, y] points`);
+      }
+    }
+  }
+  if (has(f, 'ground')) checkEnum(f.ground, GROUNDS, at('ground'), err);
+  if (has(f, 'model') && !isStr(f.model)) err(at('model'), 'model must be a non-empty string');
+  // flight non-null => carry_m has a number that agrees with the landing point
+  if (!isObj(carry) || !isNum(carry.value)) {
+    err(path, 'flight is set but metrics.carry_m has no value (flight_needs_carry)');
+  } else if (isObj(f.landing) && isNum(f.landing.x_m) && Math.abs(f.landing.x_m - carry.value) > 0.5) {
+    err(at('landing.x_m'), `landing x ${f.landing.x_m} m differs from carry_m ${carry.value} m by more than 0.5 m (flight_landing_matches_carry)`);
+  }
+}
+
+function checkTracks(tr, path, err) {
+  if (tr === null) return;
+  if (!isObj(tr)) { err(path, 'tracks must be null or an object'); return; }
+  checkKeys(tr, ['ball_px', 'impact_frame', 'view'], [], path, err);
+  const at = (k) => join(path, k);
+  if (has(tr, 'ball_px')) {
+    const b = tr.ball_px;
+    if (!Array.isArray(b) || b.length > TRACK_MAX_POINTS) err(at('ball_px'), `ball_px must be an array of at most ${TRACK_MAX_POINTS} [frame, u, v, r_px] points`);
+    else {
+      b.forEach((p, i) => {
+        const pp = join(at('ball_px'), i);
+        if (!isPoint(p, 4) || !isInt(p[0]) || p[0] < 0 || p[3] < 0) { err(pp, 'point must be [frame (integer >= 0), u, v, r_px (>= 0)]'); return; }
+        if (i > 0 && isPoint(b[i - 1], 4) && !(p[0] > b[i - 1][0])) err(pp, `frame ${p[0]} must be greater than the previous point's ${b[i - 1][0]} (tracks_frame_increasing)`);
+      });
+    }
+  }
+  if (has(tr, 'impact_frame')) checkInt(tr.impact_frame, at('impact_frame'), err, 0);
+  if (has(tr, 'view')) checkEnum(tr.view, VIEWS, at('view'), err);
+}
+
+function checkPractice(pr, path, err) {
+  if (pr === null) return;
+  if (!isObj(pr)) { err(path, 'practice must be null or an object'); return; }
+  checkKeys(pr, ['drill_id', 'slot', 'target_m', 'attempt'], [], path, err);
+  if (has(pr, 'drill_id') && !isStr(pr.drill_id)) err(join(path, 'drill_id'), 'drill_id must be a non-empty string');
+  if (has(pr, 'slot')) checkInt(pr.slot, join(path, 'slot'), err, 0);
+  if (has(pr, 'attempt')) checkInt(pr.attempt, join(path, 'attempt'), err, 0);
+  if (has(pr, 'target_m') && !(isNum(pr.target_m) && pr.target_m > 0)) {
+    err(join(path, 'target_m'), `target_m must be a number > 0, got ${show(pr.target_m)} (practice_target_positive)`);
+  }
 }
 
 /** quality.warnings <-> metric reason_codes rule (docs/contract.md "Attribution rule"). */
-function checkAttribution(shot, err) {
+function checkAttribution(shot, err, P) {
   const warnings = shot.quality?.warnings;
   const metrics = shot.metrics;
   if (!Array.isArray(warnings) || !isObj(metrics)) return;
   const active = SETUP_LEVEL_CODES.filter((c) => warnings.includes(c));
-  for (const id of METRIC_IDS) {
+  for (const id of P.ids) {
     const m = metrics[id];
     if (!isObj(m) || !Array.isArray(m.reason_codes)) continue;
     for (const c of SETUP_LEVEL_CODES) {
@@ -361,7 +469,10 @@ function checkHistory(h, shot, path, err) {
 
 // ------------------------------------------------------------------------------------------------- shot
 
-/** Validate a whole golf-shot/1 object. */
+/**
+ * Validate a whole shot: golf-shot/2, or a legacy golf-shot/1 (imported backups, records stored before the update)
+ * by the v1 rules. Any other schema value is an error ("schema must be 'golf-shot/2' ...").
+ */
 export function validateShot(shot) {
   const errors = [];
   const err = (path, msg) => errors.push({ path, msg });
@@ -369,8 +480,10 @@ export function validateShot(shot) {
     err('$', 'shot must be an object');
     return { ok: false, errors };
   }
-  checkKeys(shot, SHOT_REQUIRED_KEYS, SHOT_OPTIONAL_KEYS, '', err);
-  if (has(shot, 'schema') && shot.schema !== SCHEMA_ID) err('schema', `schema must be '${SCHEMA_ID}', got ${show(shot.schema)}`);
+  // an unknown schema value is reported once and the rest is checked by the rules of the shape it has
+  const P = shot.schema === SCHEMA_V1 || (shot.schema !== SCHEMA_ID && !has(shot, 'flight')) ? V1 : V2;
+  checkKeys(shot, P.required, SHOT_OPTIONAL_KEYS, '', err);
+  if (has(shot, 'schema') && shot.schema !== SCHEMA_ID && shot.schema !== SCHEMA_V1) err('schema', `schema must be '${SCHEMA_ID}' (or '${SCHEMA_V1}' for a legacy record), got ${show(shot.schema)}`);
   for (const k of ['shot_id', 'session_id', 'app_version']) {
     if (has(shot, k) && !isStr(shot[k])) err(k, `${k} must be a non-empty string`);
   }
@@ -380,21 +493,26 @@ export function validateShot(shot) {
   if (has(shot, 'created_at') && !(typeof shot.created_at === 'string' && ISO_RE.test(shot.created_at))) {
     err('created_at', 'created_at must be an ISO-8601 date-time with a timezone');
   }
-  if (has(shot, 'algorithms')) checkAlgorithms(shot.algorithms, 'algorithms', err);
+  if (has(shot, 'algorithms')) checkAlgorithms(shot.algorithms, 'algorithms', err, P);
   if (has(shot, 'capture')) checkCapture(shot.capture, 'capture', err);
   if (has(shot, 'calibration')) checkCalibration(shot.calibration, 'calibration', err);
   if (has(shot, 'club')) checkClub(shot.club, 'club', err);
   if (has(shot, 'handedness')) checkEnum(shot.handedness, HANDEDNESS, 'handedness', err);
   if (has(shot, 'events')) checkEvents(shot.events, 'events', err);
-  if (has(shot, 'metrics')) checkMetrics(shot.metrics, 'metrics', err);
-  if (has(shot, 'quality')) checkQuality(shot.quality, 'quality', err);
+  if (has(shot, 'metrics')) checkMetrics(shot.metrics, 'metrics', err, P);
+  if (has(shot, 'quality')) checkQuality(shot.quality, 'quality', err, P);
+  if (P.v2) {
+    if (has(shot, 'flight')) checkFlight(shot.flight, isObj(shot.metrics) ? shot.metrics.carry_m : null, 'flight', err);
+    if (has(shot, 'tracks')) checkTracks(shot.tracks, 'tracks', err);
+    if (has(shot, 'practice')) checkPractice(shot.practice, 'practice', err);
+  }
   if (has(shot, 'starred')) checkBool(shot.starred, 'starred', err);
   if (has(shot, 'note') && !(typeof shot.note === 'string' && shot.note.length <= NOTE_MAX)) {
     err('note', `note must be a string of at most ${NOTE_MAX} characters`);
   }
   if (has(shot, 'revision')) checkInt(shot.revision, 'revision', err, 0);
   if (has(shot, 'history')) checkHistory(shot.history, shot, 'history', err);
-  checkAttribution(shot, err);
+  checkAttribution(shot, err, P);
   return { ok: errors.length === 0, errors };
 }
 
@@ -412,5 +530,5 @@ export function assertValid(shot) {
 export function formatErrors(errors, max = 5) {
   const lines = errors.slice(0, max).map((e) => `${e.path}: ${e.msg}`);
   if (errors.length > max) lines.push(`... and ${errors.length - max} more`);
-  return `golf-shot/1 invalid (${errors.length} error${errors.length === 1 ? '' : 's'}): ${lines.join('; ')}`;
+  return `golf-shot invalid (${errors.length} error${errors.length === 1 ? '' : 's'}): ${lines.join('; ')}`;
 }

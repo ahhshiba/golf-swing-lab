@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 import {
   RC, REASON_CODES, validateShot, validateMetric, assertValid, formatErrors, ContractError, VALUE_VALIDITIES, VALIDITIES,
   METRIC_IDS, METRIC_UNITS, EVENTS, SETUP_LEVEL_CODES, BALL_CLUB_IDS, isAffectedBySetup, VALUE_ORIGINS,
+  METRIC_IDS_V1, REASON_CODE_LIST_V1, LM_METRIC_IDS,
 } from '../../app/src/contract/index.js';
+
+// The fixtures of tests/fixtures/shots/ are golf-shot/1 (checked by the v1 rules); golf-shot/2: lm.contract.v2.test.mjs.
 
 const FX = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/shots');
 const load = (name) => {
@@ -54,7 +57,7 @@ test('valid fixtures cover the three views, 240 and 30 fps, ball data and pose-o
     const s = load(n);
     views.add(s.capture.view);
     if (s.metrics.ball_speed_mps.value !== null) ball = s.capture.nominal_fps === 240 && s.capture.view === 'face_on';
-    if (s.capture.view === 'dtl' && s.capture.nominal_fps === 30) poseOnly = BALL_CLUB_IDS.every((id) => s.metrics[id].value === null);
+    if (s.capture.view === 'dtl' && s.capture.nominal_fps === 30) poseOnly = BALL_CLUB_IDS.filter((id) => id in s.metrics).every((id) => s.metrics[id].value === null);
   }
   assert.deepEqual([...views].sort(), ['dtl', 'face_on', 'high_behind']);
   assert.ok(ball && poseOnly);
@@ -82,7 +85,7 @@ test('required, unknown and misspelled top-level fields', () => {
 });
 
 test('top-level scalar rules', () => {
-  expectOne('valid_face_on_240', (s) => { s.schema = 'golf-shot/2'; }, 'schema must be');
+  expectOne('valid_face_on_240', (s) => { s.schema = 'golf-shot/9'; }, 'schema must be');
   expectOne('valid_face_on_240', (s) => { s.shot_id = ''; }, 'shot_id');
   expectOne('valid_face_on_240', (s) => { s.session_id = 7; }, 'session_id');
   expectOne('valid_face_on_240', (s) => { s.venue_id = ''; }, 'venue_id');
@@ -152,8 +155,10 @@ test('metric field types: finite numbers, units, measured, origin, validity', ()
 });
 
 test('every metric id has a fixed unit', () => {
-  assert.equal(METRIC_IDS.length, 22);
-  for (const id of METRIC_IDS) {
+  assert.equal(METRIC_IDS.length, 36);
+  assert.equal(METRIC_IDS_V1.length, 22);
+  assert.deepEqual([...METRIC_IDS], [...METRIC_IDS_V1, ...LM_METRIC_IDS]);
+  for (const id of METRIC_IDS_V1) {
     expectOne('valid_face_on_240', (s) => { s.metrics[id].unit = 'furlong'; }, `metrics.${id}.unit`);
   }
   assert.equal(METRIC_UNITS.carry_m, 'm');
@@ -162,10 +167,12 @@ test('every metric id has a fixed unit', () => {
 });
 
 test('metrics must have exactly the fixed ids', () => {
-  for (const id of METRIC_IDS) {
+  for (const id of METRIC_IDS_V1) {
     expectOne('valid_face_on_240', (s) => { delete s.metrics[id]; }, `metrics.${id}: required field is missing`);
   }
   expectOne('valid_face_on_240', (s) => { s.metrics.carry_yd = s.metrics.carry_m; }, 'metrics.carry_yd: unknown field');
+  // a golf-shot/1 shot may not carry the golf-shot/2 ids
+  expectOne('valid_face_on_240', (s) => { s.metrics.spin_rate_rpm = s.metrics.head_depth_y_m; }, 'metrics.spin_rate_rpm: unknown field');
   expectOne('valid_face_on_240', (s) => { s.metrics = []; }, 'metrics must be an object');
 });
 
@@ -178,8 +185,11 @@ test('reason codes: known, unique, strings; every defined code is accepted', () 
   expectOne('valid_face_on_240', (s) => { s.quality.warnings = ['TRACK_MAY_BE_SHORT', 'TRACK_MAY_BE_SHORT']; }, 'duplicate reason code');
   // codes that are not setup-level may be used anywhere
   const s = clone(load('valid_face_on_240'));
-  s.metrics.head_depth_y_m.reason_codes = Object.keys(REASON_CODES).filter((c) => !SETUP_LEVEL_CODES.includes(c));
+  s.metrics.head_depth_y_m.reason_codes = REASON_CODE_LIST_V1.filter((c) => !SETUP_LEVEL_CODES.includes(c));
   assert.deepEqual(texts(validateShot(s)), []);
+  // golf-shot/1 knows only its 29 codes
+  expectOne('valid_face_on_240', (s2) => { s2.metrics.head_depth_y_m.reason_codes = [RC.MIGRATED_V1]; }, 'reason code MIGRATED_V1 does not exist in golf-shot/1');
+  assert.equal(Object.keys(REASON_CODES).length, 38);
 });
 
 test('metric truth table: validateMetric agrees with an independent oracle on 720 combinations', () => {
@@ -234,7 +244,7 @@ test('attribution: a setup-level warning must reach every affected metric that h
   s.quality.warnings = [RC.SETUP_UNVERIFIED];
   const r = validateShot(s);
   const paths = new Set(r.errors.map((e) => e.path));
-  const affectedWithNumber = BALL_CLUB_IDS.filter((id) => s.metrics[id].value !== null);
+  const affectedWithNumber = BALL_CLUB_IDS.filter((id) => id in s.metrics && s.metrics[id].value !== null);
   assert.deepEqual(affectedWithNumber.sort(), ['carry_m', 'club_speed_mps', 'ball_speed_mps', 'launch_v_deg', 'smash_factor'].sort());
   for (const id of affectedWithNumber) {
     assert.ok(paths.has(`metrics.${id}.validity`), `${id} not downgraded`);
@@ -269,7 +279,8 @@ test('attribution: warnings that are not setup-level need no repetition', () => 
 });
 
 test('attribution: affected means ids 14-20 or a calibration-dependent value_origin', () => {
-  assert.deepEqual([...BALL_CLUB_IDS], ['club_speed_mps', 'club_path_deg', 'ball_speed_mps', 'launch_v_deg', 'launch_h_deg', 'carry_m', 'smash_factor']);
+  // F2 rows 14-20 plus every golf-shot/2 id (LAUNCH-MONITOR-SPEC §2.3: they all depend on the calibration)
+  assert.deepEqual([...BALL_CLUB_IDS], ['club_speed_mps', 'club_path_deg', 'ball_speed_mps', 'launch_v_deg', 'launch_h_deg', 'carry_m', 'smash_factor', ...LM_METRIC_IDS]);
   for (const id of METRIC_IDS) {
     for (const origin of VALUE_ORIGINS) {
       const expected = BALL_CLUB_IDS.includes(id) || ['ball_fit3d', 'ball_fit2d', 'club_track', 'ballistics'].includes(origin);

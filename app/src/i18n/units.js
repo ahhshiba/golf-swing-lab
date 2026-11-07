@@ -5,7 +5,7 @@
 //   normalizeUnits(u)                 fills/validates a settings.units object
 //   fmtMetric(metric, units, { id })  -> { value, unit, ci, text, digits }   value/ci are locale strings, ci null when
 //                                        there is none or it rounds to 0; null metric → value '—'
-//   fmtQuantity(si, kind, units, { digits }) -> { value, unit, text }   kind: distance|speed|body|clubLength|height|s|deg|pct|ratio
+//   fmtQuantity(si, kind, units, { digits }) -> { value, unit, text }   kind: distance|speed|body|clubLength|height|s|deg|pct|ratio|rpm
 //   convert(x, from, to)              between m, yd, cm, in, ft, m/s, mph, km/h (aliases mps, kmh)
 //   toSI(x, unit) = convert(x, unit, SI of that dimension)
 //   parseInput(text, unit) -> SI number | null   ('1,5', '5\'10"', '5 ft 10 in' for 'ftin'); parseLength = parseInput
@@ -26,14 +26,14 @@ export const UNIT_CHOICES = Object.freeze({
 const TO_SI = Object.freeze({
   m: 1, yd: 1 / 1.09361, cm: 0.01, in: 1 / 39.3701, ft: 12 / 39.3701,
   'm/s': 1, mph: 1 / 2.23694, 'km/h': 1 / 3.6,
-  s: 1, deg: 1, '%': 1, ratio: 1,
+  s: 1, deg: 1, '%': 1, ratio: 1, rpm: 1,
 });
 const ALIAS = Object.freeze({ mps: 'm/s', kmh: 'km/h', pct: '%', ftin: 'in' });
-const DIM = Object.freeze({ m: 'L', yd: 'L', cm: 'L', in: 'L', ft: 'L', 'm/s': 'V', mph: 'V', 'km/h': 'V', s: 'T', deg: 'A', '%': 'P', ratio: 'R' });
-const SI_OF = Object.freeze({ L: 'm', V: 'm/s', T: 's', A: 'deg', P: '%', R: 'ratio' });
+const DIM = Object.freeze({ m: 'L', yd: 'L', cm: 'L', in: 'L', ft: 'L', 'm/s': 'V', mph: 'V', 'km/h': 'V', s: 'T', deg: 'A', '%': 'P', ratio: 'R', rpm: 'W' });
+const SI_OF = Object.freeze({ L: 'm', V: 'm/s', T: 's', A: 'deg', P: '%', R: 'ratio', W: 'rpm' });
 /** Catalog id of each unit (`unit.<id>`), safe as a key. */
-const UNIT_ID = Object.freeze({ m: 'm', yd: 'yd', cm: 'cm', in: 'in', ft: 'ft', 'm/s': 'mps', mph: 'mph', 'km/h': 'kmh', s: 's', deg: 'deg', '%': 'pct', ratio: 'ratio', ftin: 'ftin' });
-const SYMBOL = Object.freeze({ m: 'm', yd: 'yd', cm: 'cm', in: 'in', ft: 'ft', 'm/s': 'm/s', mph: 'mph', 'km/h': 'km/h', s: 's', deg: '°', '%': '%', ratio: '', ftin: 'ft/in' });
+const UNIT_ID = Object.freeze({ m: 'm', yd: 'yd', cm: 'cm', in: 'in', ft: 'ft', 'm/s': 'mps', mph: 'mph', 'km/h': 'kmh', s: 's', deg: 'deg', '%': 'pct', ratio: 'ratio', ftin: 'ftin', rpm: 'rpm' });
+const SYMBOL = Object.freeze({ m: 'm', yd: 'yd', cm: 'cm', in: 'in', ft: 'ft', 'm/s': 'm/s', mph: 'mph', 'km/h': 'km/h', s: 's', deg: '°', '%': '%', ratio: '', ftin: 'ft/in', rpm: 'rpm' });
 
 /** Body-scale metrics (m in storage) shown in settings.units.body. Every other 'm' metric is a distance. */
 export const BODY_METRIC_IDS = Object.freeze(['head_sway_x_m', 'head_lift_z_m', 'head_depth_y_m', 'hand_plane_dev_m', 'early_extension_m']);
@@ -79,6 +79,7 @@ export function metricKind(id, unit) {
   if (u === 's') return 's';
   if (u === 'deg') return 'deg';
   if (u === '%') return 'pct';
+  if (u === 'rpm') return 'rpm';
   return 'ratio';
 }
 
@@ -94,6 +95,7 @@ function displayOf(kind, units) {
     case 's': return { unit: 's', digits: 2 };
     case 'deg': return { unit: 'deg', digits: 0 };
     case 'pct': return { unit: '%', digits: 0 };
+    case 'rpm': return { unit: 'rpm', digits: 0 };
     default: return { unit: 'ratio', digits: 2 };
   }
 }

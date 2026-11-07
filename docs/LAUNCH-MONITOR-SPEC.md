@@ -41,20 +41,20 @@ high_behind 做、垂直半邊只能在 face_on 做。任何「把兩個機位�
 
 | # | id | 參數 | face_on | dtl | high_behind | 方法與輸入 | 預期 1σ | 原因碼（有值時附加／不可時） | 與現行 F2 差異 |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `club_speed_mps` | 桿頭速度 | 實（估） | — | **實（低）** | fo：現行 `physics/club.js`；hb：地面投影桿頭軌跡的路徑長／時間 ÷ cos(攻擊角先驗)（RN §7） | fo 2–3%；hb 5–8% UNVERIFIED | hb 有值：`TRACK_MAY_BE_SHORT` 視情況；不可：dtl `VIEW_DEPTH_AXIS` | hb 由「不可」改「低」 |
+| 1 | `club_speed_mps` | 桿頭速度 | 實（估） | — | **實（低）** | fo：現行 `physics/club.js`；hb：地面投影桿頭軌跡的路徑長／時間 ÷ cos(攻擊角先驗)（RN §7） | fo 2–3%；hb 15–20%（中位 17%；原估 5–8% 漏了桿頭高度項，RN §7 更正）UNVERIFIED | hb 有值：`TRACK_MAY_BE_SHORT` 視情況；不可：dtl `VIEW_DEPTH_AXIS` | hb 由「不可」改「低」 |
 | 2 | `attack_angle_deg` | 攻擊角 | **實（低）** | — | — | fo：撞擊前 2 幀桿頭軌跡在球平面的垂直分量（同 `club.js` 的平面），弧線曲率修正 κ_v（類比 `clubpath.js` 的 κ） | 1.5–2.5° UNVERIFIED（RN §8-6） | 不可：dtl `VIEW_DEPTH_AXIS`；hb `VIEW_PLANE_MISMATCH`；取樣 <2 點 `TRACK_TOO_SHORT` | 新增 |
 | 3 | `club_path_deg` | 桿頭路徑 | — | — | 實（低） | 現行 `physics/clubpath.js` | 2–4°（C1.3） | 不可：fo/dtl `VIEW_PLANE_MISMATCH` | 不變 |
 | 4 | `dynamic_loft_deg` | 動態桿面仰角 | **推（估）** | — | — | 垂直 D-plane 反推 `DL=(LV−(1−v)·AoA)/v`，`v(SL)` 內插（RN §1） | 1.0–2.6°（RN §5） | `DPLANE_MODEL`；不可：dtl `VIEW_DEPTH_AXIS`、hb `DEPENDS_ON_NULL` | 新增 |
 | 5 | `face_angle_deg` | 桿面角 | — | — | **推（低）** | 水平 D-plane 反推 `F=(LH−(1−h)·P)/h`，`h(SL)` 內插；SL 用球桿先驗（RN §1） | 1.0–2.6°（path σ 2–4°） | `DPLANE_MODEL`、`SPIN_LOFT_ASSUMED`；不可：fo/dtl `LAUNCH_DIR_UNOBSERVABLE` | 新增 |
 | 6 | `face_to_path_deg` | 桿面對路徑 | — | — | **推（低）** | `(LH−P)/h` | 2.8–6.3° | 同 #5 | 新增 |
 | 7 | `spin_loft_deg` | 旋轉仰角 | **推（估）** | — | — | 3D 夾角 ∠(ĉ, n̂)，由 #2、#4 與 path=0、face=0 假設（fo 看不到水平，小角度下水平分量對 SL 影響 <0.3°） | 2.1–4.1° | `DPLANE_MODEL`；不可：dtl `VIEW_DEPTH_AXIS`、hb `DEPENDS_ON_NULL` | 新增 |
-| 8 | `ball_speed_mps` | 球速 | 實（估） | — | **推（低）** | fo：現行 fit3d；hb：#1 × smash 先驗（RN §7） | fo 1.5–2.5%；hb 6–9% UNVERIFIED | hb：`SMASH_ASSUMED`；不可：dtl `VIEW_DEPTH_AXIS` | hb 由「不可」改「低」 |
+| 8 | `ball_speed_mps` | 球速 | 實（估） | — | **推（低）** | fo：現行 fit3d；hb：#1 × smash 先驗（RN §7） | fo 1.5–2.5%；hb 16–19%（原估 6–9%，RN §7 更正）UNVERIFIED | hb：`SMASH_ASSUMED`；不可：dtl `VIEW_DEPTH_AXIS` | hb 由「不可」改「低」 |
 | 9 | `smash_factor` | 擊球效率 | 實（估） | — | — | 現行（#8／#1，K6 系統項相消） | ≈1.5–3% | 不可：dtl `DEPENDS_ON_NULL`、hb `DEPENDS_ON_NULL`（hb 的球速是用 smash 算的，回報會循環） | 不變 |
 | 10 | `launch_v_deg` | 發射角 | 實（估） | — | — | 現行 fit3d | 0.1–0.3° | 不可：dtl `VIEW_DEPTH_AXIS`、hb `VIEW_DEPTH_AXIS`（深度耦合） | 不變 |
 | 11 | `launch_h_deg` | 起飛方向 | — | — | 實（低） | 現行 `launch_h.js` | 0.3–0.6° | 不可：fo/dtl `LAUNCH_DIR_UNOBSERVABLE` | 不變 |
-| 12 | `spin_rate_rpm` | 旋轉量 | **推（估）** | — | — | spin-loft 模型 `A_club·v_c·sin(SL)/r` 與球桿先驗反變異數合併（RN §2） | 12–17%（純物理 17–26%） | `SPIN_MODELLED`；不可：dtl `VIEW_DEPTH_AXIS`；hb `DEPENDS_ON_NULL`（只剩先驗，不顯示純先驗） | 新增（現行 carry 內部用先驗、不回報） |
+| 12 | `spin_rate_rpm` | 旋轉量 | **推（估）** | — | — | spin-loft 模型 `A_club·v_c·sin(SL)/r` 與球桿先驗反變異數合併（RN §2） | 16–19%（原估 12–17%；先驗 σ 下限 30% 後，RN §2 實作修正、§9）（純物理 17–26%） | `SPIN_MODELLED`；不可：dtl `VIEW_DEPTH_AXIS`；hb `DEPENDS_ON_NULL`（只剩先驗，不顯示純先驗） | 新增（現行 carry 內部用先驗、不回報） |
 | 13 | `spin_axis_deg` | 旋轉軸 | — | — | **推（低）** | D-plane 向量 ŵ ∥ ĉ×n̂（RN §3）；hb 的 AoA、DL 用球桿先驗 | driver 11–19°、7 鐵 6–12°、PW 4–8° | `DPLANE_MODEL`、`SPIN_LOFT_ASSUMED`；不可：fo/dtl `LAUNCH_DIR_UNOBSERVABLE` | 新增 |
-| 14 | `carry_m` | 飛行距離 | 推（估） | — | **推（低）** | RK4（`ballistics.js`）；fo：#8、#10、#12、axis=0；hb：#8、發射角先驗、#13 | fo 3.5–7.5%（含模型 3%）；hb 8–13% UNVERIFIED | 現有 `SPIN_ASSUMED`→fo 改 `SPIN_MODELLED`；`WIND_IGNORED`、`FLIGHT_MODELLED`；hb 加 `SMASH_ASSUMED`、`LAUNCH_V_ASSUMED` | hb 由「不可」改「低」 |
+| 14 | `carry_m` | 飛行距離 | 推（估） | — | **推（低）** | RK4（`ballistics.js`）；fo：#8、#10、#12、axis=0；hb：#8、發射角先驗、#13 | fo 3.5–7.5%（含模型 3%）；hb 20–26%（原估 8–13%，RN §7 更正）UNVERIFIED | 現有 `SPIN_ASSUMED`→fo 改 `SPIN_MODELLED`；`WIND_IGNORED`、`FLIGHT_MODELLED`；hb 加 `SMASH_ASSUMED`、`LAUNCH_V_ASSUMED` | hb 由「不可」改「低」 |
 | 15 | `total_m` | 總距離 | **推（估）** | — | **推（低）** | carry + roll 表（落地角 × 草況，RN §6） | fo carry σ ⊕ 50%·roll（driver ≈ ±12 m） | `ROLL_MODELLED` ＋ #14 的碼 | 新增 |
 | 16 | `carry_side_m` | 落點偏移 | — | — | **推（低）** | RK4 落點的 y（起飛方向 #11 ＋ 傾斜轉軸 #13） | driver 21–37 m、7 鐵 9–17 m、PW 4.5–9 m | `DPLANE_MODEL`、`FLIGHT_MODELLED`；不可：fo/dtl `LAUNCH_DIR_UNOBSERVABLE` | 新增 |
 | 17 | `total_side_m` | 總偏移 | — | — | **推（低）** | #16 ＋ roll 沿落地水平速度方向 | 同 #16 略大 | ＋`ROLL_MODELLED` | 新增 |
@@ -384,7 +384,7 @@ practice: null | { drill_id, slot, target_m, attempt }              // 練習／
 | `tests/e2e/screenshot_matrix.mjs`、`lib.mjs`、`checks.mjs` | ✔ | | | | | |
 | `tests/e2e/m2.mjs` | | | | ✔ | | |
 | `tests/e2e/m6.mjs` | | | | | | ✔ |
-| `tests/e2e/gates/lm-<x>-*.mjs` | a | | | d | e | f |
+| `tests/e2e/gates/lm-<x>-*.mjs`（LM-C 沒有 gate，見 §5.2 共通驗收） | a | | | d | e | f |
 | `tests/fixtures/shots/v2/**`、`tests/fixtures/lm/**` | ✔ | | | | | |
 | `tests/synth/ballflight.js` | | ✔ | | | | |
 | `tests/unit/` 前綴 `contract. metrics.registry tokens. appcore. i18n. units. store.core store.export lm.contract.` | ✔ | | | | | |
@@ -404,9 +404,11 @@ practice: null | { drill_id, slot, target_m, attempt }              // 練習／
 
 共通驗收（每包都要）：
 - `bash scripts/verify.sh` 最後一行 `all stages passed`（`RUN_BROWSER_E2E` 未設時 browser-e2e 為 SKIP 屬正常，此時最後一行為 `no failures, but this is NOT a full verification` 亦可在包內接受，整合時必須 `all stages passed`）。
-- `RUN_BROWSER_E2E=1 node tests/e2e/run.mjs --only 'lm-<x>-*'` 退出碼 0。
+- `RUN_BROWSER_E2E=1 node tests/e2e/run.mjs --only 'lm-<x>-*'` 退出碼 0。**LM-C 不適用**：它是純模組、沒有自己的畫面，所以沒有 `lm-c-*` gate；
+  它在瀏覽器裡的行為由 `lm-d-viz`（結果頁四個分頁）與 `lm-f-stats`（統計圖）涵蓋（整合時補記）。
 - `node scripts/check_i18n.mjs --strict --quiet` 退出碼 0；`node scripts/check_tokens.mjs --strict` 退出碼 0。
-- `grep -rniE 'trackman|golfdb|ultralytics|opencv' app/src app/i18n app/styles | wc -l` 輸出 `0`。
+- `grep -rniE 'trackman|golfdb|ultralytics|opencv' app/src app/i18n app/styles | grep -viE 'golfdb: false|\.golfdb|"golfdb": ?false|card field golfdb|\(OpenCV[:)]' | wc -l` 輸出 `0`。
+  排除項（LM-A drop 1 實測，2026-11-06；其餘 0 筆）：事件模型卡的 GolfDB 防線欄位 `golfdb: false`（`events/card.js` 3 處、`events/calib-conf.js`／`.json` 各 1、`session/models.js` 2 處——檢查「不是 GolfDB 衍生」的 guard，不是使用 GolfDB）；`geom/camera.js:4`、`calib/gravity.js:9` 註解裡的「(OpenCV)」相機座標慣例名（不是 OpenCV 函式庫）。`physics/aero.js`、`physics/ballistics.js` 註解原本引用商業監測器名稱，LM-A 已改為通用措辭（只改註解）。
 
 #### LM-A — 契約與基礎（drop 1 = 凍結 §5.0 的檔案與最小實作）
 內容：v2 schema、migrate、validate 新規則、RC 與說明、registry 新 14 列、settings 新鍵、repo v4（drills store、讀時遷移、背景回寫）、
@@ -474,7 +476,7 @@ build LAZY 清單、check_tokens 新規則（JS hex）、screenshot_matrix 擴�
 3. LM-A 整合 commit：移除過渡別名、`LAZY_FILES` 最終清單、`check_tokens --strict` 的 JS hex 規則從 WARN 改 FAIL。
 4. **fresh-context 驗收 agent**（實作者不自驗）跑：
    - `RUN_BROWSER_E2E=1 bash scripts/verify.sh` → 最後一行 `all stages passed`。
-   - `node tests/e2e/screenshot_matrix.mjs --screens home,venue,import,shot,shot:tiles,shot:side,shot:top,shot:3d,shot:video,history,stats,gapping,drills,drill,drill:result,diag,settings,about,setup,live --json /tmp/m.json`
+   - `node tests/e2e/screenshot_matrix.mjs --screens home,venue,import,shot,shot:tiles,shot:side,shot:top,shot:3d,shot:video,history,stats,gapping,drills,drills:setup,drill,drill:result,drill:active,diag,settings,about,setup,live --json /tmp/m.json`
      → 退出碼 0（**0 findings**；3 主題 × 2 語系 × 2 字級 × 2 寬度，setup／live 另含橫拍）。
    - 預算：`dist/precache-manifest.json` 的 `shell_bytes ≤ 1,000,000`、`precache_bytes ≤ 35,000,000`；`BUDGETS` 常數未被修改（`git diff --stat scripts/build.mjs` 中 `BUDGETS` 那行不變：`git diff -U0 scripts/build.mjs | grep -c 'BUDGETS = '` → `0`）。
    - `grep -rniE 'trackman' app/ dist/ | wc -l` → `0`。
@@ -524,7 +526,7 @@ build LAZY 清單、check_tokens 新規則（JS hex）、screenshot_matrix 擴�
 |---|---|---|
 | D1 | 全 app 預設主題是否改深色（新安裝） | 是；既有使用者設定不動；資料畫面在 auto 時一律深色 |
 | D2 | 是否允許跨機位借用（§1.4） | 預設關，先累積 face_on 資料後再開 |
-| D3 | hb 的 carry／side（以 hb 桿速 × smash 先驗為基礎、σ 8–13%）要不要顯示 | 顯示但標「低」；若擁有者覺得太像猜，改 null（只需改 registry 一格） |
+| D3 | hb 的 carry／side（以 hb 桿速 × smash 先驗為基礎、σ 8–13%；實作後量到 20–26%，RN §7）要不要顯示 | 顯示但標「低」；若擁有者覺得太像猜，改 null（只需改 registry 一格） |
 | D4 | 測驗預設題組的目標距離（40–120 碼 × 2 輪）與分數係數 k = 0.25 | 先用預設，用一週後調 |
 | D5 | 落地草況預設「一般」 | 依練習場（墊子打出去的落點多為硬地）可能要改「硬」 |
 | D6 | 是否接受 v2 備份無法被舊版讀取 | 接受（目前只有擁有者一人使用） |

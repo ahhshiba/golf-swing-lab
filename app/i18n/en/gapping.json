@@ -1,0 +1,25 @@
+{
+  "_context": "LM-F gapping screen (LAUNCH-MONITOR-SPEC 3.8). Lazy namespace.",
+  "intro": "How far each club carries, from the face-on shots. The shaded band shows the middle 80 % of carries (drawn from 3 shots); the dot is the median.",
+  "include_hb": "Include high-behind shots (low confidence)",
+  "include_hb_hint": "Adds their carry, worked out from club speed only; shown as ▲",
+  "est": "◐ estimated",
+  "est_low": "◐ estimated, partly low",
+  "range": "middle 80 % {lo} – {hi}",
+  "total": "with roll {v}",
+  "n": {
+    "one": "{n} shot",
+    "other": "{n} shots"
+  },
+  "n_hb": "{n} from high behind",
+  "gap": "{v} more than the next club",
+  "flag.small_sample": "Too few shots",
+  "flag.gap_small": "Gap to the next club is small",
+  "flag.gap_large": "Gap to the next club is large",
+  "legend": "Gaps under {min} or over {max} are marked (a rule of thumb you can change in Settings).",
+  "csv": "Save as a CSV spreadsheet",
+  "empty.title": "No carry numbers yet",
+  "empty.body": "Film shots face on at 240 fps to build your distance table.",
+  "axis": "Carry ({unit})",
+  "median_ci": "median ±{v}"
+}

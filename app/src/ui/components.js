@@ -10,6 +10,12 @@
 //   segmented({ options:[[v,label]], value, onChange, label, testid }) -> <div role=radiogroup>; .value get/set
 //   switchRow({ label, checked, onChange, testid, hint }) -> <div.switch-row>; .checked get/set
 //   metricTile({ metric, size:'hero'|'compact', units, id, label }) -> <div.metric-tile>
+//   dataTile({ metric, id, units, estimatedBadge, label, onClick, testid }) -> <div|button.data-tile data-metric>
+//            LAUNCH-MONITOR-SPEC §3.2: caption label, big number (.mt-num, --t-metric, tabular), unit, ± range, a
+//            vtag pill (◐ / ▲ + word) when estimated / low confidence (measured, null: words for screen readers),
+//            a model-inferred number says estimatedBadge (default t('tiles.estimated_badge')), '—' + the first
+//            reason's short text when null.
+//            A <button> when onClick is given (the detail sheet); isInferred(metric) says whether the badge shows
 //   validityTag(validity) -> <span.vtag>   (● valid, ◐ estimated, ▲ low confidence, — not measurable)
 //   statePill({ state:'ready'|'swinging'|'analysing'|'done'|'error', text, testid }) -> element with .update(state, text)
 //   notice({ variant:'info'|'caution'|'error', title, items, body, collapsible, testid }) -> <div.notice>
@@ -23,12 +29,22 @@
 //   icon(name, { label })
 //   toast.info(text, { action:{label,onClick}, testid, ms }) -> element    toast.error(text, { slot, testid }) -> element
 //   toast.hide()
-import { t as defaultT, fmtNum } from '../i18n/index.js';
+import { t as defaultT, fmtNum, has as hasKey } from '../i18n/index.js';
 import { fmtMetric } from '../i18n/units.js';
 import { icon as makeIcon } from './icons.js';
+import { RC } from '../contract/reason-codes.js';
 
 const NULL_VALIDITIES = new Set(['occluded', 'ambiguous', 'dropped', 'stale', 'not_observable', 'implausible', 'not_computed']);
 const VALIDITY_GLYPH = Object.freeze({ valid: '●', estimated: '◐', low_confidence: '▲', null: '—' });
+/** contract MODEL_ORIGINS + the codes that mark a number as inferred rather than tracked (LAUNCH-MONITOR-SPEC §2.3). */
+export const INFERRED_ORIGINS = Object.freeze(['dplane', 'spin_model', 'flight_model', 'prior']);
+export const INFERRED_CODES = Object.freeze([RC.DPLANE_MODEL, RC.SPIN_MODELLED, RC.FLIGHT_MODELLED, RC.ROLL_MODELLED,
+  RC.SMASH_ASSUMED, RC.LAUNCH_V_ASSUMED, RC.SPIN_LOFT_ASSUMED, RC.CROSS_VIEW_PRIOR]);
+/** A number that comes from a model or a prior (the tile shows the 'estimated' word next to ◐ / ▲). */
+export function isInferred(metric) {
+  if (!metric || typeof metric.value !== 'number') return false;
+  return INFERRED_ORIGINS.includes(metric.value_origin) || (metric.reason_codes ?? []).some((c) => INFERRED_CODES.includes(c));
+}
 const STATE_GLYPH = Object.freeze({ ready: '✓', swinging: '●', analysing: '◌', done: '✓', error: '✕' });
 const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -176,6 +192,39 @@ export function createComponents(doc = globalThis.document, { t = defaultT, time
       f.ci ? h('div', { class: 'mt-ci', text: `± ${f.ci}` }) : null,
     );
     return tile;
+  }
+
+  // ---------------------------------------------------------------- DataTile (LAUNCH-MONITOR-SPEC §3.2)
+  function dataTile({ metric, id, units, estimatedBadge, label, onClick, testid: tid } = {}) {
+    const mid = id ?? metric?.id ?? null;
+    const f = fmtMetric(metric ?? null, units, { id: mid });
+    const isNull = f.value === '—';
+    const inferred = isInferred(metric);
+    const v = metric?.validity ?? 'not_computed';
+    const kind = validityKind(v);
+    const tile = h(onClick ? 'button' : 'div', {
+      class: `data-tile${isNull ? ' is-null' : ''}${inferred ? ' is-inferred' : ''}`, 'data-metric': mid, 'data-validity': v,
+      type: onClick ? 'button' : null,
+    });
+    const code = isNull ? (metric?.reason_codes ?? [])[0] : null;
+    // estimated / low confidence: a readable pill (glyph + word, as the vtag pills elsewhere); measured and null: words
+    // for screen readers only (the number or its — already says it)
+    const vtext = t(`validity.${kind === 'null' ? (NULL_VALIDITIES.has(v) ? v : 'not_measurable') : kind}`);
+    const badge = estimatedBadge ?? t('tiles.estimated_badge');
+    const estIn = inferred && kind === 'estimated';
+    put(tile,
+      h('span', { class: 'dt-label', text: label ?? (mid ? t(`metric.${mid}.label`) : '') }),
+      h('span', { class: 'dt-value' }, h('span', { class: 'mt-num', text: f.value }), f.unit && !isNull ? h('span', { class: 'mt-unit', text: f.unit }) : null),
+      f.ci ? h('span', { class: 'mt-ci', text: `± ${f.ci}` }) : null,
+      kind === 'estimated' || kind === 'low_confidence'
+        ? h('span', { class: `dt-mark vtag vtag-${kind === 'estimated' ? 'est' : 'low'}` }, h('span', { class: 'vtag-glyph', 'aria-hidden': 'true', text: VALIDITY_GLYPH[kind] }),
+          h('span', estIn ? { class: 'dt-est', text: badge } : { text: vtext }))
+        : h('span', { class: 'dt-mark visually-hidden', text: vtext }),
+      inferred && !estIn ? h('span', { class: 'dt-est', text: badge }) : null,
+      code && hasKey(`reason.${code}.short`) ? h('span', { class: 'dt-reason', text: t(`reason.${code}.short`) }) : null,
+    );
+    if (onClick) tile.addEventListener('click', (e) => onClick(e, mid));
+    return testid(tile, tid);
   }
 
   // ---------------------------------------------------------------- StatePill
@@ -402,7 +451,7 @@ export function createComponents(doc = globalThis.document, { t = defaultT, time
   };
 
   return {
-    doc, h, icon, button, listRow, segmented, chipRow, switchRow, validityTag, metricTile, statePill, notice, emptyState,
+    doc, h, icon, button, listRow, segmented, chipRow, switchRow, validityTag, metricTile, dataTile, statePill, notice, emptyState,
     sheet, confirmSheet, filePicker, progressSteps, screenHeader, toast, fmtNum,
   };
 }
@@ -420,6 +469,7 @@ export const chipRow = (o) => C().chipRow(o);
 export const switchRow = (o) => C().switchRow(o);
 export const validityTag = (v) => C().validityTag(v);
 export const metricTile = (o) => C().metricTile(o);
+export const dataTile = (o) => C().dataTile(o);
 export const statePill = (o) => C().statePill(o);
 export const notice = (o) => C().notice(o);
 export const emptyState = (o) => C().emptyState(o);

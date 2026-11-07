@@ -11,5 +11,6 @@
   "deg": "°",
   "pct": "%",
   "ratio": "",
-  "ftin": "ft/in"
+  "ftin": "ft/in",
+  "rpm": "rpm"
 }

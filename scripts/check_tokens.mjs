@@ -12,6 +12,10 @@
 // JavaScript (app/src/**/*.js, comments ignored):
 //   inline style      no `style="…"` markup strings and no setAttribute('style', …) / h(…, { style: '…' }) strings —
 //                     CSP style-src 'self' blocks them; use classes or CSSOM (el.style.x = …)
+//   js-hex-colour     (LAUNCH-MONITOR-SPEC §4.2) no hex colour string literal ('#rgb', '#rrggbb', '#rrggbbaa') in
+//                     app/src/viz/** and app/src/ui/** — Canvas colours come from viz/palette.js vizPalette(el), which
+//                     reads the --viz-* tokens; the setup / magnifier video overlays read --overlay-* (ui/magnifier.js
+//                     overlayColour). FAIL since the LM-A integration commit (JS_HEX_FAILS = true, §5.3 step 3).
 // Scope: findings in A's files (tokens.css, app.css, A's JS) FAIL; findings in a package's screen CSS / JS are WARN
 // until the integration switch --strict, when every finding FAILS (§8.7).
 // Exit code = number of FAIL findings (capped at 255); 64 on usage errors.
@@ -87,6 +91,19 @@ export function lintCss(src, { isTokens = false } = {}) {
   return out;
 }
 
+/** LAUNCH-MONITOR-SPEC §5.3 step 3 (integration): js-hex-colour findings FAIL like the others. */
+export const JS_HEX_FAILS = true;
+const JS_HEX_SCOPE = /^src\/(viz|ui)\//;
+
+/** JS findings: hex colour string literals (scope: viz/**, ui/**; the caller decides). */
+export function lintJsHex(src) {
+  let code;
+  try { code = stripJsComments(src); } catch (_) { code = src; }
+  const out = [];
+  for (const m of code.matchAll(/(['"`])#([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\1/g)) out.push({ rule: 'js-hex-colour', line: lineAt(code, m.index), text: m[0] });
+  return out;
+}
+
 /** JS findings: inline style strings (CSP style-src 'self'). */
 export function lintJs(src) {
   let code;
@@ -109,7 +126,9 @@ export function checkTokens({ strict = false } = {}) {
   const jsFiles = walk(path.join(APP, 'src'), '.js').map((f) => `src/${f}`);
   for (const rel of jsFiles) {
     const own = ownerOfFile(rel) === 'foundation';
-    for (const f of lintJs(fs.readFileSync(path.join(APP, rel), 'utf8'))) findings.push({ ...f, file: `app/${rel}`, level: strict || own ? 'FAIL' : 'WARN' });
+    const src = fs.readFileSync(path.join(APP, rel), 'utf8');
+    for (const f of lintJs(src)) findings.push({ ...f, file: `app/${rel}`, level: strict || own ? 'FAIL' : 'WARN' });
+    if (JS_HEX_SCOPE.test(rel)) for (const f of lintJsHex(src)) findings.push({ ...f, file: `app/${rel}`, level: JS_HEX_FAILS ? 'FAIL' : 'WARN' });
   }
   return { findings, files: cssFiles.length + jsFiles.length };
 }

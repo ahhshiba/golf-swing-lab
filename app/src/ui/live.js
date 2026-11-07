@@ -174,7 +174,7 @@ export function mountLive(root, app) {
         onset = await app.deps.onset.startOnsetDetector(m.audioCtx, m.stream, { onOnset: (tt, level_db) => loop?.handleOnset(tt, level_db), toMediaTime: (ms) => tap?.mediaTimeAt(ms) ?? null });
       }
       const club = { type: st.club_type, length_m: st.club_length_m, lie: cur.lie ?? st.lie, tee_lift_m: cur.venue?.tee_lift_m ?? null, tee_lift_source: Number.isFinite(cur.venue?.tee_lift_m) ? 'measured' : 'assumed' };
-      clipOptions = { view: cur.view ?? app.store.get().view, calibration: cur.calibration ?? null, club, handedness: st.handedness, venue: cur.venue ?? null, pose_model: 'full', warnings: app.controller.warnings() };
+      clipOptions = { view: cur.view ?? app.store.get().view, calibration: cur.calibration ?? null, club, handedness: st.handedness, venue: cur.venue ?? null, pose_model: 'full', warnings: app.controller.warnings(), lm: { ground: st.lm?.ground } };
       app.record?.('live.next_club', club.type);
       let jobAt = 0;
       loop = mod.createLiveLoop({

@@ -10,6 +10,10 @@ import {
   builtinShotValidator, normalizeValidation, resolveDefaultValidator, encodeTyped, decodeTyped,
 } from '../../app/src/store/export.js';
 import { METRIC_IDS } from '../../app/src/store/metric-ids.js';
+import { migrateShot } from '../../app/src/contract/migrate.js';
+
+// exportJSON writes golf-shot/2 (LAUNCH-MONITOR-SPEC §2.1): a stored golf-shot/1 comes back migrated
+const asV2 = (dump) => ({ ...dump, shots: dump.shots.map((x) => migrateShot(x).shot) });
 
 // every store of the current schema empty (stores added by later schema versions, e.g. trash, included)
 const ALL_EMPTY = Object.freeze(Object.fromEntries(STORE_NAMES.map((n) => [n, 0])));
@@ -65,12 +69,12 @@ test('export -> clear -> import round trip deep-equals (4 shots, 2 presets, 1 ve
   const res = await importJSON(repo, file, { validate: accept });
   assert.equal(res.ok, true);
   assert.deepEqual(res.total, { added: 9, updated: 0, kept: 0 }); // 1 venue + 2 presets + 2 sessions + 4 shots
-  assert.deepStrictEqual(await dumpRepo(repo), before);
+  assert.deepStrictEqual(await dumpRepo(repo), asV2(before));
 
   // importing the same file again changes nothing
   const again = await importJSON(repo, file, { validate: accept });
   assert.deepEqual(again.total, { added: 0, updated: 0, kept: 9 });
-  assert.deepStrictEqual(await dumpRepo(repo), before);
+  assert.deepStrictEqual(await dumpRepo(repo), asV2(before));
 });
 
 test('export header: format, exported_at, app_version; poses and clips only on request', async () => {
@@ -105,7 +109,7 @@ test('filtered export carries the parents of the exported shots and nothing else
   const fresh = await openMem();
   const res = await importJSON(fresh, asFile(out), { validate: accept });
   assert.equal(res.total.added, 2 + 1 + 1 + 1);
-  assert.deepEqual(await fresh.shots.list(), ds.shots.filter((s) => s.preset_id === 'preset-B'));
+  assert.deepEqual(await fresh.shots.list(), ds.shots.filter((s) => s.preset_id === 'preset-B').map((x) => migrateShot(x).shot));
   await assert.rejects(exportJSON(repo, { presetId: 'typo' }), (e) => e.code === 'BAD_QUERY' && /presetId/.test(e.message));
   // club and date filters
   assert.deepEqual((await exportJSON(repo, { club_type: 'driver' })).shots.map((s) => s.shot_id), ['shot-2']);
@@ -345,6 +349,9 @@ const EXPECTED_METRIC_IDS = [
   'spine_forward_tilt_deg', 'spine_side_tilt_deg', 'shoulder_turn_deg', 'hip_turn_deg', 'x_factor_deg',
   'hand_plane_dev_m', 'top_shaft_angle_deg', 'weight_shift_pct', 'early_extension_m', 'club_speed_mps',
   'club_path_deg', 'ball_speed_mps', 'launch_v_deg', 'launch_h_deg', 'carry_m', 'smash_factor',
+  // golf-shot/2 (LAUNCH-MONITOR-SPEC §1.2), appended in LM-A drop 1
+  'attack_angle_deg', 'dynamic_loft_deg', 'face_angle_deg', 'face_to_path_deg', 'spin_loft_deg', 'spin_rate_rpm',
+  'spin_axis_deg', 'total_m', 'carry_side_m', 'total_side_m', 'curve_m', 'apex_m', 'landing_angle_deg', 'hang_time_s',
 ];
 
 test('metric ids are exactly the ids of docs/interfaces.md section 9', () => {
@@ -364,9 +371,10 @@ test('CSV columns are exact and stable', () => {
   for (const id of EXPECTED_METRIC_IDS) expected.push(id, `${id}_lo`, `${id}_hi`, `${id}_validity`);
   assert.deepEqual([...CSV_FIXED_COLUMNS], expected.slice(0, 7));
   assert.deepEqual([...CSV_COLUMNS], expected);
-  assert.equal(CSV_COLUMNS.length, 7 + 22 * 4);
-  assert.equal(CSV_COLUMNS.length, 95);
-  assert.equal(CSV_COLUMNS[CSV_COLUMNS.length - 1], 'smash_factor_validity'); // nothing after the last metric column
+  assert.equal(CSV_COLUMNS.length, 7 + 36 * 4);
+  assert.equal(CSV_COLUMNS.length, 151);
+  assert.equal(CSV_COLUMNS[94], 'smash_factor_validity'); // the golf-shot/1 columns keep their positions
+  assert.equal(CSV_COLUMNS[CSV_COLUMNS.length - 1], 'hang_time_s_validity'); // nothing after the last metric column
   assert.ok(!CSV_COLUMNS.includes('note'), 'notes are not CSV columns (they travel in the JSON export)');
   assert.equal(new Set(CSV_COLUMNS).size, CSV_COLUMNS.length);
   assert.ok(Object.isFrozen(CSV_COLUMNS));

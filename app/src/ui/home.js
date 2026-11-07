@@ -57,6 +57,8 @@ export function mountHome(root, app) {
         const shots = (await app.repo.shots.list({ index: 'session_id', query: prev.session_id })).filter((s) => !s.deleted);
         if (shots.length) last = { session: prev, shots: shots.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))) };
       }
+      // a drill left in progress (repo.drills) becomes app.drill again after a reload (LAUNCH-MONITOR-SPEC §3.5)
+      if (!app.drill?.current() && app.repo.drills) app.drill?.set((await app.repo.drills.list()).filter((d) => d.status === 'active').sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0]);
       current = sess ? (await app.repo.shots.list({ index: 'session_id', query: sess.session_id })).length : 0;
     } catch (e) {
       app.errors?.report?.(e, { where: 'home.load', silent: true });
@@ -145,6 +147,7 @@ export function mountHome(root, app) {
       kids.push(h('div.home-cta', {}, start));
     }
 
+    kids.push(h('div.list-group', {}, drillsRow()));
     if (last) kids.push(lastCard());
     kids.push(h('h2.section-title', t('home.more')));
     kids.push(h('div.list-group.home-more', {},
@@ -152,6 +155,13 @@ export function mountHome(root, app) {
       listRow({ icon: 'ruler', title: t('home.more.venue'), testid: 'nav-venue', onClick: () => app.nav.go('venue') })));
     if (!app.repo) kids.push(notice({ variant: 'caution', title: t('home.no_repo.title'), body: t('home.no_repo.body'), testid: 'home-no-repo' }));
     clear(root, ...kids);
+  }
+
+  function drillsRow() {
+    // 練習模式 (LAUNCH-MONITOR-SPEC §3.1, §3.5): the drills screen; a drill in progress shows its count
+    const d = app.drill?.current();
+    const done = d?.slots?.filter((x) => x.shot_id).length;
+    return listRow({ icon: 'target', title: t('home.drills'), subtitle: d ? t('home.drills_resume', { done, total: d.slots.length }) : t('home.drills_hint'), testid: 'home-drills', onClick: () => app.nav.go('drills') });
   }
 
   function lastCard() {

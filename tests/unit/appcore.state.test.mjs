@@ -111,7 +111,7 @@ function mem(init = {}) {
 test('settings v2: defaults (§10 units), v1 migration keeps v1, nested fields merge and normalise', () => {
   const fresh = loadSettings(mem(), { languages: ['zh-TW'] });
   assert.equal(fresh.locale, 'auto');
-  assert.equal(fresh.theme, 'auto');
+  assert.equal(fresh.theme, 'dark', 'LAUNCH-MONITOR-SPEC D1: a new install starts dark');
   assert.deepEqual(fresh.units, { distance: 'yd', speed: 'mph', body: 'cm', clubLength: 'in', height: 'cm' });
   assert.deepEqual(fresh.onboarding, { done_v: 0 });
   assert.deepEqual(fresh.live, { metrics: ['tempo_ratio', 'club_speed_mps', 'carry_m'], voice: true });
@@ -122,9 +122,12 @@ test('settings v2: defaults (§10 units), v1 migration keeps v1, nested fields m
   const st = mem({ 'gsl-settings-v1': JSON.stringify(v1) });
   const s = loadSettings(st, { languages: ['zh-TW'] });
   for (const [k, v] of Object.entries(v1)) assert.equal(s[k], v, k);
+  assert.equal(s.theme, 'auto', 'an existing (v1) user keeps the automatic theme (D1 is for new installs only)');
   assert.ok(st.map.has(SETTINGS_KEY), 'migrated record written');
   assert.equal(st.map.get('gsl-settings-v1'), JSON.stringify(v1), 'v1 kept for a downgrade');
-  assert.deepEqual(migrateV1({ ...v1, junk: 1 }), v1);
+  assert.deepEqual(migrateV1({ ...v1, junk: 1 }), { theme: 'auto', ...v1 });
+  // an existing v2 record keeps its theme
+  assert.equal(loadSettings(mem({ [SETTINGS_KEY]: JSON.stringify({ theme: 'auto' }) })).theme, 'auto');
   const st2 = mem();
   saveSettings({ units: { distance: 'm' }, live: { voice: false }, theme: 'sun', locale: 'en' }, st2);
   const s2 = loadSettings(st2, { languages: ['zh-TW'] });
@@ -142,6 +145,43 @@ test('settings v2: defaults (§10 units), v1 migration keeps v1, nested fields m
   assert.equal(loadSettings(broken).club_type, '7i');
   const throwing = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
   assert.equal(saveSettings({ dev: true }, throwing).dev, true, 'private mode keeps the value in memory');
+});
+
+test('settings.lm (LAUNCH-MONITOR-SPEC §3.4, §3.9): defaults, normalisation, one-level merge, tile defaults per view', async () => {
+  const { LM_TILE_DEFAULTS, tileDefaults, LM_GROUNDS, LM_TILE_MAX } = await import('../../app/src/session/settings.js');
+  const { METRIC_IDS } = await import('../../app/src/contract/enums.js');
+  const { GROUNDS } = await import('../../app/src/contract/enums.js');
+  const d = loadSettings(mem(), { languages: ['zh-TW'] }).lm;
+  assert.deepEqual(Object.keys(d), ['ground', 'crossView', 'tiles', 'tilePreset', 'gapMin', 'gapMax', 'excludeMishits']);
+  assert.equal(d.ground, 'normal'); // D5
+  assert.equal(d.crossView, false); // D2
+  assert.equal(d.tilePreset, 'auto');
+  assert.deepEqual(d.tiles, [...LM_TILE_DEFAULTS.face_on]);
+  assert.ok(Math.abs(d.gapMin - 8 * 0.9144) < 1e-9 && Math.abs(d.gapMax - 20 * 0.9144) < 1e-9);
+  assert.equal(d.excludeMishits, true);
+  assert.deepEqual([...LM_GROUNDS], [...GROUNDS]);
+  for (const v of ['face_on', 'high_behind', 'dtl']) {
+    const t = tileDefaults(v);
+    assert.ok(t.length >= 1 && t.length <= LM_TILE_MAX && t.every((id) => METRIC_IDS.includes(id)), v);
+  }
+  assert.deepEqual(LM_TILE_DEFAULTS.face_on.slice(0, 3), ['carry_m', 'total_m', 'ball_speed_mps']);
+  assert.deepEqual(LM_TILE_DEFAULTS.high_behind.slice(0, 2), ['carry_side_m', 'curve_m']);
+  const st = mem();
+  saveSettings({ lm: { tiles: ['spin_rate_rpm', 'bogus', 'spin_rate_rpm', 'apex_m'], tilePreset: 'custom' } }, st);
+  saveSettings({ lm: { ground: 'firm', crossView: true } }, st);
+  const s = loadSettings(st).lm;
+  assert.deepEqual(s.tiles, ['spin_rate_rpm', 'apex_m'], 'unknown ids and duplicates dropped');
+  assert.equal(s.tilePreset, 'custom', 'one-level merge keeps the other lm fields');
+  assert.equal(s.ground, 'firm');
+  assert.equal(s.crossView, false, 'D2: cross-view priors are not implemented');
+  saveSettings({ lm: { tiles: [], ground: 'ice', gapMin: 30, gapMax: 10, tilePreset: 'x', excludeMishits: 'yes' } }, st);
+  const n = loadSettings(st).lm;
+  assert.deepEqual(n.tiles, [...LM_TILE_DEFAULTS.face_on]);
+  assert.equal(n.ground, 'normal');
+  assert.ok(n.gapMin < n.gapMax && Math.abs(n.gapMin - 8 * 0.9144) < 1e-9);
+  assert.equal(n.tilePreset, 'auto');
+  assert.equal(n.excludeMishits, true);
+  assert.equal(saveSettings({ lm: { tiles: METRIC_IDS } }, mem()).lm.tiles.length, LM_TILE_MAX);
 });
 
 test('CLUBS are [type, length_m] (name from t("club." + type)); clubLength()', () => {

@@ -10,7 +10,7 @@
   "note.mixed_presets": "A group mixes shots from different camera setups",
   "note.mixed_views": "A group mixes camera angles: its average means little",
   "note.mixed_clubs": "A group mixes clubs: its average means little",
-  "note.small_sample": "One group has fewer than 2 shots: you can see the difference but not whether it is luck",
+  "note.small_sample": "One group has fewer than {min} shots: you can see the difference but not whether it is luck",
   "note.other": "Something about this comparison needs care",
   "lines_title": "Main differences",
   "dir.higher": "B is {amount} higher",
@@ -27,5 +27,6 @@
   "col.delta": "B − A",
   "mean_n": "{v} ({n} shots)",
   "star_note": "* means the difference is outside the 95 % margin of error.",
-  "how": "“Usual variation” uses each shot’s margin of error (or the spread within a group) at {n} % confidence."
+  "how": "“Usual variation” uses each shot’s margin of error (or the spread within a group) at {n} % confidence.",
+  "note.model_mismatch": "The groups were worked out with different versions of the estimation model: a difference may come from the model, not from you"
 }

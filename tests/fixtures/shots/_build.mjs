@@ -301,7 +301,7 @@ addBad('bad_unknown_metric_id', 'valid_face_on_240', 'metrics.carry_yd: unknown 
   s.metrics.carry_yd = clone(s.metrics.carry_m);
 });
 addBad('bad_wrong_schema_version', 'valid_face_on_240', 'schema must be', (s) => {
-  s.schema = 'golf-shot/2';
+  s.schema = 'golf-shot/9'; // 'golf-shot/2' exists since LAUNCH-MONITOR-SPEC (2026-11-06)
 });
 addBad('bad_metric_unit_mismatch', 'valid_face_on_240', 'for this metric', (s) => {
   s.metrics.carry_m.unit = 'yd';

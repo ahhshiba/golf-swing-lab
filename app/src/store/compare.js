@@ -7,9 +7,10 @@
 //     preset id is missing on either side (a missing id cannot prove the same setup). For sets it is present unless
 //     both sets consist of exactly one and the same preset.
 //   notes: [{ kind: 'view_mismatch' | 'club_mismatch' | 'mixed_views' | 'mixed_clubs' | 'mixed_presets' | 'empty_set'
-//             | 'small_sample', params }] — codes only (PRODUCT-SPEC §3.4); the UI renders t('compare.note.<kind>', …).
+//             | 'small_sample' | 'model_mismatch', params }] — codes only (PRODUCT-SPEC §3.4); the UI renders t('compare.note.<kind>', …).
 //             params: view_mismatch { a, b } (view ids), club_mismatch { a, b } (club types, null = unknown),
-//             empty_set { side: 'A' | 'B' }, the others {}.
+//             empty_set { side: 'A' | 'B' }, small_sample { min }, the others {}. model_mismatch (sets): the shots
+//             were derived with more than one algorithms.lm version (a missing one counts as 'none').
 //   like_for_like: true only when there are no warnings and no notes.
 //   metrics: { [metric id]: entry } in the order of metric-ids.js (ids unknown to that list follow, sorted).
 //     shots entry: { id, unit, a, b, delta, delta_ci95, significant, status }
@@ -192,6 +193,7 @@ function describeSet(list) {
     preset_ids: distinct(list, (s) => s.preset_id ?? null),
     views: distinct(list, (s) => s.capture?.view ?? null),
     club_types: distinct(list, (s) => s.club?.type ?? null),
+    lm: distinct(list, (s) => s.algorithms?.lm?.version ?? 'none'),
   };
 }
 
@@ -219,12 +221,13 @@ export function compareSets(listA, listB) {
     } else if (da.club_types[0] !== db.club_types[0]) {
       notes.push({ kind: 'club_mismatch', params: { a: da.club_types[0], b: db.club_types[0] } });
     }
+    if (new Set([...da.lm, ...db.lm]).size > 1) notes.push({ kind: 'model_mismatch', params: {} });
   }
   const metrics = {};
   if (da.n > 0 && db.n > 0) {
     for (const id of metricIds([...listA, ...listB])) metrics[id] = diffSets(id, summarize(listA, id), summarize(listB, id));
     if (Object.values(metrics).some((m) => m.status === 'compared' && m.delta_ci95 === null)) {
-      notes.push({ kind: 'small_sample', params: {} });
+      notes.push({ kind: 'small_sample', params: { min: 2 } });
     }
   }
   return { kind: 'sets', a: da, b: db, like_for_like: warnings.length === 0 && notes.length === 0, warnings, notes, metrics };

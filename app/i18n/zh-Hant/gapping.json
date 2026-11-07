@@ -1,0 +1,24 @@
+{
+  "_context": "LM-F gapping screen (LAUNCH-MONITOR-SPEC 3.8). Lazy namespace.",
+  "intro": "各球桿的飛行距離，來自正面拍攝的球。色帶是中間 80% 的距離（至少 3 球才畫），圓點是中位數。",
+  "include_hb": "含高斜角後方的球（低可信度）",
+  "include_hb_hint": "併入它們只靠桿速推估的距離，以 ▲ 標示",
+  "est": "◐ 估計",
+  "est_low": "◐ 估計，部分低可信度",
+  "range": "中間 80% {lo} – {hi}",
+  "total": "含滾動 {v}",
+  "n": {
+    "other": "{n} 球"
+  },
+  "n_hb": "其中 {n} 球來自高斜角後方",
+  "gap": "比下一支遠 {v}",
+  "flag.small_sample": "樣本不足",
+  "flag.gap_small": "和下一支的間距太小",
+  "flag.gap_large": "和下一支的間距太大",
+  "legend": "間距小於 {min} 或大於 {max} 會標記（經驗值，可在設定調整）。",
+  "csv": "存成 CSV 試算表",
+  "empty.title": "還沒有飛行距離",
+  "empty.body": "用 240 fps 從正面拍攝，就能建立你的距離表。",
+  "axis": "飛行距離（{unit}）",
+  "median_ci": "中位數 ±{v}"
+}

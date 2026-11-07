@@ -286,3 +286,54 @@ test('diffSummary: significant differences first, codes only', async () => {
   for (const x of rows) assert.ok(!hasChinese(JSON.stringify(x)));
   assert.deepEqual(diffSummary(null), []);
 });
+
+// ------------------------------------------------------------------ LM-F (LAUNCH-MONITOR-SPEC §3.7, §5.2 acceptance 2)
+import { compareSessions } from '../../app/src/store/stats.js';
+import { gauss } from '../../app/src/geom/rng.js';
+
+/** n shots, carry ~ N(mu, sd) (seeded), carry sigma 3 m, one preset / view / club, algorithms.lm.version = lm. */
+function carrySet(prefix, n, mu, { sd = 3, lm = 'lm-1', preset = 'preset-A', seed = 1 } = {}) {
+  const rng = mulberry32(seed);
+  return Array.from({ length: n }, (_, i) => {
+    const s = makeShot({ id: `${prefix}${i}`, seed: seed * 100 + i, preset_id: preset });
+    const c = { value: mu + gauss(rng, 0, sd), unit: 'm', ci95: null, sigma: 3, validity: 'estimated', value_origin: 'ballistics', measured: false, reason_codes: [] };
+    return { ...s, schema: 'golf-shot/2', algorithms: { lm: { version: lm, sha256: 'x' } }, metrics: { ...s.metrics, carry_m: c } };
+  });
+}
+
+test('compareSessions: different algorithms.lm versions → note model_mismatch and every significant false', () => {
+  const A = carrySet('a', 20, 150, { lm: 'lm-1', seed: 1 });
+  const B = carrySet('b', 20, 160, { lm: 'lm-2', seed: 2 });
+  const r = compareSessions(A, B, ['carry_m', 'tempo_ratio', 'club_speed_mps']);
+  assert.ok(r.notes.some((n) => n.kind === 'model_mismatch'), JSON.stringify(r.notes));
+  assert.equal(r.like_for_like, false);
+  assert.deepEqual(Object.keys(r.metrics).sort(), ['carry_m', 'club_speed_mps', 'tempo_ratio']);
+  for (const m of Object.values(r.metrics)) assert.equal(m.significant, false, m.id);
+  assert.equal(r.metrics.carry_m.ci_excludes_zero, true, 'the raw interval still excludes 0; only the verdict is withheld');
+  // compareSets carries the same note
+  assert.ok(compareSets(A, B).notes.some((n) => n.kind === 'model_mismatch'));
+});
+
+test('compareSessions: same version and preset, 10 m apart, n = 20, σ = 3 m → significant', () => {
+  const A = carrySet('a', 20, 150, { seed: 3 });
+  const B = carrySet('b', 20, 160, { seed: 4 });
+  const r = compareSessions(A, B, ['carry_m']);
+  assert.deepEqual(r.warnings, []);
+  assert.deepEqual(r.notes, []);
+  assert.equal(r.like_for_like, true);
+  const m = r.metrics.carry_m;
+  assert.equal(m.significant, true);
+  assert.ok(m.delta > 7 && m.delta < 13, `${m.delta}`);
+  assert.ok(m.delta_ci95[0] > 0);
+});
+
+test('compareSessions: n < 5 → small_sample note, not significant; different presets → PRESET_MISMATCH, not significant', () => {
+  const r = compareSessions(carrySet('a', 4, 150, { seed: 5 }), carrySet('b', 4, 170, { seed: 6 }), ['carry_m']);
+  assert.ok(r.notes.some((n) => n.kind === 'small_sample' && n.params.min === 5));
+  assert.equal(r.metrics.carry_m.significant, false);
+  const p = compareSessions(carrySet('a', 20, 150, { seed: 7 }), carrySet('b', 20, 170, { preset: 'preset-B', seed: 8 }), ['carry_m']);
+  assert.ok(p.warnings.includes(RC.PRESET_MISMATCH));
+  assert.equal(p.metrics.carry_m.significant, false);
+  // v1 shots (no algorithms.lm) on both sides: no model note
+  assert.ok(!compareSets([makeShot({ id: 'x' })], [makeShot({ id: 'y' })]).notes.some((n) => n.kind === 'model_mismatch'));
+});

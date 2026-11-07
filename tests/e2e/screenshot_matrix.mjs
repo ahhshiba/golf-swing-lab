@@ -4,12 +4,18 @@
 //   node tests/e2e/screenshot_matrix.mjs [--dist DIR] [--out DIR] [--port N] [--screens a,b] [--locales zh-Hant,en]
 //                                        [--themes light,dark,sun] [--scales 1,2] [--json FILE]
 //
-// Screens: the 10 of the shell (home, venue, setup, live, import, shot, history, diag, settings, about).
+// Screens (default = all): the 10 of the shell (home, venue, setup, live, import, shot, history, diag, settings, about),
+// the launch-monitor screens (drills, drill, stats, gapping) and the named states `<screen>:<state>` (LAUNCH-MONITOR-SPEC
+// §5.0-13; shot:tiles|side|top|3d|video, drills:setup (the drill setup sheet), drill:result|active): the screen is shown, then the state its module registered
+// with app.e2e.registerState(screen, state, async (app) => …) is run; an unregistered state is a 'state' finding.
+// Files of a state are named <screen>~<state>-….png. History is seeded with tests/fixtures/shots/valid_*.json (v1) and
+// tests/fixtures/shots/v2/valid_*.json; the shot screen opens the v2 face_on shot (flight, tracks, the 14 new metrics).
 // Widths: 390×844 and 430×932 for every screen; setup and live also 844×390 landscape. Themes light / dark / sun,
 // locales zh-Hant / en (each a fresh browser context in that locale), text 100 % and 200 % (html font-size).
 // Every state is screenshotted (full page) into --out as <screen>-<w>x<h>-<theme>-<locale>-<scale>x.png and checked:
 //   hscroll      document scrollWidth ≤ clientWidth
-//   overlap      no two visible interactive controls intersect (> 2 px each way, neither contains the other): flow vs
+//   overlap      (while an aria-modal dialog is open only the controls inside it count: the page behind is not
+//                reachable) no two visible interactive controls intersect (> 2 px each way, neither contains the other): flow vs
 //                flow and fixed vs fixed at scroll 0; scrolled to the end, no flow control under a fixed bar or a stuck
 //                sticky element (content must be able to scroll clear of the tab bar and the pinned primary)
 //   truncation   no element with its own text has scrollWidth > clientWidth + 1 (scroll containers and form fields
@@ -36,7 +42,8 @@ const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0
 const DIST = path.resolve(opt('dist', process.env.GSL_E2E_DIST || path.join(ROOT, 'dist')));
 const OUT = path.resolve(opt('out', process.env.GSL_SHOTS_DIR || path.join(ROOT, 'tests', 'e2e', '.shots', 'matrix')));
 const PORT = Number(opt('port', process.env.GSL_E2E_PORT || 0));
-const SCREENS = opt('screens', 'home,venue,import,shot,history,diag,settings,about,setup,live').split(',');
+const ALL_SCREENS = 'home,venue,import,shot,shot:tiles,shot:side,shot:top,shot:3d,shot:video,history,stats,gapping,drills,drills:setup,drill,drill:result,drill:active,diag,settings,about,setup,live';
+const SCREENS = opt('screens', ALL_SCREENS).split(',');
 const LOCALES = opt('locales', 'zh-Hant,en').split(',');
 const THEMES = opt('themes', 'light,dark,sun').split(',');
 const SCALES = opt('scales', '1,2').split(',').map(Number);
@@ -90,7 +97,10 @@ function pageChecks([screen, locale, vp]) {
     return { left, top, right, bottom };
   };
   const label = (el) => `${d(el)} "${(el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 24)}"`;
-  const collect = () => [...document.querySelectorAll(CONTROLS)].filter((el) => visible(el) && !el.matches('.visually-hidden') && !el.closest('.visually-hidden'))
+  // an open modal dialog (components.js sheet: role=dialog aria-modal=true) makes the page behind it unreachable, so
+  // only its own controls are compared; overlaps inside the dialog are still findings
+  const modal = [...document.querySelectorAll('[aria-modal="true"]')].filter(visible).at(-1) ?? null;
+  const collect = () => [...(modal ?? document).querySelectorAll(CONTROLS)].filter((el) => visible(el) && !el.matches('.visually-hidden') && !el.closest('.visually-hidden'))
     .map((el) => ({ el, r: clipRect(el), layer: layer(el) })).filter((c) => c.r.right - c.r.left > 0.5 && c.r.bottom - c.r.top > 0.5);
   const overlaps = (list, pairOk, where) => {
     for (let i = 0; i < list.length; i++) {
@@ -244,11 +254,30 @@ async function main() {
   const server = await startServer(DIST, { port: PORT || undefined });
   const browser = await launch({}, { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const states = [];
+  const missingStates = [];
   const external = [];
   const pageErrors = [];
   const fixture = path.join(OUT, '_matrix_import.json');
   const shotsDir = path.join(ROOT, 'tests', 'fixtures', 'shots');
-  const shots = fs.readdirSync(shotsDir).filter((f) => /^valid_.*\.json$/.test(f)).map((f) => JSON.parse(fs.readFileSync(path.join(shotsDir, f), 'utf8')));
+  const readValid = (dir) => fs.readdirSync(dir).filter((f) => /^valid_.*\.json$/.test(f)).sort().map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+  const shots = [...readValid(shotsDir), ...readValid(path.join(shotsDir, 'v2'))];
+  // Gapping and Stats need a real spread: every fixture driver (and the 7-iron) carries the same 181 m / 139 m, so the
+  // P10–P90 band and the box plot whiskers would never render. These extra face-on shots (an older session, so the
+  // history order and the shot opened below do not change) only vary the carry; the code under test is untouched.
+  const fo = shots.find((x) => x.schema === 'golf-shot/2' && x.capture?.view === 'face_on' && x.flight && x.tracks && x.club?.type === 'driver');
+  const spread = (club, length, carries) => (fo ? carries.map((c, i) => {
+    const k = c / fo.metrics.carry_m.value;
+    const x = JSON.parse(JSON.stringify(fo));
+    Object.assign(x, { shot_id: `shot-mx-${club}-${i + 1}`, session_id: 'sess-mx-0001', created_at: `2026-11-03T10:0${i}:00.000+08:00`, starred: false });
+    x.club = { ...x.club, type: club, length_m: length };
+    x.metrics.carry_m = { ...x.metrics.carry_m, value: c, ci95: [c - 21, c + 21] };
+    x.metrics.total_m = { ...x.metrics.total_m, value: c + 20, ci95: [c - 2.5, c + 44.5] };
+    x.flight.samples = x.flight.samples.map((p) => [p[0], p[1] * k, p[2], p[3]]);
+    x.flight.landing = { ...x.flight.landing, x_m: c };
+    x.flight.rest = { ...x.flight.rest, x_m: c + 20 };
+    return x;
+  }) : []);
+  shots.push(...spread('driver', 1.17, [166, 172, 190, 197]), ...spread('7i', 0.94, [128, 134, 143, 150]));
   fs.writeFileSync(fixture, JSON.stringify({ format: 'golf-swing-lab-export/1', exported_at: '2026-11-04T00:00:00.000Z', app_version: '0.2.0', venues: [], presets: [], sessions: [], shots }));
   try {
     for (const locale of LOCALES) {
@@ -268,20 +297,37 @@ async function main() {
       await page.locator('[data-screen="history"]').waitFor({ state: 'visible' });
       await page.locator('[data-testid="history-import-input"]').setInputFiles(fixture);
       await until(page, (n) => document.querySelectorAll('[data-screen="history"] [data-testid="shot-row"]').length >= n, Math.min(shots.length, 1), 'history rows', 60000);
-      const shot = shots.find((s) => s.capture?.view === 'face_on') ?? shots[0];
-      const capture = async (screen, vps) => {
+      const shot = shots.find((s) => s.schema === 'golf-shot/2' && s.capture?.view === 'face_on' && s.flight && s.tracks) ?? shots[0];
+      const capture = async (screen, vps, state = null) => {
+        const tag = state ? `${screen}~${state}` : screen;
         for (const theme of THEMES) for (const scale of SCALES) for (const vp of vps) {
           await setState(page, theme, scale, vp);
           const r = await page.evaluate(pageChecks, [screen, locale, vp]);
-          const file = path.join(OUT, `${screen}-${vp.width}x${vp.height}-${theme}-${locale}-${scale}x.png`);
-          await page.screenshot({ path: file, fullPage: true });
-          states.push({ screen, locale, theme, scale, vp: `${vp.width}x${vp.height}`, file: path.basename(file), ...r });
+          const file = path.join(OUT, `${tag}-${vp.width}x${vp.height}-${theme}-${locale}-${scale}x.png`);
+          await page.screenshot({ path: file, fullPage: true, animations: 'disabled' });
+          states.push({ screen, state, locale, theme, scale, vp: `${vp.width}x${vp.height}`, file: path.basename(file), ...r });
         }
         await setState(page, 'light', 1, PORTRAIT[0]);
       };
-      for (const screen of SCREENS.filter((s) => s !== 'setup' && s !== 'live')) {
+      for (const entry of SCREENS.filter((s) => s !== 'setup' && s !== 'live')) {
+        const [screen, state = null] = entry.split(':');
         await go(page, screen, screen === 'shot' ? { shot } : {});
-        await capture(screen, PORTRAIT);
+        if (state) {
+          const ran = await page.evaluate(async ([sc, st]) => {
+            const app = globalThis.__GSL_E2E__.app;
+            if (!app.e2e?.has?.(sc, st)) return false;
+            await app.e2e.runState(sc, st, app);
+            return true;
+          }, [screen, state]);
+          if (!ran) { missingStates.push(`${locale}: no e2e state ${screen}:${state} registered (app.e2e.registerState)`); continue; }
+          await page.waitForTimeout(300);
+        }
+        await capture(screen, PORTRAIT, state);
+        // a state that opened a sheet (drills:setup) must not stay open over the next screen
+        if (await page.evaluate(() => Boolean(document.querySelector('[aria-modal="true"]')))) {
+          await page.keyboard.press('Escape');
+          await until(page, () => !document.querySelector('[aria-modal="true"]'), null, `${entry}: sheet closed`, 5000);
+        }
       }
       if (SCREENS.includes('setup') || SCREENS.includes('live')) {
         await go(page, 'home');
@@ -303,10 +349,11 @@ async function main() {
   }
   const byKind = {};
   for (const s of states) for (const f of s.findings) (byKind[f.kind] ??= []).push(`${s.file}: ${f.detail}`);
+  for (const m of missingStates) (byKind.state ??= []).push(m);
   const bad = states.filter((s) => s.findings.length);
   const summary = {
     states: states.length, screenshots: states.length, with_findings: bad.length,
-    checks: Object.fromEntries(['hscroll', 'overlap', 'obscured', 'truncation', 'word-break', 'spec-codes', 'cjk', 'hero'].map((k) => [k, (byKind[k] ?? []).length])),
+    checks: Object.fromEntries(['hscroll', 'overlap', 'obscured', 'truncation', 'word-break', 'spec-codes', 'cjk', 'hero', 'state'].map((k) => [k, (byKind[k] ?? []).length])),
     hero: { live: [...new Set(states.filter((s) => s.hero.live).flatMap((s) => s.hero.live))].sort((a, b) => a - b), shot: [...new Set(states.filter((s) => s.hero.shot).flatMap((s) => s.hero.shot))].sort((a, b) => a - b) },
     external_requests: [...new Set(external)], page_errors: pageErrors, out: OUT,
   };
@@ -316,7 +363,7 @@ async function main() {
   console.log(`  hero sizes px: live ${summary.hero.live.join(', ') || '—'} · shot ${summary.hero.shot.join(', ') || '—'}`);
   console.log(`  external requests: ${summary.external_requests.length}; page errors: ${pageErrors.length}`);
   for (const [k, list] of Object.entries(byKind)) for (const line of list.slice(0, 12)) console.log(`    ${k}: ${line}`);
-  const n = bad.length + (summary.external_requests.length ? 1 : 0) + (pageErrors.length ? 1 : 0);
+  const n = bad.length + missingStates.length + (summary.external_requests.length ? 1 : 0) + (pageErrors.length ? 1 : 0);
   process.exit(Math.min(255, n));
 }
 

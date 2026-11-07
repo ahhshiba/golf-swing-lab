@@ -76,6 +76,8 @@
 
 ## F2 角度×指標表（registry 照表實作、逐格測試；可＝valid、估＝estimated、低＝low_confidence、不可＝null＋原因碼）
 
+> 2026-11-06：發射監測器級擴充（golf-shot/2、14 個新 metric、high_behind 三格由不可改低）見 `docs/LAUNCH-MONITOR-SPEC.md`；本表保留為 golf-shot/1 的原始規格。
+
 | # | 指標 | 正面 face_on | 後方 dtl | 高斜角後方 high_behind | 最低 fps | 不可時原因碼 |
 |---|---|---|---|---|---|---|
 |1|上桿／下桿時間、tempo|可|可|可|30|—|

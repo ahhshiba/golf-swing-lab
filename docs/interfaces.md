@@ -197,6 +197,25 @@ exactly these keys:
 | 18 | `launch_h_deg` (+ = right of target for a right-hander) | deg |
 | 19 | `carry_m` | m |
 | 20 | `smash_factor` | ratio |
+| 21 | `attack_angle_deg` | deg |
+| 22 | `dynamic_loft_deg` | deg |
+| 23 | `face_angle_deg` | deg |
+| 24 | `face_to_path_deg` | deg |
+| 25 | `spin_loft_deg` | deg |
+| 26 | `spin_rate_rpm` | rpm |
+| 27 | `spin_axis_deg` | deg |
+| 28 | `total_m` | m |
+| 29 | `carry_side_m` | m |
+| 30 | `total_side_m` | m |
+| 31 | `curve_m` | m |
+| 32 | `apex_m` | m |
+| 33 | `landing_angle_deg` | deg |
+| 34 | `hang_time_s` | s |
+
+Rows 21–34 are golf-shot/2 (docs/LAUNCH-MONITOR-SPEC.md §1.2, §2; frozen interfaces in docs/LM-INTERFACES.md). A
+golf-shot/1 record has exactly the ids of rows 1–20; contract/migrate.js appends rows 21–34 as `not_computed` +
+`MIGRATED_V1`. RC added for golf-shot/2: `DPLANE_MODEL`, `SPIN_MODELLED`, `SPIN_LOFT_ASSUMED`, `FLIGHT_MODELLED`,
+`ROLL_MODELLED`, `SMASH_ASSUMED`, `LAUNCH_V_ASSUMED`, `CROSS_VIEW_PRIOR`, `MIGRATED_V1`.
 
 ### 9.x WP-A shell additions (2026-11-05)
 - `state.js`: `SUB_SCREENS`, `ALL_SCREENS`, `TABS`, `TABBAR_HIDDEN`, `tabOf(screen, prevTab)`, `nav.root(screen)`.

@@ -55,5 +55,9 @@
   "restore.error.bad_field": "Part of the backup file is damaged.",
   "restore.error.invalid": "{n} records in the backup are not valid.",
   "restore.error.too_big": "The file is too big (over 2 GB).",
-  "restore.error.nothing_written": "Nothing was changed."
+  "restore.error.nothing_written": "Nothing was changed.",
+  "seg.label": "View",
+  "seg.list": "Shots",
+  "seg.stats": "Stats",
+  "seg.gapping": "Gapping"
 }

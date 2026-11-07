@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { computeMetrics } from '../../app/src/metrics/compute.js';
-import { REGISTRY } from '../../app/src/metrics/registry.js';
+import { REGISTRY, nullCodeFor, minFpsFor } from '../../app/src/metrics/registry.js';
 import { detectEvents } from '../../app/src/events/rules.js';
 import { RC } from '../../app/src/contract/reason-codes.js';
 import { METRIC_IDS, NULL_VALIDITIES } from '../../app/src/contract/enums.js';
@@ -39,9 +39,10 @@ for (const fps of [60, 240]) {
         const cell = r.views[view];
         if (cell === 'not') {
           assert.equal(m[id].value, null, `${view} ${id}`);
-          assert.deepEqual(m[id].reason_codes, [r.nullCode], `${view} ${id}`);
+          // a row may name its 不可 code per view (registry nullCodes) -> nullCodeFor
+          assert.deepEqual(m[id].reason_codes, [nullCodeFor(id, view)], `${view} ${id}`);
           assert.ok(NULL_VALIDITIES.includes(m[id].validity));
-        } else if (fps < r.minFps) {
+        } else if (fps < minFpsFor(id, view)) {
           assert.equal(m[id].value, null);
           assert.deepEqual(m[id].reason_codes, [RC.FPS_TOO_LOW], `${view} ${id} @${fps}`);
         } else if (id === 'club_speed_mps' && view === 'face_on' && fps < 200) {
@@ -50,7 +51,8 @@ for (const fps of [60, 240]) {
           assert.ok(x.value === null ? x.reason_codes.length > 0 : x.validity === 'low_confidence', `${view} ${id}: ${JSON.stringify(x)}`);
           if (x.value !== null) assert.ok(x.ci95[1] - x.value >= 0.25 * x.value - 1e-9 && x.value - x.ci95[0] >= 0.25 * x.value - 1e-9);
         } else if (r.row >= 14) {
-          // the track-based cells need a ball / club-head track, which computeMetrics does not receive
+          // the track-based cells need a ball / club-head track, which computeMetrics does not receive (rows 21–34:
+          // physics/lm fills them in pipeline/assemble.js)
           assert.equal(m[id].value, null);
           assert.deepEqual(m[id].reason_codes, [RC.TRACK_TOO_SHORT], `${view} ${id}`);
           assert.equal(m[id].validity, 'not_computed');

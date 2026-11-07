@@ -1,5 +1,5 @@
 // Package C gates (results & data; PRODUCT-SPEC §8 WP-C acceptance). Chromium, 390×844, zh-TW unless noted.
-//   c-shot-hero     hero strip, collapsed "not measured" disclosure, no raw codes, carry in yd then m
+//   c-shot-hero     hero tiles (≥ 6 li, ≥ 44 px), collapsed "not measured" disclosure, no raw codes, carry in yd then m
 //   c-timeline      markers never overlap, arrow keys move a marker 1 frame, set-frame without drag, undo, leave-confirm
 //   c-labels        label rows ≤ 64 px, event names ≥ 3 em and on one line at 100 % and 200 % text
 //   c-import-batch  multiple input, 2 clips → 2 shots with ✓ per step, persistent error card, back-confirm, no-swing
@@ -101,8 +101,8 @@ async function shotHero(ctx) {
       await openShot(page, 'shot-fx-face-on-240');
       const r = await page.evaluate(() => {
         const s = document.querySelector('[data-screen="shot"]');
-        const hero = s.querySelector('[data-testid="shot-hero"]');
-        const tiles = [...hero.querySelectorAll(':scope > li')];
+        const hero = s.querySelector('ul[data-testid="shot-hero"]');
+        const tiles = [...hero.querySelectorAll(':scope > li[data-metric]')]; // not the trailing '+ Tiles' ghost tile
         const um = s.querySelector('[data-testid="shot-unmeasured"]');
         const nums = tiles.map((li) => parseFloat(getComputedStyle(li.querySelector('.mt-num')).fontSize));
         return {
@@ -111,9 +111,10 @@ async function shotHero(ctx) {
           text: s.innerText, carry: tiles.find((li) => li.dataset.metric === 'carry_m')?.innerText ?? '',
         };
       });
-      need(r.n === 3, `${locale}: shot-hero has ${r.n} tiles, want 3`);
-      need(r.bottoms.every((b) => b <= 844), `${locale}: hero tile bottoms ${r.bottoms} not all above the fold (844)`);
-      need(r.nums.every((x) => x >= 44), `${locale}: hero value font-size ${r.nums} < 44 px`);
+      // launch-monitor hero (LAUNCH-MONITOR-SPEC §3.2): li tiles in ul[data-testid=shot-hero], ≥ 6, ≥ 6 above the fold
+      need(r.n >= 6, `${locale}: shot-hero has ${r.n} tiles, want ≥ 6`);
+      need(r.bottoms.filter((b) => b <= 844).length >= 6, `${locale}: hero tile bottoms ${r.bottoms}: fewer than 6 above the fold (844)`);
+      need(r.nums.length === r.n && r.nums.every((x) => x >= 44), `${locale}: hero value font-size ${r.nums} < 44 px`);
       need(r.umOpen === false, `${locale}: shot-unmeasured is ${r.umOpen === null ? 'missing' : 'open'}; want a collapsed disclosure`);
       need(r.umRows > 0 && r.umSummary.includes(String(r.umRows)), `${locale}: disclosure summary "${r.umSummary}" does not state the count ${r.umRows}`);
       need(!/±\s*0[.,]0+\b/.test(r.text), `${locale}: "± 0.00" shown`);
@@ -135,7 +136,7 @@ async function shotHero(ctx) {
     } finally { await browser.close(); }
   }
   need(notes.length === 0, notes.join('\n'));
-  return '3 hero tiles above the fold (≥ 44 px), collapsed not-measured disclosure with count, no raw codes, carry yd → m, shared checks zh + en';
+  return '≥ 6 hero tiles above the fold (≥ 44 px), collapsed not-measured disclosure with count, no raw codes, carry yd → m, shared checks zh + en';
 }
 
 // ------------------------------------------------------------------ c-timeline

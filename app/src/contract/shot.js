@@ -1,4 +1,4 @@
-// Builders for a whole golf-shot/1 object (CAFCR F3, P6). Pure: no clock, no randomness, no mutation of inputs.
+// Builders for a whole golf-shot/2 object (CAFCR F3, P6). Pure: no clock, no randomness, no mutation of inputs.
 //
 //   newShot({ shot_id, session_id, created_at, app_version, algorithms, capture, calibration, club, handedness,
 //             events, venue_id?, preset_id?, quality?, metrics?, starred?, note? }) -> shot
@@ -12,7 +12,7 @@
 import { RC, REASON_CODES } from './reason-codes.js';
 import {
   SCHEMA_ID, METRIC_IDS, METRIC_UNITS, METRIC_DEFAULT_ORIGIN, SETUP_LEVEL_CODES, SHOT_REQUIRED_KEYS,
-  SHOT_OPTIONAL_KEYS, isAffectedBySetup,
+  SHOT_OPTIONAL_KEYS, isAffectedBySetup, LM_ALGORITHM_NONE,
 } from './enums.js';
 import { metricNull, downgrade } from './metric.js';
 import { ContractError, validateShot, formatErrors } from './validate.js';
@@ -51,7 +51,7 @@ function mergeDeep(target, src) {
   return clone(src);
 }
 
-/** All 22 metric ids as not_computed placeholders carrying NOT_IMPLEMENTED. */
+/** All 36 metric ids as not_computed placeholders carrying NOT_IMPLEMENTED. */
 export function emptyMetrics() {
   const out = {};
   for (const id of METRIC_IDS) {
@@ -65,9 +65,10 @@ function defaultQuality() {
 }
 
 /**
- * Assemble a shot. Fills schema, revision 0, starred false, note '', venue_id/preset_id null, a default quality
- * block and every metric id as a not_computed placeholder; `init.metrics` replaces placeholders by id (unknown ids
- * throw). Fields that cannot be defaulted honestly (shot_id, session_id, created_at, app_version, algorithms,
+ * Assemble a golf-shot/2 shot. Fills schema, revision 0, starred false, note '', venue_id/preset_id null, flight /
+ * tracks / practice null, algorithms.lm = { version: 'none', sha256('none') } when `init.algorithms` has no lm, a
+ * default quality block and every metric id as a not_computed placeholder; `init.metrics` replaces placeholders by
+ * id (unknown ids throw). Fields that cannot be defaulted honestly (shot_id, session_id, created_at, app_version, algorithms,
  * capture, calibration, club, handedness, events) are copied from `init` when given and otherwise left out, so
  * validateShot names them.
  */
@@ -93,7 +94,7 @@ export function newShot(init = {}) {
     preset_id: init.preset_id === undefined ? null : init.preset_id,
     created_at: init.created_at,
     app_version: init.app_version,
-    algorithms: init.algorithms,
+    algorithms: isPlain(init.algorithms) && !('lm' in init.algorithms) ? { ...init.algorithms, lm: { ...LM_ALGORITHM_NONE } } : init.algorithms,
     capture: init.capture,
     calibration: init.calibration,
     club: init.club,
@@ -104,6 +105,9 @@ export function newShot(init = {}) {
     starred: init.starred === undefined ? false : init.starred,
     note: init.note === undefined ? '' : init.note,
     revision: init.revision === undefined ? 0 : init.revision,
+    flight: init.flight === undefined ? null : init.flight,
+    tracks: init.tracks === undefined ? null : init.tracks,
+    practice: init.practice === undefined ? null : init.practice,
   };
   if (init.history !== undefined) base.history = init.history;
   if (init.quality !== undefined && !isPlain(init.quality)) base.quality = init.quality;

@@ -4,7 +4,7 @@
 //   node tests/e2e/run.mjs [--only m1,screens,m2,m2-ui,m2-shot,m5,m6,m6-ui,real-pose,m1@webkit,a-*,...] [--dist dist]
 //                          [--port N] [--no-fixtures] [--list]
 //
-// Package gates are auto-discovered: every tests/e2e/gates/<pkg>-<name>.mjs exporting `meta` ({ id, title, timeoutMs })
+// Package gates are auto-discovered: every tests/e2e/gates/<pkg>-<name>.mjs (<pkg> = a…f or lm-a…lm-f) exporting `meta` ({ id, title, timeoutMs })
 // + `run(ctx)`, and/or `gates` (an array of { meta, run }), is added after the built-in gates (sorted by file name).
 // --only takes ids or prefixes ending in '*' (e.g. --only 'b-*'). Env: GSL_E2E_DIST (dist dir, default dist/),
 // GSL_E2E_PORT (fixed server port, default free), GSL_E2E_LOCALE (default browser locale, default zh-TW),
@@ -38,7 +38,8 @@ const GATES_DIR = path.join(ROOT, 'tests', 'e2e', 'gates');
 export async function discoverGates(dir = GATES_DIR) {
   if (!fs.existsSync(dir)) return [];
   const out = [];
-  for (const f of fs.readdirSync(dir).filter((x) => /^[a-f]-[\w-]+\.mjs$/.test(x)).sort()) {
+  // <pkg> = a…f (PRODUCT-SPEC packages) or lm-a…lm-f (LAUNCH-MONITOR-SPEC packages)
+  for (const f of fs.readdirSync(dir).filter((x) => /^(?:lm-)?[a-f]-[\w-]+\.mjs$/.test(x)).sort()) {
     try {
       const m = await import(pathToFileURL(path.join(dir, f)).href);
       const list = [...(m.meta && m.run ? [{ meta: m.meta, run: m.run }] : []), ...(Array.isArray(m.gates) ? m.gates : [])];

@@ -39,6 +39,7 @@ test('probe -> 60 Hz pose pass -> events -> full-rate impact window -> gray fram
   const res = await analyzeClip({ name: 'clip.mov' }, {
     view: 'face_on', handedness: 'right', calibration: { tag: 'cal' }, club: { type: 'driver' }, venue: { mat_L: 1.5 },
     ids: { shot_id: 's1' }, warnings: [RC.SETUP_UNVERIFIED], restBall: { u: 700, v: 900, w_px: 22 }, seed: 5, clip_ref: 'clip-1',
+    lm: { ground: 'firm' },
   }, {
     probe: async () => probe,
     decode: fakeDecoder(probe, log, [RC.TIMESTAMPS_NOMINAL]),
@@ -73,6 +74,7 @@ test('probe -> 60 Hz pose pass -> events -> full-rate impact window -> gray fram
   assert.deepEqual(assembled.warnings, [RC.SETUP_UNVERIFIED, RC.TIMESTAMPS_NOMINAL]);
   assert.equal(assembled.seed, 5);
   assert.equal(assembled.handedness, 'right');
+  assert.deepEqual(assembled.lm, { ground: 'firm' }, 'settings.lm.ground reaches assembleShot (roll / total)');
   assert.equal(res.shot.shot_id, 's1');
   const order = [...new Set(stages.map((s) => s[0]))];
   assert.deepEqual(order, ['probe', 'pose', 'events', 'impact', 'assemble']);
@@ -93,6 +95,7 @@ test('trim_s limits the pose pass; nominal timestamps are not passed as containe
   assert.equal(log[0].to_s, 1.5);
   assert.equal(log[1].to_s, 1.5, 'impact window clipped to the trim');
   assert.equal(assembled.capture.timestamps, 'nominal');
+  assert.equal(assembled.lm.ground, undefined, 'no setting: assemble / physics default (normal)');
   assert.deepEqual(assembled.capture.trim_s, [0.5, 1.5]);
   assert.ok(assembled.warnings.includes(RC.TIMESTAMPS_NOMINAL));
 });

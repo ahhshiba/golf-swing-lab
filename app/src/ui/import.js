@@ -32,6 +32,7 @@ export function mountImport(root, app) {
   let running = false;
   let cancelAll = false;
   let prefs = null;
+  let dm = null; // ui/drill.js (lazy) while a practice drill is in progress: clip → drill slot (LAUNCH-MONITOR-SPEC §3.5)
 
   async function loadCalibs() {
     calibs = [];
@@ -129,7 +130,7 @@ export function mountImport(root, app) {
         view: prefs.view, calibration: it.noBall ? null : (cal?.calibration ?? null), handedness: st.handedness, venue, ids,
         club: { type: prefs.club, length_m: len, lie: app.current?.lie ?? st.lie, tee_lift_m: venue?.tee_lift_m ?? null, tee_lift_source: Number.isFinite(venue?.tee_lift_m) ? 'measured' : 'assumed' },
         mode: 'highspeed', source: 'import', clip_ref: newId('clip'), allowNoSwing: false, pose_model: st.model,
-        warnings: app.controller?.warnings?.() ?? [],
+        warnings: app.controller?.warnings?.() ?? [], lm: { ground: st.lm?.ground },
       }, { onProgress: (stg) => {
         if (!STEPS.includes(stg) || stg === last) return;
         for (const s of STEPS.slice(0, STEPS.indexOf(stg))) it.steps.set(s, 'done');
@@ -143,6 +144,7 @@ export function mountImport(root, app) {
       const elapsed = performance.now() - it.t0;
       app.record?.('import.analysis_s', elapsed / 1000);
       if (frames) msPerFrame = elapsed / frames;
+      dm?.tagShot(app, it, shot);
       const r = await app.controller.saveShot(shot, { clipBlob: it.file, poseSeq: res?.poseSeq ?? null, mime: it.file.type });
       const saved = r?.shot ?? (r?.shot_id ? r : shot);
       it.clipSaved = r && typeof r === 'object' && 'clipSaved' in r ? r.clipSaved : true;
@@ -150,6 +152,7 @@ export function mountImport(root, app) {
         ? (saved?.events?.meta?.time_scale ?? res?.time_scale ?? 8) : null;
       for (const s of STEPS) it.steps.set(s, 'done');
       it.shot = saved;
+      await dm?.recordImported(app, it, saved).catch(() => {});
       it.status = 'done';
     } catch (e) {
       if (cancelledErr(e)) { it.status = 'cancelled'; } else {
@@ -314,7 +317,7 @@ export function mountImport(root, app) {
       h('div.list-group', {}, settingsRow()),
       guide(),
       picker,
-      queue, summary,
+      dm?.drillImportPanel(app, items, { onChange: render }), queue, summary,
       h('div.import-primary', {}, go, next));
   }
 
@@ -324,6 +327,7 @@ export function mountImport(root, app) {
       prefs = null;
       render();
       await loadCalibs();
+      dm = app.drill?.current?.()?.status === 'active' ? await import('./drill.js').catch(() => null) : null;
       prefs = null;
       render();
     },

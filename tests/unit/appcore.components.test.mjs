@@ -14,11 +14,13 @@ setCatalog('zh-Hant', {
   'validity.valid': '可信', 'validity.estimated': '估計', 'validity.low_confidence': '低可信', 'validity.not_observable': '量不到',
   'validity.not_measurable': '量不到', 'validity.not_computed': '未計算', 'metric.carry_m.label': '飛行距離', 'unit.yd': '碼',
   'a11y.step_done': '已完成', 'a11y.step_active': '進行中', 'a11y.step_pending': '尚未開始', 'a11y.step_error': '失敗',
+  'metric.spin_rate_rpm.label': '旋轉量', 'metric.curve_m.label': '彎曲量', 'unit.rpm': '轉/分', 'tiles.estimated_badge': '估計',
+  'reason.LAUNCH_DIR_UNOBSERVABLE.short': '這個機位看不到左右',
 });
 setCatalog('en', {});
 await initI18n({ locale: 'zh-Hant', fetchImpl: null });
 
-const FROZEN = ['button', 'listRow', 'segmented', 'switchRow', 'metricTile', 'validityTag', 'statePill', 'notice', 'emptyState', 'sheet',
+const FROZEN = ['button', 'listRow', 'segmented', 'switchRow', 'metricTile', 'dataTile', 'validityTag', 'statePill', 'notice', 'emptyState', 'sheet',
   'confirmSheet', 'filePicker', 'progressSteps', 'chipRow', 'screenHeader', 'icon', 'toast'];
 
 test('every frozen component is exported by name and by createComponents(doc)', () => {
@@ -132,6 +134,53 @@ test('validityTag glyphs + text; metricTile value/unit/CI/label; null tile', () 
   assert.equal(nul.querySelector('.mt-num').textContent, '—');
   assert.equal(nul.querySelector('.mt-ci'), null);
   assert.ok(!/null|undefined/.test(nul.textContent));
+});
+
+test('dataTile (LAUNCH-MONITOR-SPEC §3.2): big number, unit, ± range, validity mark with text, the estimated word, null reason', () => {
+  const C = createComponents(fakeDocument());
+  const spin = { value: 2650, unit: 'rpm', ci95: [1905, 3395], sigma: 380, validity: 'estimated', value_origin: 'spin_model', measured: false, reason_codes: ['SPIN_MODELLED'] };
+  const t = C.dataTile({ id: 'spin_rate_rpm', metric: spin, testid: 'shot-tile' });
+  assert.equal(t.tagName, 'DIV');
+  assert.equal(t.getAttribute('data-metric'), 'spin_rate_rpm');
+  assert.equal(t.getAttribute('data-testid'), 'shot-tile');
+  assert.equal(t.getAttribute('data-validity'), 'estimated');
+  assert.ok(t.classList.contains('data-tile') && t.classList.contains('is-inferred'));
+  assert.equal(t.querySelector('.dt-label').textContent, '旋轉量');
+  assert.equal(t.querySelector('.mt-num').textContent, '2,650');
+  assert.equal(t.querySelector('.mt-unit').textContent, '轉/分');
+  assert.equal(t.querySelector('.mt-ci').textContent, '± 745');
+  assert.equal(t.querySelector('.dt-est').textContent, '估計');
+  // estimated: a readable pill (glyph + word, the same vtag pill as the result list), not a corner sliver
+  assert.ok(t.querySelector('.dt-mark').classList.contains('vtag') && t.querySelector('.dt-mark').classList.contains('vtag-est'), 'vtag pill');
+  assert.ok(t.querySelector('.dt-mark').textContent.startsWith('◐'), 'glyph');
+  assert.ok(t.querySelector('.dt-mark').textContent.includes('估計'), 'validity in words too (not colour only)');
+  // a tracked number has no 'estimated' word; a custom badge text wins; onClick makes it a button
+  let clicked = null;
+  const carry = C.dataTile({ id: 'carry_m', metric: { value: 181, unit: 'm', ci95: [160, 202], sigma: null, validity: 'estimated', value_origin: 'ballistics', reason_codes: [] }, units: { distance: 'm' }, onClick: (e, id) => { clicked = id; } });
+  assert.equal(carry.tagName, 'BUTTON');
+  assert.equal(carry.querySelector('.dt-est'), null);
+  assert.equal(carry.querySelector('.dt-mark').textContent, '◐估計', 'every estimated tile gets the pill, inferred or not');
+  const low = C.dataTile({ id: 'carry_m', metric: { value: 181, unit: 'm', ci95: null, sigma: null, validity: 'low_confidence', value_origin: 'ballistics', reason_codes: [] } });
+  assert.equal(low.querySelector('.dt-mark').textContent, '▲低可信');
+  const ok = C.dataTile({ id: 'carry_m', metric: { value: 181, unit: 'm', ci95: null, sigma: null, validity: 'valid', value_origin: 'ballistics', reason_codes: [] } });
+  assert.ok(ok.querySelector('.dt-mark').classList.contains('visually-hidden'), 'measured: words for screen readers only');
+  carry.dispatchEvent({ type: 'click' });
+  assert.equal(clicked, 'carry_m');
+  assert.equal(C.dataTile({ id: 'spin_rate_rpm', metric: spin, estimatedBadge: 'EST' }).querySelector('.dt-est').textContent, 'EST');
+  // null: '—' and the first reason's short text, no unit, no range
+  const nul = C.dataTile({ id: 'curve_m', metric: { value: null, unit: 'm', ci95: null, sigma: null, validity: 'not_observable', value_origin: 'flight_model', measured: false, reason_codes: ['LAUNCH_DIR_UNOBSERVABLE'] } });
+  assert.ok(nul.classList.contains('is-null') && !nul.classList.contains('is-inferred'));
+  assert.equal(nul.querySelector('.mt-num').textContent, '—');
+  assert.equal(nul.querySelector('.mt-unit'), null);
+  assert.equal(nul.querySelector('.mt-ci'), null);
+  assert.equal(nul.querySelector('.dt-reason').textContent, '這個機位看不到左右');
+  assert.ok(nul.querySelector('.dt-mark').classList.contains('visually-hidden') && nul.querySelector('.dt-mark').textContent === '量不到');
+  assert.ok(!/null|undefined/.test(nul.textContent));
+  // isInferred: model origins or model / prior codes, numbers only
+  assert.equal(Comp.isInferred(spin), true);
+  assert.equal(Comp.isInferred({ value: 50, value_origin: 'derived', reason_codes: ['SMASH_ASSUMED'] }), true);
+  assert.equal(Comp.isInferred({ value: null, value_origin: 'dplane', reason_codes: [] }), false);
+  assert.deepEqual([...Comp.INFERRED_ORIGINS], ['dplane', 'spin_model', 'flight_model', 'prior']);
 });
 
 test('statePill is a persistent polite live region with update(); notice, emptyState', () => {

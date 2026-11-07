@@ -5,6 +5,7 @@
 
 /* ------------------------------------------------------------------ shared bits */
 .section-title { font: var(--t-caption); color: var(--text-2); letter-spacing: .02em; text-transform: uppercase; margin: var(--s-6) 0 var(--s-1); }
+:lang(zh) .section-title { text-transform: none; } /* no forced capitals inside Chinese headings (「各球桿 CARRY」) */
 .step-count { font: var(--t-footnote); color: var(--text-2); margin: 0 0 var(--s-1); }
 .step-title { font: var(--t-title2); margin: 0 0 var(--s-2); }
 .step-title:focus { outline: none; }
@@ -315,3 +316,50 @@
   .state-pill[data-state="swinging"] .sp-glyph { animation: rec-pulse 1.2s ease-in-out infinite; }
   @keyframes rec-pulse { 50% { opacity: .35; } }
 }
+
+/* ------------------------------------------------------------------ drills / drill (LAUNCH-MONITOR-SPEC §3.5, LM-E) */
+.drill-cards { display: grid; gap: var(--s-3); }
+.drill-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-1); width: 100%; margin: 0; min-height: var(--hit-primary); text-align: start; color: var(--text); font: var(--t-body); cursor: pointer; }
+.dc-head { display: flex; align-items: center; gap: var(--s-2); font: var(--t-headline); color: var(--accent); }
+.dc-title { color: var(--text); }
+.dc-body, .dc-meta, .ds-sub, .drt-caption { font: var(--t-callout); color: var(--text-2); }
+.drill-club-grid { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+/* setup sheet: the club row wraps (no sideways scrolling with the choice off screen) and the chosen one carries a tick */
+.drill-setup .chip-row { flex-wrap: wrap; overflow: visible; }
+.drill-setup .chip-row-opt[aria-checked="true"]::before { content: "✓"; content: "✓" / ""; margin-inline-end: var(--s-1); }
+.drill-club[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.dn-template { font: var(--t-callout); color: var(--text-2); margin: 0; }
+.dn-target { font: var(--t-title1); margin: var(--s-1) 0 var(--s-3); }
+.drill-progress { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-3); }
+.dp-track, .db-track { position: relative; flex: 1 1 auto; height: .5rem; border-radius: var(--r-pill); background: var(--surface-2); overflow: hidden; }
+.dp-fill, .db-bar { position: absolute; inset-block: 0; inset-inline-start: 0; background: var(--accent); }
+.dp-text, .drt-big, .ds-score, .db-val { font-variant-numeric: tabular-nums; }
+.dp-text { font: var(--t-headline); }
+.drill-slots, .drill-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.drill-slot { display: flex; align-items: center; gap: var(--s-3); min-height: var(--row-min); padding: var(--s-2) var(--s-3); border-radius: var(--r-sm); background: var(--surface); }
+.ds-n { display: inline-flex; flex: none; align-items: center; gap: 2px; min-width: 2ch; font: var(--t-headline); color: var(--text-2); }
+.ds-n .icon { width: .85em; height: .85em; }
+.drill-slot[data-state="done"] .ds-n { color: var(--accent); }
+.drill-slot[data-state="open"] { color: var(--text-2); }
+.drill-slot[data-state="current"] { background: var(--accent-tint); color: var(--accent); outline: var(--border-control) solid var(--accent); outline-offset: calc(-1 * var(--border-control)); }
+.drill-slot[data-state="current"] .ds-n, .drill-slot[data-state="current"] .ds-target { color: var(--accent); font-weight: 700; }
+.ds-now { flex: none; font: var(--t-caption); color: var(--accent); }
+.ds-main { display: grid; flex: 1 1 auto; min-width: 0; }
+.ds-score { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--s-1); font: var(--t-headline); }
+.drill-actions { display: grid; gap: var(--s-2); margin-top: var(--s-6); }
+.drill-actions .drill-delete { color: var(--danger-text); }
+.drt-big { font: var(--t-display); margin: 0; }
+.drt-pm { font: var(--t-title2); color: var(--text-2); }
+.drt-est { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.drill-chart { display: block; width: 100%; margin-bottom: var(--s-1); }
+.drill-legend { font: var(--t-footnote); margin: 0 0 var(--s-3); }
+.db-val { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--s-1) var(--s-2); }
+.db-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: var(--s-2); }
+.db-bar[data-dir="short"] { background: var(--signal-caution); }
+.has-chart .db-track { display: none; }
+.has-chart .db-row { grid-template-columns: auto minmax(0, 1fr); } /* label as wide as it needs; the value (± and pill) takes the rest and wraps */
+.drill-map-rows { display: grid; gap: var(--s-2); margin: var(--s-2) 0; }
+.drill-map-row { display: grid; gap: var(--s-1); }
+.drill-map-row label { overflow-wrap: anywhere; font: var(--t-callout); color: var(--text-2); }
+.drill-map-row select { min-height: var(--hit-min); }
+.dm-what { font: var(--t-headline); }

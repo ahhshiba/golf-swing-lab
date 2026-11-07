@@ -19,8 +19,9 @@ A missing hook makes that gate FAIL with the testid in the message; nothing pass
   `GSL_E2E_DIST=<scratch>/dist-<pkg> GSL_E2E_PORT=<8811…8816> node tests/e2e/run.mjs --only '<pkg>-*'`
   (`--dist` and `--port` do the same; `--list` prints the selected gates; `--only` takes ids and prefixes ending in `*`).
 - Integration screenshot matrix (§8.7 step 4): `node tests/e2e/screenshot_matrix.mjs --dist <dist> --out <dir> [--port N]
-  [--json file]` — 10 screens × 390/430 (+ 844×390 for setup and live) × light/dark/sun × zh-Hant/en × text 100/200 %
-  (264 states), each screenshotted and checked for h-scroll, control overlap, obscured / clipped glance targets (live
+  [--json file]` — by default every screen and state of LAUNCH-MONITOR-SPEC §5.3-4 (10 shell screens, drills, drill, stats,
+  gapping, shot:tiles|side|top|3d|video, drills:setup, drill:result|active) × 390/430 (+ 844×390 for setup and live) × light/dark/sun ×
+  zh-Hant/en × text 100/200 % (552 states; history seeded with the v1 and v2 `valid_*` fixtures, shot = v2 face_on), each screenshotted and checked for h-scroll, control overlap, obscured / clipped glance targets (live
   pill, hero tiles, count, club, toolbar; setup title, primary, ≥ 2 lines of the instruction in landscape), truncation,
   split words, spec codes, CJK in en and hero sizes; exit code = states with findings. verify runs it as gate
   `a-matrix` (browser-e2e stage, 0 findings required).
@@ -35,6 +36,17 @@ A missing hook makes that gate FAIL with the testid in the message; nothing pass
   `confirm-yes` / `confirm-no` unless you pass a testid).
 - Shell hooks: `#toast` (`role=status`, info), `#toast-alert` (`role=alert`, errors), `#icon-sprite`; diag record
   `errors.last` (until D's `events[]` ring exists) and `i18n.missing`.
+
+## Launch-monitor packages (LM-A drop 1, 2026-11-06; docs/LM-INTERFACES.md §7)
+
+- Gates `tests/e2e/gates/lm-<a…f>-<name>.mjs` are discovered like the package gates (ids `lm-<x>-<name>`); LM-A's is
+  `lm-a-shell`.
+- `__GSL_E2E__.app.e2e.registerState(screen, name, async (app) => …)` registers a named screen state;
+  `screenshot_matrix.mjs --screens shot:tiles,drill:result` shows the screen, runs the state and checks it like any
+  other (a state nobody registered is a `state` finding). `app.e2e.runState(screen, name, app)`, `has()`, `states()`.
+- `__GSL_E2E__.app.drill` = `{ current(), set(drill | null), onChange(fn) }`.
+- New screens: `drills`, `drill`, `stats`, `gapping` (`[data-screen="<id>"]`); on `theme = auto` the roots of `shot`,
+  `stats`, `gapping`, `drill` carry `data-live-theme="dark"`. New installs start with `settings.theme = 'dark'`.
 
 ## UI hooks (all present since the integration step, 2026-11-04)
 

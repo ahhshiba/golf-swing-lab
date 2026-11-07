@@ -14,7 +14,7 @@ export { BALL_AREA, K_AERO };
 
 export const CLUB_CATEGORIES = Object.freeze(['driver', 'wood', 'hybrid', 'iron_long', 'iron_mid', 'iron_short', 'wedge']);
 
-// PRIORS, not measurements: backspin per club category (rpm, 1σ). Means follow the TrackMan tour averages
+// PRIORS, not measurements: backspin per club category (rpm, 1σ). Means follow published launch-monitor tour averages
 // (driver 2686, 3W 3655, 5W 4350, hybrid 4437, 3–5i 4630–5361, 6–7i 6231–7097, 8–9i 7998–8647, PW 9304 rpm);
 // σ ≈ 15–20 % covers amateur spread (UNVERIFIED). CAFCR 待決定 6: the owner may override them per club.
 export const SPIN_PRIORS = Object.freeze({

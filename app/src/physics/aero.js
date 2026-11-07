@@ -7,7 +7,7 @@
 // Functional form: Smits & Smith (1994), "A new aerodynamic model of a golf ball in flight", Science and Golf II,
 // pp. 340–347 (published constants CD1 = 0.24, CD2 = 0.18, CL1 = 0.54, plus a Reynolds-number term in Cd that is
 // left out here). With the published constants the model over-carries tour irons by 5–10 %, so CD1, CD2, CL1 were
-// re-fitted (this module, 2026-11-04) to the widely quoted TrackMan PGA/LPGA tour averages (driver … PW,
+// re-fitted (this module, 2026-11-04) to widely quoted launch-monitor PGA/LPGA tour averages (driver … PW,
 // 14 clubs; carry RMS error 2.0 %, worst −4.4 % driver / +2.6 % LPGA 7-iron; apex within ±12 %). The tour table
 // was taken from memory of the published charts, not re-checked against the source: UNVERIFIED, and the whole
 // model is unvalidated against a launch monitor (CAFCR 待決定 5).

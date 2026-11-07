@@ -3,8 +3,10 @@
 //
 //   SCREENS                              ordered core screen ids (docs/app-architecture.md §2)
 //   SUB_SCREENS                          screens added by PRODUCT-SPEC §2 (venues, teach, privacy, help, licences,
-//                                        developer); mounted lazily by main.js when their module exists. Onboarding
-//                                        runs inside home (B), which hides the tab bar while it shows
+//                                        developer) and LAUNCH-MONITOR-SPEC §3.1 (drills, drill under Practice; stats,
+//                                        gapping under History); mounted lazily by main.js when their module exists.
+//                                        Onboarding runs inside home (B), which hides the tab bar while it shows
+//   DATA_SCREENS                         data screens shown dark while the theme is auto (LAUNCH-MONITOR-SPEC §4.1)
 //   ALL_SCREENS                          SCREENS + SUB_SCREENS (what nav.go accepts)
 //   TABS, tabOf(screen, prevTab?)        bottom tab bar: tab id → root screen; which tab a screen belongs to
 //   TABBAR_HIDDEN                        screens without the tab bar (setup, live; and home while it shows onboarding)
@@ -16,15 +18,16 @@
 //   initialState()                       the default app state
 
 export const SCREENS = Object.freeze(['home', 'venue', 'setup', 'live', 'import', 'shot', 'history', 'diag', 'settings', 'about']);
-export const SUB_SCREENS = Object.freeze(['venues', 'teach', 'privacy', 'help', 'licences', 'developer']);
+export const SUB_SCREENS = Object.freeze(['venues', 'teach', 'privacy', 'help', 'licences', 'developer', 'drills', 'drill', 'stats', 'gapping']);
+export const DATA_SCREENS = Object.freeze(['shot', 'stats', 'gapping', 'drill']);
 export const ALL_SCREENS = Object.freeze([...SCREENS, ...SUB_SCREENS]);
 
 /** PRODUCT-SPEC §2.1: Practice · History · Settings (tab id → its root screen). */
 export const TABS = Object.freeze({ practice: 'home', history: 'history', settings: 'settings' });
 export const TABBAR_HIDDEN = Object.freeze(['setup', 'live']);
 const TAB_OF = Object.freeze({
-  home: 'practice', venue: 'practice', setup: 'practice', live: 'practice', import: 'practice',
-  history: 'history', teach: 'history',
+  home: 'practice', venue: 'practice', setup: 'practice', live: 'practice', import: 'practice', drills: 'practice', drill: 'practice',
+  history: 'history', teach: 'history', stats: 'history', gapping: 'history',
   settings: 'settings', diag: 'settings', about: 'settings', venues: 'settings', privacy: 'settings', help: 'settings', licences: 'settings', developer: 'settings',
 });
 /** The tab a screen belongs to; a screen reachable from several tabs (shot) keeps the tab it was opened from. */

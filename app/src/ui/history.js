@@ -7,7 +7,8 @@
 // with a size estimate), spreadsheet (CSV), restore; navigator.share({ files }) when available, else a download link.
 //
 // Exports for other screens: buildFilter, shotOps(app), shareOrDownload(blob, name, outEl, opts), fileStamp(iso),
-// groupShots(shots, venues).
+// groupShots(shots, venues), historySeg(app, current) (shots / stats / gapping, LAUNCH-MONITOR-SPEC §3.7),
+// loadedShots() (the shots this screen last loaded, so stats opens without a second read of the store).
 import { h, clear, downloadLink } from './dom.js';
 import * as C from './components.js';
 import { t, plural, fmtDate, fmtTime, fmtNum } from '../i18n/index.js';
@@ -123,23 +124,51 @@ export function groupShots(shots, venues = new Map()) {
   return out;
 }
 
+let lastShots = null;
+export const loadedShots = () => lastShots;
+
+/**
+ * Segmented control shots / stats / gapping (testid history-seg, data-seg); stats and gapping are sub screens.
+ * onLeave runs before navigating away (the list empties its hidden root: it re-renders from cache on show).
+ */
+export function historySeg(app, cur, onLeave) {
+  const nav = app.nav;
+  const g = C.segmented({ options: ['list', 'stats', 'gapping'].map((k) => [k, t(`history.seg.${k}`)]), value: cur, label: t('history.seg.label'),
+    onChange: (v) => {
+      if (v === cur) return;
+      onLeave?.();
+      const fromHist = cur !== 'list' && nav.stack().at(-1) === 'history';
+      if (v === 'list') return fromHist ? nav.back() : nav.root('history');
+      if (fromHist) nav.back();
+      nav.go(v);
+    } });
+  for (const b of g.children) Object.assign(b.dataset, { testid: 'history-seg', seg: b.dataset.value });
+  return g;
+}
+
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const val = (m) => (m && Number.isFinite(m.value) ? m.value : null);
 
-/** Headline numbers of a shot row: carry · ball speed when measured, else tempo · club speed. */
+/**
+ * Headline numbers of a shot row: carry · ball speed when measured, else tempo · club speed. validity = the least certain
+ * of the numbers shown ('estimated' | 'low_confidence' | null), which the row marks with the shared confidence pill.
+ */
 function headline(shot, units) {
   const m = shot.metrics ?? {};
   const pick = val(m.carry_m) !== null ? ['carry_m', 'ball_speed_mps'] : ['tempo_ratio', 'club_speed_mps'];
   const parts = [];
+  let validity = null;
   for (const id of pick) {
     if (val(m[id]) === null) continue;
     const f = fmtMetric({ ...m[id], ci95: null, sigma: null }, units, { id });
     parts.push(id === 'tempo_ratio' ? t('history.row.tempo', { v: f.value }) : f.text);
+    const v = m[id].validity;
+    if (v === 'low_confidence' || (v === 'estimated' && validity === null)) validity = v;
   }
-  if (!parts.length) return t('history.row.no_numbers');
+  if (!parts.length) return { nodes: t('history.row.no_numbers'), validity: null };
   const out = [];
   parts.forEach((x, i) => { if (i) out.push(' · '); out.push(h('span.nowrap', x)); });
-  return out;
+  return { nodes: out, validity };
 }
 
 export function mountHistory(root, app) {
@@ -164,6 +193,7 @@ export function mountHistory(root, app) {
     if (!app.repo) { shots = []; return; }
     const all = await app.repo.queryShots({ reverse: true });
     shots = all.filter((s) => !ops.isDeleted(s));
+    lastShots = shots;
     try { venues = new Map((await app.repo.venues.list()).map((v) => [v.venue_id, v])); } catch (_) { venues = new Map(); }
     try { clipBytes = (await app.repo.clips.list()).reduce((a, c) => a + (Number(c.bytes) || Number(c.blob?.size) || 0), 0); } catch (_) { clipBytes = 0; }
   }
@@ -199,11 +229,14 @@ export function mountHistory(root, app) {
 
   function row(s, units) {
     const time = fmtTime(s.created_at);
-    const primary = headline(s, units);
+    const { nodes: primary, validity } = headline(s, units);
+    // an estimated / low-confidence headline carries the same pill as the result tiles (the vtag classes and words; the
+    // glyph ◐ / ▲ is drawn by CSS, so the pill is ONE element: 1,000-shot history stays under its 1,500-node budget)
+    const pill = validity ? h(`span.vtag.sr-pill.vtag-${validity === 'estimated' ? 'est' : 'low'}`, { 'data-validity': validity }, t(`validity.${validity}`)) : null;
     const tag = s.revision > 0 ? h('span.tag-corrected', t('shot.corrected')) : null;
     const open = h('button.shot-row', { type: 'button', 'data-testid': 'shot-row', 'data-shot': s.shot_id },
       h('span.club-chip', { 'aria-hidden': 'true' }, clubName(s.club?.type)),
-      h('span.sr-main', {}, h('span.sr-primary', primary), h('span.sr-secondary', h('span.sr-club', `${clubName(s.club?.type)} · `), [time, viewName(s.capture?.view)].join(' · '), tag ? ' ' : null, tag)),
+      h('span.sr-main', {}, h('span.sr-primary', primary, pill ? ' ' : null, pill), h('span.sr-secondary', h('span.sr-club', `${clubName(s.club?.type)} · `), [time, viewName(s.capture?.view)].join(' · '), tag ? ' ' : null, tag)),
       h('span.lr-chevron', {}, C.icon('chevron-right')));
     open.addEventListener('click', () => app.nav.go('shot', { shot_id: s.shot_id }, { opener: open }));
     const star = h('button.icon-btn.star-btn', { type: 'button', 'data-testid': 'shot-star', 'aria-pressed': String(Boolean(s.starred)), 'aria-label': t(s.starred ? 'history.row.unstar' : 'history.row.star', { time }) }, C.icon(s.starred ? 'star-filled' : 'star'));
@@ -335,6 +368,7 @@ export function mountHistory(root, app) {
     const teachRow = C.listRow({ icon: 'target', title: t('history.teach.title'), subtitle: t('history.teach.subtitle'), onClick: () => openTeach(), testid: 'history-teach' });
     clear(root,
       C.screenHeader({ title: t('screen.history.title'), actions: shots.length ? toggle : null }), // tab root: no Back
+      historySeg(app, 'list', () => clear(root)),
       app.repo ? null : C.notice({ variant: 'error', title: t('error.REPO_UNAVAILABLE'), body: t('error.REPO_UNAVAILABLE.fix') }),
       shots.length ? filters() : null,
       compareMode ? h('p.hint', t('history.compare.hint')) : null,

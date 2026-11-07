@@ -35,7 +35,7 @@
   "theme.dark": "Dark",
   "theme.sun": "Sun",
   "theme.hint": "Sun is a high-contrast look with thick borders for direct sunlight.",
-  "text_size.hint": "Text size follows your iPhone's Settings › Display & Brightness › Text Size.",
+  "text_size.hint": "Follows the system text size: change it in iPhone Settings › Display & Brightness › Text Size.",
 
   "live.metrics": "Numbers shown after each swing",
   "live.metrics.hint": "Choose up to 3. Numbers the mode cannot measure are not shown.",
@@ -91,7 +91,7 @@
   "storage.cleanup.done": { "one": "Deleted {n} video", "other": "Deleted {n} videos" },
   "storage.cleanup.failed": "Nothing was deleted. Please try again",
   "storage.backup.row": "Back up and restore",
-  "storage.backup.hint": "History can save all your data as one file, or restore it from one",
+  "storage.backup.hint": "History can save all your data as one file, or restore it from one. Backups in the new format cannot be restored by versions older than 0.3.",
 
   "dev.title": "Developer options",
   "dev.taps": { "one": "{n} more tap to turn on developer options", "other": "{n} more taps to turn on developer options" },
@@ -145,5 +145,16 @@
   "dev.setup.body": "While developer options are on, the setup screens show raw calibration numbers and a timer for each step.",
   "dev.diag.row": "Diagnostic report",
   "dev.spec.label": "Show spec codes",
-  "dev.spec.hint": "Shows internal spec numbers next to screen elements, to match problem reports with the documentation."
+  "dev.spec.hint": "Shows internal spec numbers next to screen elements, to match problem reports with the documentation.",
+  "lm.ground": "Landing ground",
+  "lm.ground.firm": "Firm",
+  "lm.ground.normal": "Fairway",
+  "lm.ground.soft": "Soft",
+  "lm.ground.hint": "Used to estimate how far the ball rolls after landing; range targets are usually firm.",
+  "lm.mishits": "Leave mishits out of statistics",
+  "lm.mishits.hint": "Shots far from the rest (thin or fat contact) do not count in averages.",
+  "lm.gap_min": "Smallest useful gap",
+  "lm.gap_max": "Largest useful gap",
+  "lm.gap.hint": "The distance table marks two neighbouring clubs whose carries are closer than the smallest gap, or further apart than the largest.",
+  "lm.gap.invalid": "Enter a smallest gap below the largest, both between {min} and {max}."
 }

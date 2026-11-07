@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { createThermalGuard } from '../../app/src/session/thermal.js';
 import { bayAdvice, twoMeasureCheck } from '../../app/src/session/bay.js';
 import { formatMetric, metricRows, failureTexts, errorText } from '../../app/src/ui/format.js';
+import { migrateShot } from '../../app/src/contract/migrate.js';
 import { checkMonotonic, nearestIndex } from '../../app/src/ui/replay.js';
 import { recomputeShot } from '../../app/src/ui/shot.js';
 import { buildFilter } from '../../app/src/ui/history.js';
@@ -50,7 +51,7 @@ test('results card rows: every metric id, value ± ci95 in display units, nulls 
   const { initI18n, setLocale } = await import('../../app/src/i18n/index.js');
   const fsFetch = async (u) => { const p = new URL(String(u)); return fs.existsSync(p) ? { ok: true, status: 200, json: async () => JSON.parse(fs.readFileSync(p, 'utf8')) } : { ok: false, status: 404, json: async () => ({}) }; };
   await initI18n({ locale: 'zh-Hant', fetchImpl: fsFetch, base: new URL('../../app/i18n/', import.meta.url).href });
-  const shot = fx('valid_face_on_240');
+  const shot = migrateShot(fx('valid_face_on_240')).shot; // the screens get golf-shot/2 (store reads migrate)
   const rows = metricRows(shot.metrics);
   assert.deepEqual(rows.map((r) => r.id), [...METRIC_IDS]);
   for (const r of rows) {

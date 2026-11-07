@@ -1,4 +1,17 @@
-# golf-shot/1 result contract
+# golf-shot/2 result contract (golf-shot/1 below, still read)
+
+> 2026-11-06 (LM-A drop 1, `docs/LAUNCH-MONITOR-SPEC.md` §2): new shots are `golf-shot/2` = everything below plus 14
+> metric ids (rows 21–34 of `docs/interfaces.md` §9, unit `rpm` added), value origins `dplane`, `spin_model`,
+> `flight_model`, `prior`, nine reason codes, `algorithms.lm`, and the top-level `flight`, `tracks`, `practice`
+> (each `null` or an object). Schema: `schema/shot-v2.schema.json`; fixtures `tests/fixtures/shots/v2/`. Extra
+> validator rules (the rule name is part of the message): `flight_t_increasing`, `flight_z_above_ground`,
+> `flight_needs_carry`, `flight_landing_matches_carry` (|landing.x_m − carry| ≤ 0.5 m), `tracks_frame_increasing`,
+> `practice_target_positive`, `model_code_required` (a number from a model origin carries DPLANE_MODEL, SPIN_MODELLED,
+> FLIGHT_MODELLED or ROLL_MODELLED; `metricValue` enforces it too). A `golf-shot/1` shot (old backups, records stored
+> before the update) is validated by the frozen v1 rules and migrated losslessly by `contract/migrate.js`
+> (`migrateShot`; the 14 new ids become `not_computed` + `MIGRATED_V1`, `algorithms.lm` = `{ version: 'none',
+> sha256('none') }`). Full interface list: `docs/LM-INTERFACES.md`. The rest of this file describes golf-shot/1, which
+> golf-shot/2 extends without changing.
 
 Owner: `contract` module. Files: `app/src/contract/` (code), `schema/shot-v1.schema.json` (JSON Schema 2020-12),
 `tests/fixtures/shots/` (fixtures), `scripts/check_contract.mjs` (the `contract` stage of `scripts/verify.sh`).

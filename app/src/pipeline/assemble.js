@@ -1,4 +1,4 @@
-// assembleShot: decoded frames + pose + calibration -> one validated golf-shot/1 (CAFCR F2, F3, P5; KD2, KD9).
+// assembleShot: decoded frames + pose + calibration -> one validated golf-shot/2 (CAFCR F2, F3, P5; KD2, KD9).
 // Pure end-to-end assembly (no DOM, no WebCodecs; Node-testable). Owner: integration-core. pipeline/clip.js and
 // pipeline/live.js (media owner) call it after decoding; scripts/synth_e2e.mjs runs the M4 machine gate through it.
 //
@@ -56,6 +56,9 @@ import { ballHeight, predictedBallWidthPx, framesBudget } from '../calib/ballspo
 import { project } from '../geom/camera.js';
 import { nearestFrame, resolveTimestamps } from './frames.js';
 import { fpsAtLeast } from '../geom/constants.js';
+import { sha256Hex } from '../physics/sha256.js';
+import { deriveLaunchMonitor } from '../physics/lm/index.js';
+import { mulberry32 } from '../geom/rng.js';
 
 export const ASSEMBLE_VERSION = 'assemble-1.0.0';
 /** P5: plausible downswing duration (top -> impact); outside -> TIMEBASE_SUSPECT. */
@@ -84,67 +87,7 @@ const BALL_ROW_IDS = METRIC_IDS.filter((id) => REGISTRY[id].row >= 14);
 const uniq = (a) => [...new Set(a.filter(Boolean))];
 const defaultNow = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : 0);
 
-// ------------------------------------------------------------------------------------------------ sha256 (pure)
-
-const K256 = new Uint32Array([
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,
-  0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
-  0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8,
-  0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
-  0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
-  0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-  0xc67178f2,
-]);
-
-function utf8(s) {
-  const out = [];
-  for (const ch of String(s)) {
-    let c = ch.codePointAt(0);
-    if (c < 0x80) out.push(c);
-    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
-    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
-    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
-  }
-  return out;
-}
-
-/** SHA-256 of a string (UTF-8) or byte array, as 64 lowercase hex characters. */
-export function sha256Hex(input) {
-  const bytes = typeof input === 'string' ? utf8(input) : Array.from(input);
-  const L = bytes.length;
-  const nBlocks = Math.ceil((L + 9) / 64);
-  const m = new Uint8Array(nBlocks * 64);
-  m.set(bytes);
-  m[L] = 0x80;
-  const bits = L * 8;
-  const dv = new DataView(m.buffer);
-  dv.setUint32(m.length - 8, Math.floor(bits / 0x100000000));
-  dv.setUint32(m.length - 4, bits >>> 0);
-  const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
-  const w = new Uint32Array(64);
-  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
-  for (let b = 0; b < nBlocks; b++) {
-    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(b * 64 + 4 * i);
-    for (let i = 16; i < 64; i++) {
-      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
-      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
-      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
-    }
-    let [a, bb, c, d, e, f, g, hh] = h;
-    for (let i = 0; i < 64; i++) {
-      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-      const ch = (e & f) ^ (~e & g);
-      const t1 = (hh + S1 + ch + K256[i] + w[i]) >>> 0;
-      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-      const mj = (a & bb) ^ (a & c) ^ (bb & c);
-      const t2 = (S0 + mj) >>> 0;
-      hh = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = bb; bb = a; a = (t1 + t2) >>> 0;
-    }
-    h[0] += a; h[1] += bb; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
-  }
-  return Array.from(h, (x) => x.toString(16).padStart(8, '0')).join('');
-}
+export { sha256Hex } from '../physics/sha256.js';
 
 // ------------------------------------------------------------------------------------------------ helpers
 
@@ -345,6 +288,7 @@ export function assembleShot(input) {
   }
 
   let clubOut = clubOut0;
+  const lm = { fit: null, club: null, start: null, trk: null };
   let height = height0;
   let trackResult = null;
   const warnings = [];
@@ -378,6 +322,8 @@ export function assembleShot(input) {
     const dep = trk.info?.departure;
     const times = bf?.times;
     if (times && Number.isInteger(dep) && dep > 0 && dep < times.length) tGuess = 0.5 * (times[dep - 1] + times[dep]);
+    lm.trk = trk;
+    lm.start = start?.X ?? null;
     if (start) {
       const hb = analyzeHighBehind({
         cam, ballObs: trk.ballTrack?.obs ?? [], clubObs: trk.clubTrack ?? [], start, fps, club: clubOut, t_impact_guess: tGuess,
@@ -442,12 +388,16 @@ export function assembleShot(input) {
     const dep = trk.info?.departure;
     if (Number.isInteger(dep) && dep > 0 && dep < bf.times.length) tGuess = 0.5 * (bf.times[dep - 1] + bf.times[dep]);
     let phys = null;
+    lm.trk = trk;
+    lm.start = start?.X ?? null;
     if (start) {
       phys = analyzeFaceOn({
         cam, ballObs: trk.ballTrack.obs, clubObs: trk.clubTrack.length ? trk.clubTrack : undefined, start, fps,
         club: clubOut, t_impact_guess: tGuess, view, readout_source: calibration.readout_source, calibration,
         seed: input.seed ?? 1, nMC: input.nMC ?? 2000, nCarry: input.nCarry ?? 500, extra_codes: tsCodes,
       });
+      lm.fit = phys.fit;
+      lm.club = phys.club;
       for (const id of PHYSICS_IDS) {
         const cell = cells[id];
         if (cell.validity === null) continue;
@@ -497,6 +447,18 @@ export function assembleShot(input) {
     }
   } else warnings.push(RC.EVENTS_UNCERTAIN);
 
+  // ---- 4b. launch-monitor derivation (physics/lm; LAUNCH-MONITOR-SPEC §1.2): rows 21–34, face_on carry, hb rows 14/16/19
+  t = now();
+  const lmr = deriveLaunchMonitor({
+    view, fps: regFps, club: clubOut, metrics, fit: lm.fit, calibration, handedness, rng: mulberry32((input.seed ?? 1) + 7919),
+    clubTrack: { obs: lm.trk?.clubTrack ?? [], club: lm.club }, ballTrack: { obs: lm.trk?.ballTrack?.obs ?? [], times: capTimes },
+    settings: { ground: input.lm?.ground }, start: lm.start ?? undefined,
+  });
+  for (const [id, m] of Object.entries(lmr.metrics)) {
+    metrics[id] = warnings.includes(RC.TIMEBASE_SUSPECT) && TIME_SCALED_IDS.includes(id) ? downgrade(m, RC.TIMEBASE_SUSPECT) : m;
+  }
+  timings.lm = now() - t;
+
   // ---- 5. setup-level and whole-shot warnings
   for (const c of input.warnings ?? []) {
     if (typeof c !== 'string' || !Object.prototype.hasOwnProperty.call(REASON_CODES, c)) throw new RangeError(`assembleShot: unknown warning code ${String(c)}`);
@@ -517,8 +479,8 @@ export function assembleShot(input) {
   let shot = newShot({
     shot_id: ids.shot_id, session_id: ids.session_id, venue_id: ids.venue_id ?? null, preset_id: ids.preset_id ?? null,
     created_at: ids.created_at, app_version: ids.app_version,
-    algorithms: algorithmsBlock(poseSeq, calibration, ev.source, input.algorithms),
-    capture, calibration, club: clubOut, handedness, events: ev.shot, metrics,
+    algorithms: { ...algorithmsBlock(poseSeq, calibration, ev.source, input.algorithms), lm: lmr.algorithm },
+    capture, calibration, club: clubOut, handedness, events: ev.shot, metrics, flight: lmr.flight, tracks: lmr.tracks,
     quality: {
       pose_mean_vis: meanVisibility(poseSeq),
       frames_analyzed: (poseSeq ? poseSeq.t_s.length : 0) + (bf?.frames?.length ?? 0),
@@ -531,6 +493,6 @@ export function assembleShot(input) {
   shot = attributeWarnings(shot);
   const v = validateShot(shot);
   timings.total = now() - T0;
-  if (!v.ok) throw new ContractError(`assembleShot: shot violates golf-shot/1. ${formatErrors(v.errors)}`, v.errors);
+  if (!v.ok) throw new ContractError(`assembleShot: shot violates golf-shot/2. ${formatErrors(v.errors)}`, v.errors);
   return { shot, timings_ms: timings, debug, track: trackResult };
 }

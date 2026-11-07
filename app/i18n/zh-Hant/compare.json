@@ -10,7 +10,7 @@
   "note.mixed_presets": "同一組裡有不同機位拍的球",
   "note.mixed_views": "同一組裡混了不同拍攝角度，平均值沒有意義",
   "note.mixed_clubs": "同一組裡混了不同球桿，平均值沒有意義",
-  "note.small_sample": "有一組少於 2 球，只能看差多少，無法判斷是不是運氣",
+  "note.small_sample": "有一組少於 {min} 球，只能看差多少，無法判斷是不是運氣",
   "note.other": "這次比較有需要注意的地方",
   "lines_title": "主要差異",
   "dir.higher": "B 高 {amount}",
@@ -27,5 +27,6 @@
   "col.delta": "B − A",
   "mean_n": "{v}（{n} 球）",
   "star_note": "* 表示差異超出 95% 誤差範圍。",
-  "how": "「平常變動」用每一球的誤差範圍（或組內的變動）判斷，信心水準 {n}%。"
+  "how": "「平常變動」用每一球的誤差範圍（或組內的變動）判斷，信心水準 {n}%。",
+  "note.model_mismatch": "兩組用了不同版本的推估模型算出來，差異可能來自模型而不是你"
 }

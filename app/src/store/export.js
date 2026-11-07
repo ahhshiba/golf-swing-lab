@@ -8,6 +8,11 @@
 //   * labels?[] (P14 owner annotations, store/labels.js) are included only with includeLabels; on import each one
 //     is checked with validateLabel and merged by revision like the shots. Event models are never exported.
 //
+// Shots are exported as golf-shot/2 (a stored golf-shot/1 record is migrated by contract/migrate.js on the way out;
+// LAUNCH-MONITOR-SPEC §2.1). importJSON accepts golf-shot/1 and golf-shot/2 shots (the contract validator checks a v1
+// shot by the v1 rules) and stores them as they are; the repository migrates v1 on read. An app older than golf-shot/2
+// cannot import a v2 backup (its validator rejects the schema) — the export screen says so.
+//
 // importJSON merges by primary id: a record with a higher `revision` replaces the stored one, a tie keeps the
 // stored one (a missing revision counts as 0). Anything wrong with the file rejects the WHOLE import with an
 // ImportError (reason code + params for the UI, English developer detail), and nothing is written. This module
@@ -17,7 +22,8 @@
 //   shot_id, created_at, venue_id, preset_id, view, club_type, lie,
 //   then for every metric id in docs/interfaces.md section 9 (see metric-ids.js), in that order:
 //     <id>, <id>_lo, <id>_hi, <id>_validity
-//   (7 + 22 x 4 = 95 columns; nothing follows the last metric column. Shot notes are NOT CSV columns; they
+//   (7 + 36 x 4 = 151 columns; the 14 golf-shot/2 ids were appended after smash_factor_validity in LM-A drop 1;
+//   nothing follows the last metric column. Shot notes are NOT CSV columns; they
 //   travel in the JSON export.)
 //   <id> = metric value, <id>_lo/_hi = ci95 bounds, <id>_validity = validity text. Null or absent -> empty cell.
 //   (sigma is not converted into a range: only a stored ci95 fills _lo/_hi.)
@@ -27,6 +33,7 @@
 import { METRIC_IDS } from './metric-ids.js';
 import { assertShotFilter, getPath, revisionOf, filterShots } from './core.js';
 import { validateLabel, LABEL_SET_FORMAT } from './labels.js';
+import { migrateShot } from '../contract/migrate.js';
 
 export { LABEL_SET_FORMAT };
 
@@ -177,7 +184,7 @@ export async function exportJSON(repo, filter = {}) {
     venues,
     presets,
     sessions,
-    shots,
+    shots: shots.map((x) => migrateShot(x).shot),
   };
   if (includePoses) out.poses = poses.map(encodeTyped);
   if (includeClips) out.clips = await Promise.all(clips.map(encodeClip));
@@ -221,7 +228,7 @@ export function exportCSV(shots, { bom = false } = {}) {
 export function builtinShotValidator(shot) {
   const errors = [];
   if (!isPlain(shot)) return { ok: false, errors: ['not an object'] };
-  if (shot.schema !== 'golf-shot/1') errors.push(`schema must be golf-shot/1, got ${String(shot.schema)}`);
+  if (shot.schema !== 'golf-shot/1' && shot.schema !== 'golf-shot/2') errors.push(`schema must be golf-shot/2 or golf-shot/1, got ${String(shot.schema)}`);
   if (typeof shot.shot_id !== 'string' || shot.shot_id === '') errors.push('missing shot_id');
   if (shot.metrics !== undefined && !isPlain(shot.metrics)) errors.push('metrics must be an object');
   return { ok: errors.length === 0, errors };

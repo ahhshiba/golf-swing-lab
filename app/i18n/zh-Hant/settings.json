@@ -35,7 +35,7 @@
   "theme.dark": "深色",
   "theme.sun": "強光",
   "theme.hint": "「強光」是高對比、粗邊框的外觀，適合在大太陽下看。",
-  "text_size.hint": "文字大小跟隨 iPhone 的「設定 › 螢幕顯示與亮度 › 文字大小」。",
+  "text_size.hint": "跟隨系統文字大小：在 iPhone 的「設定 › 螢幕顯示與亮度 › 文字大小」調整。",
 
   "live.metrics": "每球顯示的數字",
   "live.metrics.hint": "最多選 3 項；這個模式量不到的項目不會顯示。",
@@ -91,7 +91,7 @@
   "storage.cleanup.done": "已刪除 {n} 支影片",
   "storage.cleanup.failed": "沒有刪除成功，請再試一次",
   "storage.backup.row": "備份與還原",
-  "storage.backup.hint": "在「歷史」可以把全部資料存成一個檔案，或從檔案還原",
+  "storage.backup.hint": "在「歷史」可以把全部資料存成一個檔案，或從檔案還原。新格式的備份無法匯入 0.3 以前的舊版。",
 
   "dev.title": "開發者選項",
   "dev.taps": "再按 {n} 下開啟開發者選項",
@@ -145,5 +145,16 @@
   "dev.setup.body": "開發者選項開啟時，架設畫面會顯示原始校正數字與每一步的計時。",
   "dev.diag.row": "診斷報告",
   "dev.spec.label": "顯示規格代碼",
-  "dev.spec.hint": "在畫面元素旁顯示內部規格編號，方便對照文件回報問題。"
+  "dev.spec.hint": "在畫面元素旁顯示內部規格編號，方便對照文件回報問題。",
+  "lm.ground": "落地草況",
+  "lm.ground.firm": "硬",
+  "lm.ground.normal": "一般球道",
+  "lm.ground.soft": "軟",
+  "lm.ground.hint": "用來估計落地後滾多遠；練習場的落點多半偏硬。",
+  "lm.mishits": "統計時排除失誤球",
+  "lm.mishits.hint": "離群太遠的球（例如打薄、打厚）不算進平均。",
+  "lm.gap_min": "相鄰球桿最小距離差",
+  "lm.gap_max": "相鄰球桿最大距離差",
+  "lm.gap.hint": "距離表會標出飛行距離差小於最小值、或大於最大值的相鄰兩支球桿。",
+  "lm.gap.invalid": "請輸入比最大值小的最小值，兩個都要在 {min} 到 {max} 之間。"
 }

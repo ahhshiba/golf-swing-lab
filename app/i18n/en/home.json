@@ -48,5 +48,8 @@
   "dev.timer_C0": "Tripod mounted",
   "dev.timer_C1": "Position set",
   "dev.timer_done": "Timer recorded",
-  "dev.timer_hint": "Tap before mounting the tripod so the setup time includes it."
+  "dev.timer_hint": "Tap before mounting the tripod so the setup time includes it.",
+  "drills": "Practice drills",
+  "drills_hint": "Target practice, gapping, fixed tests",
+  "drills_resume": "In progress: {done}/{total} done"
 }

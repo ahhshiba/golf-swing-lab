@@ -5,17 +5,22 @@ import {
   openRepository, StoreError, STORE_DEFS, STORE_NAMES, makeClipRecord, filterShots, SCHEMA_VERSION, V1_STORE_NAMES, MIGRATIONS,
 } from '../../app/src/store/core.js';
 import { MemBackend } from '../../app/src/store/mem.js';
+import { readdirSync, readFileSync } from 'node:fs';
+import { RC } from '../../app/src/contract/reason-codes.js';
+import { validateShot } from '../../app/src/contract/validate.js';
 import { openMem, makeVenue, makePreset, makeSession, makeShot, makeDataset, fillRepo, hasChinese } from './store.fixtures.mjs';
 
 // PRODUCT-SPEC §3.4: store errors carry a code (UI text = t('error.' + code)); the message is English developer detail
 const rejectsStore = (p, code) => assert.rejects(p, (e) => e instanceof StoreError && e.code === code && typeof e.message === 'string' && e.message.length > 0 && !hasChinese(e.message));
 
-test('schema declares the six v1 stores, the two v2 stores, the v3 trash store and the required shot indexes', () => {
-  assert.deepEqual([...STORE_NAMES], ['venues', 'presets', 'sessions', 'shots', 'poses', 'clips', 'labels', 'models', 'trash']);
+test('schema declares the six v1 stores, the two v2 stores, the v3 trash store, the v4 drills store and the required shot indexes', () => {
+  assert.deepEqual([...STORE_NAMES], ['venues', 'presets', 'sessions', 'shots', 'poses', 'clips', 'labels', 'models', 'trash', 'drills']);
   assert.deepEqual([...V1_STORE_NAMES], STORE_NAMES.slice(0, 6));
-  assert.equal(SCHEMA_VERSION, 3);
+  assert.equal(SCHEMA_VERSION, 4);
   assert.equal(STORE_DEFS.trash.keyPath, 'shot_id');
-  assert.deepEqual(MIGRATIONS.map((m) => m.version), [2, 3]);
+  assert.deepEqual(MIGRATIONS.map((m) => m.version), [2, 3, 4]);
+  assert.equal(STORE_DEFS.drills.keyPath, 'drill_id');
+  assert.deepEqual({ ...STORE_DEFS.drills.indexes }, { created_at: 'created_at', template: 'template' });
   assert.equal(STORE_DEFS.labels.keyPath, 'shot_id');
   assert.equal(STORE_DEFS.models.keyPath, 'slot');
   const idx = STORE_DEFS.shots.indexes;
@@ -406,6 +411,55 @@ test('v2 -> v3: a v2 database keeps every record and gains an empty trash store'
   assert.equal(v3.openedFromVersion, 2);
   for (const n of names) assert.deepStrictEqual(await v3.list(n), before[n], n);
   assert.equal(await v3.trash.count(), 0);
+});
+
+// ------------------------------------------------------------------ LAUNCH-MONITOR-SPEC §2.1 / §5.0-7 (LM-A drop 1)
+
+const V1_FIXTURES = readdirSync(new URL('../fixtures/shots/', import.meta.url)).filter((f) => /^valid_.*\.json$/.test(f))
+  .map((f) => JSON.parse(readFileSync(new URL(`../fixtures/shots/${f}`, import.meta.url), 'utf8')));
+
+test('v3 -> v4: a v3 database opens with an empty drills store; a stored golf-shot/1 shot reads back as golf-shot/2', async () => {
+  const backend = new MemBackend();
+  const names = STORE_NAMES.filter((n) => n !== 'drills');
+  const v3 = await openRepository(backend, { version: 3, stores: Object.fromEntries(names.map((n) => [n, STORE_DEFS[n]])) });
+  assert.ok(V1_FIXTURES.length >= 4 && V1_FIXTURES.every((s) => s.schema === 'golf-shot/1'));
+  await v3.putMany('shots', V1_FIXTURES);
+  await v3.close();
+  const v4 = await openRepository(backend);
+  assert.equal(v4.schemaVersion, 4);
+  assert.equal(v4.openedFromVersion, 3);
+  assert.equal(await v4.drills.count(), 0);
+  // the upgrade itself rewrites nothing (no long transaction): the raw records are still golf-shot/1
+  assert.ok((await v4.list('shots')).every((s) => s.schema === 'golf-shot/1'));
+  const one = await v4.shots.get(V1_FIXTURES[0].shot_id);
+  assert.equal(one.schema, 'golf-shot/2');
+  assert.equal(validateShot(one).ok, true, JSON.stringify(validateShot(one).errors.slice(0, 3)));
+  assert.deepEqual(one.metrics.spin_rate_rpm.reason_codes, [RC.MIGRATED_V1]);
+  assert.deepEqual(one.algorithms.lm, { version: 'none', sha256: '140bedbf9c3f6d56a9846d2ba7088798683f4da0c248231336e6a05679e4fdfe' });
+  for (const s of [...await v4.shots.list(), ...await v4.queryShots({})]) {
+    assert.equal(s.schema, 'golf-shot/2');
+    assert.equal(validateShot(s).ok, true, s.shot_id);
+  }
+  // background write-back in batches (one short transaction each)
+  const r1 = await v4.migrateBatch(2);
+  assert.deepEqual(r1, { migrated: 2, remaining: V1_FIXTURES.length - 2 });
+  let r = r1;
+  while (r.remaining > 0) r = await v4.migrateBatch(2);
+  assert.deepEqual(await v4.migrateBatch(), { migrated: 0, remaining: 0 });
+  const raw = await v4.list('shots');
+  assert.ok(raw.every((s) => s.schema === 'golf-shot/2'));
+  assert.deepStrictEqual(raw, await v4.shots.list(), 'written back = what the read-time migration returned');
+});
+
+test('drills store: put / get / list by created_at and template', async () => {
+  const repo = await openMem();
+  const d = (id, template, at) => ({ drill_id: id, template, created_at: at, slots: [] });
+  await repo.drills.put(d('d1', 'distance18', '2026-11-06T10:00:00.000Z'));
+  await repo.drills.put(d('d2', 'gapping', '2026-11-06T09:00:00.000Z'));
+  assert.equal((await repo.drills.get('d1')).template, 'distance18');
+  assert.deepEqual((await repo.drills.list({ index: 'created_at' })).map((x) => x.drill_id), ['d2', 'd1']);
+  assert.deepEqual((await repo.drills.list({ index: 'template', query: 'gapping' })).map((x) => x.drill_id), ['d2']);
+  await rejectsStore(repo.drills.put({ template: 'x' }), 'BAD_RECORD');
 });
 
 test('soft delete moves the shot to the trash unchanged; restore brings it back; list({ includeDeleted })', async () => {
