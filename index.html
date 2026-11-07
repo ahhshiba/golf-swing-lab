@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-Hant" data-built>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data:; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="src/boot-watchdog.js"></script>
+<title>揮桿實驗室</title>
+<meta name="description" content="離線的高爾夫揮桿與球飛行分析（個人練習用）">
+<meta name="theme-color" content="#F2F4F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#07100B" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="揮桿實驗室">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png">
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/app.css">
+<link rel="stylesheet" href="styles/screens/practice.css">
+<link rel="stylesheet" href="styles/screens/results.css">
+<link rel="stylesheet" href="styles/screens/settings.css">
+<link rel="stylesheet" href="styles/screens/viz.css">
+<link rel="stylesheet" href="styles/screens/stats.css">
+<link rel="modulepreload" href="src/main.js">
+<link rel="modulepreload" href="src/ui/home.js">
+<link rel="modulepreload" href="src/ui/onboarding.js">
+<link rel="modulepreload" href="src/state.js">
+<link rel="modulepreload" href="src/store/core.js">
+<link rel="modulepreload" href="src/store/idb.js">
+<link rel="modulepreload" href="src/session/settings.js">
+<link rel="modulepreload" href="src/ui/update.js">
+<link rel="modulepreload" href="src/i18n/index.js">
+<link rel="modulepreload" href="src/i18n/units.js">
+<link rel="modulepreload" href="src/ui/icons.js">
+<link rel="modulepreload" href="src/ui/components.js">
+<link rel="modulepreload" href="src/diag/record.js">
+<link rel="modulepreload" href="src/version.js">
+<link rel="modulepreload" href="src/ui/dom.js">
+<link rel="modulepreload" href="src/calib/mat.js">
+<link rel="modulepreload" href="src/session/ids.js">
+<link rel="modulepreload" href="src/contract/reason-codes.js">
+<link rel="modulepreload" href="src/contract/enums.js">
+<link rel="modulepreload" href="src/geom/constants.js">
+<script type="module" src="src/main.js"></script>
+</head>
+<body>
+<div id="top-stack" class="top-stack">
+  <button id="update-banner" class="update-banner" type="button" hidden data-i18n="app.update.available">有新版本，點此更新</button>
+  <div id="repo-banner" class="repo-banner" hidden role="status">
+    <span class="bar-text" data-i18n="app.repo.unsaved">結果不會被儲存</span>
+    <button class="repo-reload" type="button" data-i18n="app.boot.reload">重新載入</button>
+  </div>
+  <div id="session-bar" class="session-bar" hidden role="status">
+    <span class="bar-text" data-i18n="app.session.active">練習進行中</span>
+    <button class="bar-reopen primary" type="button" hidden data-i18n="app.camera.reopen">重新開啟相機</button>
+  </div>
+  <div id="health-prompts" class="health-prompts" hidden role="status" aria-live="polite">
+    <ul class="hp-list"></ul>
+    <button class="hp-dismiss" type="button" data-i18n="app.health.dismiss">知道了</button>
+  </div>
+</div>
+<main id="app">
+  <section data-screen="home" aria-label="練習" data-i18n-aria-label="screen.home.title"><h1 data-i18n="app.name">揮桿實驗室</h1><p class="boot-loading" data-i18n="app.loading">載入中…</p></section>
+  <section data-screen="venue" aria-label="場地" data-i18n-aria-label="screen.venue.title" hidden></section>
+  <section data-screen="setup" aria-label="架設" data-i18n-aria-label="screen.setup.title" hidden></section>
+  <section data-screen="live" aria-label="即時" data-i18n-aria-label="screen.live.title" hidden></section>
+  <section data-screen="import" aria-label="匯入影片" data-i18n-aria-label="screen.import.title" hidden></section>
+  <section data-screen="shot" aria-label="結果" data-i18n-aria-label="screen.shot.title" hidden></section>
+  <section data-screen="history" aria-label="歷史" data-i18n-aria-label="screen.history.title" hidden></section>
+  <section data-screen="diag" aria-label="診斷" data-i18n-aria-label="screen.diag.title" hidden></section>
+  <section data-screen="settings" aria-label="設定" data-i18n-aria-label="screen.settings.title" hidden></section>
+  <section data-screen="about" aria-label="關於" data-i18n-aria-label="screen.about.title" hidden></section>
+  <section data-screen="venues" aria-label="場地" data-i18n-aria-label="screen.venues.title" hidden></section>
+  <section data-screen="teach" aria-label="教偵測器認揮桿" data-i18n-aria-label="screen.teach.title" hidden></section>
+  <section data-screen="privacy" aria-label="隱私" data-i18n-aria-label="screen.privacy.title" hidden></section>
+  <section data-screen="help" aria-label="說明" data-i18n-aria-label="screen.help.title" hidden></section>
+  <section data-screen="licences" aria-label="授權" data-i18n-aria-label="screen.licences.title" hidden></section>
+  <section data-screen="developer" aria-label="開發者" data-i18n-aria-label="screen.developer.title" hidden></section>
+  <section data-screen="drills" aria-label="練習模式" data-i18n-aria-label="screen.drills.title" hidden></section>
+  <section data-screen="drill" aria-label="練習題目" data-i18n-aria-label="screen.drill.title" hidden></section>
+  <section data-screen="stats" aria-label="統計" data-i18n-aria-label="screen.stats.title" hidden></section>
+  <section data-screen="gapping" aria-label="距離表" data-i18n-aria-label="screen.gapping.title" hidden></section>
+  <div id="boot-error" class="boot-error" hidden role="alert"></div>
+</main>
+<nav id="tabbar" class="tabbar" aria-label="主選單" data-i18n-aria-label="nav.tabbar" hidden></nav>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="toast-alert" class="toast toast-error" role="alert" hidden></div>
+<template id="boot-fallback">
+  <div class="empty-state boot-fail" lang="zh-Hant" data-locale="zh-Hant">
+    <h1 class="es-title" tabindex="-1">App 無法啟動</h1>
+    <p class="es-body">重新載入通常可以解決；也可以先在不儲存結果的情況下繼續。</p>
+    <button type="button" class="btn btn-primary btn-lg btn-block" data-boot="reload">重新載入</button>
+    <button type="button" class="btn btn-secondary btn-lg btn-block" data-boot="unsaved">以不儲存模式繼續</button>
+    <button type="button" class="btn btn-plain btn-md" data-boot="copy">複製診斷資料</button>
+    <p class="es-body boot-copied" hidden>已複製</p>
+  </div>
+  <div class="empty-state boot-fail" lang="en" data-locale="en">
+    <h1 class="es-title" tabindex="-1">The app could not start</h1>
+    <p class="es-body">Reloading usually fixes this. You can also continue without saving results.</p>
+    <button type="button" class="btn btn-primary btn-lg btn-block" data-boot="reload">Reload</button>
+    <button type="button" class="btn btn-secondary btn-lg btn-block" data-boot="unsaved">Continue without saving</button>
+    <button type="button" class="btn btn-plain btn-md" data-boot="copy">Copy diagnostics</button>
+    <p class="es-body boot-copied" hidden>Copied</p>
+  </div>
+</template>
+<noscript><p class="noscript">這個 App 需要開啟 JavaScript。 · This app needs JavaScript.</p></noscript>
+</body>
+</html>
