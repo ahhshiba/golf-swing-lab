@@ -1,0 +1,4 @@
+/* styles/screens/lab.css — swing lab screens (lab, patterns; V04-SPEC §E). Lazy: never linked by index.html; main.js
+   app.loadStyles('lab') adds it before those screens mount. Created empty by V4-A drop 1; owner V4-F.
+   The probe rule below lets the v4-a-shell gate see that the sheet applied before show(); keep it. */
+[data-screen="lab"], [data-screen="patterns"] { --lazy-css: lab; }

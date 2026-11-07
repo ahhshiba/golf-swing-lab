@@ -49,5 +49,9 @@
   "dev.timer_hint": "裝腳架前先按，架設時間才會包含擺腳架。",
   "drills": "練習模式",
   "drills_hint": "目標距離、距離表測驗、固定題目測驗",
-  "drills_resume": "進行中：已完成 {done}/{total}"
+  "drills_resume": "進行中：已完成 {done}/{total}",
+  "course": "模擬球場",
+  "course_hint": "用自己的揮桿打原創 9 洞或 18 洞球場",
+  "lab": "揮桿實驗室",
+  "lab_hint": "對齊線、揮桿分段與看得到的問題"
 }

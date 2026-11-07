@@ -66,6 +66,15 @@ const LM_PAIRS = [
   ['--text', '--tile-bg', TEXT], ['--text-2', '--tile-bg', TEXT], ['--text-2', '--viz-bg', TEXT], ['--viz-axis', '--viz-bg', UI],
 ];
 PAIRS.push(...LM_PAIRS);
+// V04-SPEC §D.4 / §F.6 (0.4.0): trails are drawn on video over a dark halo (--media-bg black) → text level; course map
+// neighbours ≥ 1.5 (each area also has its own texture) and the pin ≥ 3.0 on the green
+export const TRAILS = Array.from({ length: 8 }, (_, i) => `--trail-${i + 1}`);
+const V4_PAIRS = [
+  ...TRAILS.map((fg) => [fg, '--media-bg', TEXT]),
+  ['--course-fairway', '--course-rough', 1.5], ['--course-green', '--course-fairway', 1.5], ['--course-water', '--course-rough', 1.5],
+  ['--course-bunker', '--course-fairway', 1.5], ['--course-pin', '--course-green', UI],
+];
+PAIRS.push(...V4_PAIRS);
 /** Pairs required in one theme only: the sun tile border (2 px, no fill) must stand out (§4.2). */
 const THEME_PAIRS = { sun: [['--tile-border-color', '--surface', UI], ['--tile-border-color', '--bg', UI]] };
 /** Colour tokens with no contrast requirement (decorative or not a solid colour). */
@@ -74,7 +83,9 @@ const EXEMPT = ['--separator', '--scrim', '--scroll-shade', // --scroll-shade: e
   // visible on any frame by construction; the light / dark tile border is a hairline like --separator (sun: THEME_PAIRS)
   '--viz-grid', '--viz-tracer', '--viz-tracer-halo', '--tile-border-color',
   // camera-frame overlays in ui/setup.js and ui/magnifier.js: drawn on video and outlined in --media-bg (theme-independent)
-  '--overlay-go', '--overlay-caution', '--overlay-stop', '--overlay-select'];
+  '--overlay-go', '--overlay-caution', '--overlay-stop', '--overlay-select',
+  // V04-SPEC §F.6: trees are a symbol + texture over rough, OB a hatch pattern; the sun outline is a 2 px black frame
+  '--course-tree', '--course-ob', '--course-outline'];
 
 test('every declared pair meets its threshold in light, dark and sun', () => {
   const fails = [];

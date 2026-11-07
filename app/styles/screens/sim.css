@@ -1,0 +1,4 @@
+/* styles/screens/sim.css — virtual course screens (course, round, scorecard; V04-SPEC §C.4). Lazy: never linked by
+   index.html; main.js app.loadStyles('sim') adds it before those screens mount. Created empty by V4-A drop 1; owner V4-D.
+   The probe rule below lets the v4-a-shell gate see that the sheet applied before show(); keep it. */
+[data-screen="course"], [data-screen="round"], [data-screen="scorecard"] { --lazy-css: sim; }

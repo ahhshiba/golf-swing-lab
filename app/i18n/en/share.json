@@ -1,0 +1,23 @@
+{
+  "title": "Tracer Clip",
+  "make": "Make video",
+  "making": "Making video…",
+  "cancel": "Cancel",
+  "send": "Share",
+  "download": "Save file",
+  "unsupported_video": "This browser cannot record video here; you can still share a picture card.",
+  "privacy_note": "The video shows your body. It has no sound and stays on this phone until you share it.",
+  "legend.detected": "Detected",
+  "legend.modelled": "Modelled",
+  "legend.hand_path": "Hand path",
+  "legend.club_path": "Club head",
+  "ball_colour": "Ball colour",
+  "club_colour": "Club colour",
+  "layout.portrait": "Portrait",
+  "layout.landscape": "Landscape",
+  "card": "Add data card",
+  "lines": "Alignment lines",
+  "face_mask": "Blur face",
+  "app_mark": "Small app name",
+  "card.simulated": "Simulated"
+}

@@ -13,12 +13,16 @@ import { openMem, makeVenue, makePreset, makeSession, makeShot, makeDataset, fil
 // PRODUCT-SPEC §3.4: store errors carry a code (UI text = t('error.' + code)); the message is English developer detail
 const rejectsStore = (p, code) => assert.rejects(p, (e) => e instanceof StoreError && e.code === code && typeof e.message === 'string' && e.message.length > 0 && !hasChinese(e.message));
 
-test('schema declares the six v1 stores, the two v2 stores, the v3 trash store, the v4 drills store and the required shot indexes', () => {
-  assert.deepEqual([...STORE_NAMES], ['venues', 'presets', 'sessions', 'shots', 'poses', 'clips', 'labels', 'models', 'trash', 'drills']);
+test('schema declares the six v1 stores, the two v2 stores, the v3 trash store, the v4 drills store, the v5 rounds + lab stores and the required shot indexes', () => {
+  assert.deepEqual([...STORE_NAMES], ['venues', 'presets', 'sessions', 'shots', 'poses', 'clips', 'labels', 'models', 'trash', 'drills', 'rounds', 'lab']);
   assert.deepEqual([...V1_STORE_NAMES], STORE_NAMES.slice(0, 6));
-  assert.equal(SCHEMA_VERSION, 4);
+  assert.equal(SCHEMA_VERSION, 5);
   assert.equal(STORE_DEFS.trash.keyPath, 'shot_id');
-  assert.deepEqual(MIGRATIONS.map((m) => m.version), [2, 3, 4]);
+  assert.deepEqual(MIGRATIONS.map((m) => m.version), [2, 3, 4, 5]);
+  assert.equal(STORE_DEFS.rounds.keyPath, 'round_id');
+  assert.deepEqual({ ...STORE_DEFS.rounds.indexes }, { created_at: 'created_at', status: 'status' });
+  assert.equal(STORE_DEFS.lab.keyPath, 'shot_id');
+  assert.deepEqual({ ...STORE_DEFS.lab.indexes }, { computed_at: 'computed_at', view: 'view' });
   assert.equal(STORE_DEFS.drills.keyPath, 'drill_id');
   assert.deepEqual({ ...STORE_DEFS.drills.indexes }, { created_at: 'created_at', template: 'template' });
   assert.equal(STORE_DEFS.labels.keyPath, 'shot_id');
@@ -420,12 +424,12 @@ const V1_FIXTURES = readdirSync(new URL('../fixtures/shots/', import.meta.url)).
 
 test('v3 -> v4: a v3 database opens with an empty drills store; a stored golf-shot/1 shot reads back as golf-shot/2', async () => {
   const backend = new MemBackend();
-  const names = STORE_NAMES.filter((n) => n !== 'drills');
+  const names = STORE_NAMES.filter((n) => !['drills', 'rounds', 'lab'].includes(n));
   const v3 = await openRepository(backend, { version: 3, stores: Object.fromEntries(names.map((n) => [n, STORE_DEFS[n]])) });
   assert.ok(V1_FIXTURES.length >= 4 && V1_FIXTURES.every((s) => s.schema === 'golf-shot/1'));
   await v3.putMany('shots', V1_FIXTURES);
   await v3.close();
-  const v4 = await openRepository(backend);
+  const v4 = await openRepository(backend, { version: 4, stores: Object.fromEntries([...names, 'drills'].map((n) => [n, STORE_DEFS[n]])) });
   assert.equal(v4.schemaVersion, 4);
   assert.equal(v4.openedFromVersion, 3);
   assert.equal(await v4.drills.count(), 0);
@@ -449,6 +453,55 @@ test('v3 -> v4: a v3 database opens with an empty drills store; a stored golf-sh
   const raw = await v4.list('shots');
   assert.ok(raw.every((s) => s.schema === 'golf-shot/2'));
   assert.deepStrictEqual(raw, await v4.shots.list(), 'written back = what the read-time migration returned');
+});
+
+// ------------------------------------------------------------------ V04-SPEC §F.2 (V4-A drop 1): schema 5
+
+test('v4 -> v5: a v4 database keeps every shot and drill (counts unchanged) and gains empty rounds + lab stores', async () => {
+  const backend = new MemBackend();
+  const names = STORE_NAMES.filter((n) => !['rounds', 'lab'].includes(n));
+  const v4 = await openRepository(backend, { version: 4, stores: Object.fromEntries(names.map((n) => [n, STORE_DEFS[n]])) });
+  await fillRepo(v4);
+  await v4.drills.put({ drill_id: 'd1', template: 'gapping', created_at: '2026-11-06T10:00:00.000Z', slots: [] });
+  await v4.drills.put({ drill_id: 'd2', template: 'distance18', created_at: '2026-11-06T11:00:00.000Z', slots: [] });
+  const before = {};
+  for (const n of names) before[n] = await v4.list(n);
+  const nShots = await v4.shots.count();
+  const nDrills = await v4.drills.count();
+  await v4.close();
+  const v5 = await openRepository(backend);
+  assert.equal(v5.schemaVersion, 5);
+  assert.equal(v5.openedFromVersion, 4);
+  assert.equal(await v5.shots.count(), nShots);
+  assert.equal(await v5.drills.count(), nDrills);
+  for (const n of names) assert.deepStrictEqual(await v5.list(n), before[n], n);
+  assert.equal(await v5.rounds.count(), 0);
+  assert.equal(await v5.lab.count(), 0);
+});
+
+test('rounds store: get / put / list by created_at and status / delete', async () => {
+  const repo = await openMem();
+  const r = (id, status, at) => ({ schema: 'golf-round/1', round_id: id, status, created_at: at, updated_at: at, strokes: [] });
+  await repo.rounds.put(r('r1', 'active', '2026-11-07T10:00:00.000Z'));
+  await repo.rounds.put(r('r2', 'finished', '2026-11-07T09:00:00.000Z'));
+  assert.equal((await repo.rounds.get('r1')).status, 'active');
+  assert.deepEqual((await repo.rounds.list({ index: 'created_at' })).map((x) => x.round_id), ['r2', 'r1']);
+  assert.deepEqual((await repo.rounds.list({ index: 'status', query: 'active' })).map((x) => x.round_id), ['r1']);
+  await repo.rounds.delete('r1');
+  assert.equal(await repo.rounds.get('r1'), null);
+  await rejectsStore(repo.rounds.put({ status: 'active' }), 'BAD_RECORD');
+});
+
+test('lab store: get / put / list by view; deleteStale(version) drops other algorithm versions only', async () => {
+  const repo = await openMem();
+  const l = (id, view, version, at) => ({ shot_id: id, view, algo: { version, sha256: 'x' }, faults: [], computed_at: at });
+  await repo.lab.put(l('a', 'dtl', 'lab-1', '2026-11-07T10:00:00.000Z'));
+  await repo.lab.put(l('b', 'face_on', 'lab-0', '2026-11-07T09:00:00.000Z'));
+  await repo.lab.put(l('c', 'dtl', 'lab-1', '2026-11-07T11:00:00.000Z'));
+  assert.deepEqual((await repo.lab.list({ index: 'view', query: 'dtl' })).map((x) => x.shot_id), ['a', 'c']);
+  assert.equal(await repo.lab.deleteStale('lab-1'), 1);
+  assert.deepEqual((await repo.lab.list()).map((x) => x.shot_id), ['a', 'c']);
+  assert.equal((await repo.lab.get('a')).view, 'dtl');
 });
 
 test('drills store: put / get / list by created_at and template', async () => {

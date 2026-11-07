@@ -29,6 +29,9 @@
 //   newShot(init) -> shot            emptyMetrics() -> { [id]: not_computed placeholder }
 //   attributeWarnings(shot) -> shot  addWarning(shot, code) -> shot
 //   bumpRevision(shot, patch, { at? }) -> shot                 revision + 1, replaced values kept in history
+// round.js   (LAZY, V04-SPEC §F.2: import it dynamically; NOT re-exported here, index.js is in the boot graph)
+//   ROUND_SCHEMA 'golf-round/1'  LAB_SCHEMA 'golf-lab/1'  ROUND_MAX_BYTES  enums (SIM_LIES, STROKE_SOURCES, RULE_OPTIONS …)
+//   validateRound(round, { replayRound }?) -> { ok, errors: [{ path, msg, rule }] }   validateLabRecord(rec) -> { ok, errors }
 
 export * from './reason-codes.js';
 export * from './enums.js';

@@ -3,6 +3,7 @@
   "$id": "shot-v2.schema.json",
   "title": "golf-shot/2",
   "description": "Per-shot result of golf-swing-lab, schema 2 (docs/LAUNCH-MONITOR-SPEC.md section 2): schema 1 plus 14 launch-monitor metrics, algorithms.lm, flight, tracks and practice. Every number carries ci95 or sigma, every null carries a reason code. Cross-field rules JSON Schema cannot express (ci95 bounds, warnings attribution, event order, camera consistency, flight / tracks order, flight vs carry, model reason codes) are enforced by app/src/contract/validate.js; see docs/contract.md. Schema 1 shots are migrated losslessly by app/src/contract/migrate.js.",
+  "$comment": "rev 2 (V04-SPEC F.1, 0.4.0): additive, schema id unchanged: optional tracks.club_px and the nine reason codes of V04-SPEC F.3. A 0.3.0 validator rejects a shot that carries tracks.club_px.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -693,7 +694,16 @@
         "SMASH_ASSUMED",
         "LAUNCH_V_ASSUMED",
         "CROSS_VIEW_PRIOR",
-        "MIGRATED_V1"
+        "MIGRATED_V1",
+        "PROVISIONAL",
+        "GAPPING_PRIOR",
+        "REFERENCE_PRIOR",
+        "SIDE_SAMPLED",
+        "MANUAL_ENTRY",
+        "LIE_ADJUSTED",
+        "AUTO_PUTT",
+        "AUTO_CHIP",
+        "FAULT_INCONCLUSIVE"
       ],
       "description": "Every code is defined, with a Traditional Chinese description, in app/src/contract/reason-codes.js"
     },
@@ -1570,7 +1580,7 @@
     "tracks": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Detected ball centres in image pixels (original resolution) for the video tracer. Validator: frames strictly increasing.",
+      "description": "Detected ball centres (and, rev 2, club-head centres) in image pixels (original resolution) for the video tracer. Validator: frames strictly increasing (tracks_frame_increasing, tracks_club_frame_increasing).",
       "required": [
         "ball_px",
         "impact_frame",
@@ -1613,6 +1623,28 @@
             "dtl",
             "high_behind"
           ]
+        },
+        "club_px": {
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "prefixItems": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "description": "[frame, u, v] club-head centre (optional, rev 2: V04-SPEC F.1; 240 fps imports)"
         }
       }
     },

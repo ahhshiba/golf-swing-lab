@@ -85,7 +85,7 @@ test('export header: format, exported_at, app_version; poses and clips only on r
   assert.equal(EXPORT_FORMAT, 'golf-swing-lab-export/1');
   assert.equal(out.exported_at, NOW);
   assert.equal(out.app_version, '9.9.9');
-  assert.deepEqual(Object.keys(out), ['format', 'exported_at', 'app_version', 'venues', 'presets', 'sessions', 'shots']);
+  assert.deepEqual(Object.keys(out), ['format', 'exported_at', 'app_version', 'venues', 'presets', 'sessions', 'shots', 'rounds']);
   assert.deepEqual(out.shots.map((s) => s.shot_id), ['shot-1', 'shot-2', 'shot-3', 'shot-4']);
   assert.equal(out.shots.length, 4);
   assert.match((await exportJSON(repo)).exported_at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
@@ -483,4 +483,68 @@ test('CSV: optional BOM and CSV of repo query results', async () => {
   const rows = parseCSV(text.slice(1));
   assert.deepEqual(rows.slice(1).map((r) => r[0]), ['shot-3', 'shot-4']);
   assert.equal(exportCSV(shots).charCodeAt(0), CSV_COLUMNS[0].charCodeAt(0));
+});
+
+// ------------------------------------------------------------------ V04-SPEC §F.2 (V4-A drop 1): rounds[]
+
+const ROUND_9 = () => JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/rounds/valid_9_links_2p.json'), 'utf8'));
+const ROUND_18 = () => JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/rounds/valid_18_parkland_1p_finished.json'), 'utf8'));
+
+test('rounds[]: export -> clear -> import deep-equals; included by default, left out of a filtered export unless asked', async () => {
+  const repo = await openMem();
+  await fillRepo(repo);
+  await repo.rounds.put(ROUND_9());
+  await repo.rounds.put(ROUND_18());
+  const before = await repo.rounds.list();
+  const out = await exportJSON(repo, { now: NOW, app_version: '0.4.0-test' });
+  assert.equal(out.format, 'golf-swing-lab-export/1');
+  assert.deepStrictEqual(out.rounds, before);
+  const file = JSON.stringify(out);
+  await repo.clear();
+  const res = await importJSON(repo, file, { validate: accept });
+  assert.deepEqual(res.counts.rounds, { added: 2, updated: 0, kept: 0 });
+  assert.deepStrictEqual(await repo.rounds.list(), before);
+  assert.equal((await exportJSON(repo, { session_id: 'session-1' })).rounds, undefined);
+  assert.equal((await exportJSON(repo, { session_id: 'session-1', includeRounds: true })).rounds.length, 2);
+  assert.equal((await exportJSON(repo, { includeRounds: false })).rounds, undefined);
+});
+
+test('rounds[]: an invalid round rejects the whole import (rule named), nothing written; a non-array is bad_field', async () => {
+  const repo = await openMem();
+  const bad = ROUND_9();
+  bad.strokes[0].carry.validity = 'valid';
+  const file = { format: EXPORT_FORMAT, exported_at: NOW, app_version: 'x', venues: [], presets: [], sessions: [], shots: [], rounds: [bad] };
+  await assert.rejects(importJSON(repo, file, { validate: accept }), (e) => e instanceof ImportError && e.reason === 'invalid' && /validity_not_valid/.test(e.message));
+  assert.equal(await repo.rounds.count(), 0);
+  await assert.rejects(importJSON(repo, { ...file, rounds: {} }, { validate: accept }), (e) => e instanceof ImportError && e.reason === 'bad_field');
+});
+
+test('the 0.3.0 importer (checkEnvelope + importJSON at 9f429da) ignores an unknown rounds[] array (locks the behaviour)', async (t) => {
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { pathToFileURL } = await import('node:url');
+  const git = spawnSync('git', ['show', '9f429da:app/src/store/export.js'], { cwd: ROOT, encoding: 'utf8' });
+  if (git.status !== 0) { t.skip('git history with 9f429da not available'); return; }
+  // the old module, its relative imports pointed at this tree (core.js / labels.js / migrate.js are backward compatible)
+  const src = git.stdout.replace(/from '(\.\.?\/[^']+)'/g, (_, rel) => `from '${pathToFileURL(join(ROOT, 'app/src/store', rel)).href}'`);
+  const dir = mkdtempSync(join(tmpdir(), 'gsl-export-030-'));
+  try {
+    const file = join(dir, 'export-0.3.0.mjs');
+    writeFileSync(file, src);
+    const old = await import(pathToFileURL(file).href);
+    const repo = await openMem();
+    await fillRepo(repo);
+    await repo.rounds.put(ROUND_9());
+    const out = JSON.parse(JSON.stringify(await exportJSON(repo, { now: NOW })));
+    assert.ok(Array.isArray(out.rounds) && out.rounds.length === 1);
+    const target = await openMem();
+    const res = await old.importJSON(target, out, { validate: accept });
+    assert.equal(res.ok, true);
+    assert.equal(res.counts.rounds, undefined, 'the old importer does not touch rounds');
+    assert.equal(await target.shots.count(), 4);
+    assert.equal(await target.rounds.count(), 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

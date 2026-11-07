@@ -1,0 +1,12 @@
+{
+  "none.title": "No scorecard yet",
+  "none.body": "Finish a hole in a round to see the scorecard.",
+  "disclaimer": "Simulated scores come from estimated distances; they are not real course scores.",
+  "out": "Out",
+  "in": "In",
+  "total": "Total",
+  "putts": "Putts",
+  "penalties": "Penalties",
+  "to_par": "To par",
+  "simulated": "Simulated"
+}

@@ -17,13 +17,17 @@ export const REASON_CODE_LIST = Object.freeze([
   'DPLANE_MODEL', 'SPIN_MODELLED', 'SPIN_LOFT_ASSUMED', 'FLIGHT_MODELLED', 'ROLL_MODELLED', 'SMASH_ASSUMED',
   'LAUNCH_V_ASSUMED', 'CROSS_VIEW_PRIOR', 'MIGRATED_V1',
   // LAUNCH-MONITOR-SPEC §2.3 (golf-shot/2, LM-A drop 1) added the nine above
+  'PROVISIONAL', 'GAPPING_PRIOR', 'REFERENCE_PRIOR', 'SIDE_SAMPLED', 'MANUAL_ENTRY', 'LIE_ADJUSTED', 'AUTO_PUTT',
+  'AUTO_CHIP', 'FAULT_INCONCLUSIVE',
+  // V04-SPEC §F.3 (0.4.0, V4-A drop 1) added the nine above
 ]);
 
 /** The 29 codes of golf-shot/1 (schema/shot-v1.schema.json); a v1 shot may only carry these. */
 export const REASON_CODE_LIST_V1 = Object.freeze(REASON_CODE_LIST.slice(0, 29));
 
-/** Model codes (LAUNCH-MONITOR-SPEC §2.3 ★): a non-null metric whose value_origin is a model must carry one. */
-export const MODEL_CODES = Object.freeze(['DPLANE_MODEL', 'SPIN_MODELLED', 'FLIGHT_MODELLED', 'ROLL_MODELLED']);
+/** Model codes (LAUNCH-MONITOR-SPEC §2.3 ★, V04-SPEC §F.3 ★): a non-null metric whose value_origin is a model must carry one. */
+export const MODEL_CODES = Object.freeze(['DPLANE_MODEL', 'SPIN_MODELLED', 'FLIGHT_MODELLED', 'ROLL_MODELLED', 'GAPPING_PRIOR',
+  'REFERENCE_PRIOR', 'AUTO_PUTT', 'AUTO_CHIP']);
 
 /** { NAME: 'NAME' } for every code: membership tests (`code in REASON_CODES`) and Object.keys() order. */
 export const REASON_CODES = Object.freeze(Object.fromEntries(REASON_CODE_LIST.map((k) => [k, k])));

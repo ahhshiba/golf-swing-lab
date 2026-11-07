@@ -51,5 +51,9 @@
   "dev.timer_hint": "Tap before mounting the tripod so the setup time includes it.",
   "drills": "Practice drills",
   "drills_hint": "Target practice, gapping, fixed tests",
-  "drills_resume": "In progress: {done}/{total} done"
+  "drills_resume": "In progress: {done}/{total} done",
+  "course": "Virtual Course",
+  "course_hint": "Play original 9 or 18-hole courses with your own swings",
+  "lab": "Swing Lab",
+  "lab_hint": "Alignment lines, swing phases and the faults you can see"
 }

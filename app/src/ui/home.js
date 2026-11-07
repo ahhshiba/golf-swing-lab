@@ -147,7 +147,10 @@ export function mountHome(root, app) {
       kids.push(h('div.home-cta', {}, start));
     }
 
-    kids.push(h('div.list-group', {}, drillsRow()));
+    // 0.4.0 entries (V04-SPEC §F.5): virtual course and swing lab (lazy screens)
+    kids.push(h('div.list-group', {}, drillsRow(),
+      listRow({ icon: 'flag', title: t('home.course'), subtitle: t('home.course_hint'), testid: 'home-course', onClick: () => app.nav.go('course') }),
+      listRow({ icon: 'level', title: t('home.lab'), subtitle: t('home.lab_hint'), testid: 'home-lab', onClick: () => app.nav.go('lab') })));
     if (last) kids.push(lastCard());
     kids.push(h('h2.section-title', t('home.more')));
     kids.push(h('div.list-group.home-more', {},

@@ -1,0 +1,4 @@
+/* styles/screens/share.css — tracer clip / share card sheet (V04-SPEC §D.2). Lazy: never linked by index.html; ui/share.js
+   calls app.loadStyles('share') before it opens the sheet. Created empty by V4-A drop 1; owner V4-E.
+   The probe rule below is checked by the share gate; keep it. */
+.share-sheet { --lazy-css: share; }

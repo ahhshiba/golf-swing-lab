@@ -15,7 +15,7 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 70
 
-ALL_STAGES=(env static unit contract tokens i18n event-conf model-parity synthetic-calib synthetic-e2e build sw-version browser-e2e training)
+ALL_STAGES=(env static brands unit contract tokens i18n event-conf model-parity synthetic-calib synthetic-e2e build sw-version browser-e2e training)
 GSL_PY=${GSL_PY:-$HOME/.local/share/golf-swing-lab-venv/bin/python}
 
 usage() {
@@ -173,6 +173,10 @@ if [ "${#STATIC_FILES[@]}" -gt 0 ]; then
 else
   skip static "no app/src/**/*.js or scripts/*.mjs yet"
 fi
+
+# brand / claim lint (V04-SPEC §I): competitor name anywhere in the repo or dist/, monitor brand and feature names in the
+# product, accuracy-percentage claims in the catalogs, banned vendors
+script_stage brands          scripts/check_brands.mjs --quiet
 
 if [ -n "$(find tests/unit -type f -name '*.test.mjs' 2>/dev/null | head -n1)" ]; then
   stage unit node --test tests/unit/

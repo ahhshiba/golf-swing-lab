@@ -19,5 +19,10 @@
   "drills.title": "練習模式",
   "drill.title": "練習題目",
   "stats.title": "統計",
-  "gapping.title": "距離表"
+  "gapping.title": "距離表",
+  "course.title": "模擬球場",
+  "round.title": "回合",
+  "scorecard.title": "記分卡",
+  "lab.title": "揮桿實驗室",
+  "patterns.title": "揮桿趨勢"
 }

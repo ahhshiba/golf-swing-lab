@@ -1,0 +1,23 @@
+{
+  "title": "軌跡影片",
+  "make": "製作影片",
+  "making": "正在製作影片…",
+  "cancel": "取消",
+  "send": "分享",
+  "download": "儲存檔案",
+  "unsupported_video": "這個瀏覽器無法在這裡錄製影片；仍可分享圖片卡",
+  "privacy_note": "影片會拍到你的身體；沒有聲音，分享前只留在這支手機",
+  "legend.detected": "偵測",
+  "legend.modelled": "模擬",
+  "legend.hand_path": "手部軌跡",
+  "legend.club_path": "桿頭",
+  "ball_colour": "球的顏色",
+  "club_colour": "桿頭顏色",
+  "layout.portrait": "直式",
+  "layout.landscape": "橫式",
+  "card": "加數據卡",
+  "lines": "對齊線",
+  "face_mask": "臉部馬賽克",
+  "app_mark": "小字 app 名稱",
+  "card.simulated": "模擬"
+}

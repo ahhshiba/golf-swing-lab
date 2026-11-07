@@ -84,6 +84,8 @@ const LAZY_EXACT = Object.freeze([
   'icons/icon-512.png', 'icons/icon-maskable-512.png', // read by the install prompt (manifest) only
   'src/ui/developer.js', 'src/ui/diag.js', 'src/diag/report.js', 'src/ui/about.js', 'src/ui/licences.js',
   'src/ui/help.js', 'src/ui/privacy.js', 'src/ui/teach.js', 'src/ui/compare.js', 'src/store/compare.js',
+  // 0.4.0 screen styles (V04-SPEC §F.6): never linked by index.html, main.js app.loadStyles(name) adds them on first use
+  'styles/screens/sim.css', 'styles/screens/lab.css', 'styles/screens/share.css',
 ]);
 /**
  * Lazy path patterns (`*` = any file name within one directory): every launch-monitor screen and module
@@ -92,6 +94,10 @@ const LAZY_EXACT = Object.freeze([
 export const LAZY_GLOBS = Object.freeze([
   'src/viz/*.js', 'src/ui/drills.js', 'src/ui/drill.js', 'src/ui/stats.js', 'src/ui/gapping.js', 'src/ui/tiles.js',
   'src/practice/*.js', 'src/store/stats.js', 'src/physics/lm/*.js',
+  // 0.4.0 (V04-SPEC §F.7): every new module and screen
+  'src/quick/*.js', 'src/course/*.js', 'src/sim/*.js', 'src/share/*.js', 'src/lab/*.js', 'src/contract/round.js',
+  'src/ui/course.js', 'src/ui/round.js', 'src/ui/scorecard.js', 'src/ui/sim-banner.js', 'src/ui/quickcard.js',
+  'src/ui/share.js', 'src/ui/lab.js', 'src/ui/patterns.js',
 ]);
 const globRe = (g) => new RegExp(`^${g.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`);
 const LAZY_GLOB_RES = LAZY_GLOBS.map(globRe);
@@ -109,7 +115,8 @@ export const LAZY_FILES = Object.freeze([...LAZY_EXACT, ...(() => {
  * or reason texts — home and onboarding (the boot graph) use neither (they format numbers with the `unit` namespace).
  */
 export const LAZY_I18N_NAMESPACES = Object.freeze(['about', 'diag', 'help', 'legal', 'licence', 'privacy', 'teach',
-  'tiles', 'viz', 'drill', 'stats', 'gapping', 'metric', 'reason']);
+  'tiles', 'viz', 'drill', 'stats', 'gapping', 'metric', 'reason',
+  'quick', 'sim', 'course', 'score', 'share', 'lab', 'fault', 'patterns']); // 0.4.0 (V04-SPEC §F.5)
 export const lazyCatalogUrl = (loc) => `i18n/${loc}.more.json`;
 /** Namespace catalog sources (merged by mergeCatalogs, not copied). */
 export const CATALOG_SOURCE_RE = /^i18n\/([A-Za-z-]+)\/([a-z0-9_-]+)\.json$/;

@@ -5,7 +5,8 @@
 //                                        [--themes light,dark,sun] [--scales 1,2] [--json FILE]
 //
 // Screens (default = all): the 10 of the shell (home, venue, setup, live, import, shot, history, diag, settings, about),
-// the launch-monitor screens (drills, drill, stats, gapping) and the named states `<screen>:<state>` (LAUNCH-MONITOR-SPEC
+// the launch-monitor screens (drills, drill, stats, gapping), the 0.4.0 screens (course, round, scorecard, lab, patterns;
+// V04-SPEC §F.8 adds their named states as the packages land) and the named states `<screen>:<state>` (LAUNCH-MONITOR-SPEC
 // §5.0-13; shot:tiles|side|top|3d|video, drills:setup (the drill setup sheet), drill:result|active): the screen is shown, then the state its module registered
 // with app.e2e.registerState(screen, state, async (app) => …) is run; an unregistered state is a 'state' finding.
 // Files of a state are named <screen>~<state>-….png. History is seeded with tests/fixtures/shots/valid_*.json (v1) and
@@ -42,7 +43,7 @@ const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0
 const DIST = path.resolve(opt('dist', process.env.GSL_E2E_DIST || path.join(ROOT, 'dist')));
 const OUT = path.resolve(opt('out', process.env.GSL_SHOTS_DIR || path.join(ROOT, 'tests', 'e2e', '.shots', 'matrix')));
 const PORT = Number(opt('port', process.env.GSL_E2E_PORT || 0));
-const ALL_SCREENS = 'home,venue,import,shot,shot:tiles,shot:side,shot:top,shot:3d,shot:video,history,stats,gapping,drills,drills:setup,drill,drill:result,drill:active,diag,settings,about,setup,live';
+const ALL_SCREENS = 'home,venue,import,shot,shot:tiles,shot:side,shot:top,shot:3d,shot:video,history,stats,gapping,drills,drills:setup,drill,drill:result,drill:active,course,round,scorecard,lab,patterns,diag,settings,about,setup,live';
 const SCREENS = opt('screens', ALL_SCREENS).split(',');
 const LOCALES = opt('locales', 'zh-Hant,en').split(',');
 const THEMES = opt('themes', 'light,dark,sun').split(',');

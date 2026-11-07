@@ -157,6 +157,27 @@
   --overlay-caution: #FFB000;
   --overlay-stop: #FF3B30;
   --overlay-select: #FFCC00;
+  /* V04-SPEC §D.4 tracer-clip trails: drawn on video over a 4 px dark halo, theme-independent (defined once here);
+     each >= 4.5 against black, pairwise CIEDE2000 >= 20 (tests/unit/tokens.v4.test.mjs). 1 = ball, 4 = club head. */
+  --trail-1: #FFE000;
+  --trail-2: #FF8A00;
+  --trail-3: #FF5C7A;
+  --trail-4: #00E5FF;
+  --trail-5: #4DFF6A;
+  --trail-6: #FFFFFF;
+  --trail-7: #C58BFF;
+  --trail-8: #6FA8FF;
+  /* V04-SPEC §F.6 course map: a data screen, one dark palette in every theme (sun: ob, pin and a 2 px outline);
+     neighbouring areas >= 1.5 apart and each drawn with its own texture, pin >= 3.0 on the green */
+  --course-fairway: #3F8F4C;
+  --course-rough: #1E4A2A;
+  --course-green: #8FE08F;
+  --course-bunker: #E3CF95;
+  --course-water: #2F6DB5;
+  --course-tree: #0E2A16;
+  --course-ob: #9A9A9A;
+  --course-pin: #0A0A0A;
+  --course-outline: transparent;
 }
 
 /* ---- dark (explicit) and the live screen root ---- */
@@ -307,6 +328,9 @@
   --overlay-caution: #FFB000;
   --overlay-stop: #FF3B30;
   --overlay-select: #FFCC00;
+  --course-ob: #FFFFFF;
+  --course-pin: #000000;
+  --course-outline: #000000;
 }
 
 /* ---- auto theme (no data-theme): follow the system. Values MUST equal the explicit blocks above (unit test). ---- */
@@ -456,5 +480,8 @@
     --overlay-caution: #FFB000;
     --overlay-stop: #FF3B30;
     --overlay-select: #FFCC00;
+    --course-ob: #FFFFFF;
+    --course-pin: #000000;
+    --course-outline: #000000;
 }
 }

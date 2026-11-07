@@ -13,6 +13,10 @@
 //     excludeMishits: true }
 //   LM_GROUNDS  LM_TILE_PRESETS  LM_TILE_MAX  LM_TILE_DEFAULTS { face_on, high_behind, dtl }  tileDefaults(view)
 //   theme: new installs start 'dark' (D1); an existing record keeps its theme, a migrated v1 record gets 'auto'.
+// 0.4.0 (V04-SPEC §F.4; FROZEN in V4-A drop 1): settings.quick / sim / share / lab are kept AS GIVEN (a plain object,
+//   else absent) and merge one level in saveSettings; defaults and normalisation live in the lazy modules
+//   quick/settings.js normalizeQuick, sim/settings.js normalizeSim, share/settings.js normalizeShare,
+//   lab/settings.js normalizeLab (shell budget). Readers in the shell treat an absent quick.enabled as true.
 import { DEFAULT_UNITS, defaultUnits, normalizeUnits } from '../i18n/units.js';
 import { METRIC_IDS } from '../contract/enums.js';
 
@@ -64,7 +68,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   }),
 });
 
-const NESTED = ['units', 'onboarding', 'live', 'lm'];
+const FEATURE = ['quick', 'sim', 'share', 'lab'];
+const NESTED = ['units', 'onboarding', 'live', 'lm', ...FEATURE];
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 function read(storage, key) {
@@ -90,6 +95,7 @@ function normalize(obj, languages) {
   s.dev = s.dev === true;
   s.sunSuggested = s.sunSuggested === true;
   s.lm = normalizeLm(isObj(obj.lm) ? obj.lm : {});
+  for (const k of FEATURE) if (!isObj(s[k])) delete s[k];
   return s;
 }
 

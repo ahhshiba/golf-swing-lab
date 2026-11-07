@@ -1,0 +1,13 @@
+{
+  "schema": "gsl-budget-baseline/1",
+  "note": "V04-SPEC F.7 / G.2: the 0.3.0 shell and precache sizes every 0.4.0 package's growth is measured against (dist/precache-manifest.json totals of a default build at commit 9f429da).",
+  "commit": "9f429da",
+  "version": "0.3.0+1b4deb6f45",
+  "shell_bytes": 976739,
+  "precache_bytes": 31880602,
+  "caps": {
+    "integration_shell_bytes": 992000,
+    "integration_precache_bytes": 32500000,
+    "package_shell_delta": { "V4-A": 11000, "V4-B": 3500, "V4-C": 0, "V4-D": 0, "V4-E": 600, "V4-F": 2000 }
+  }
+}

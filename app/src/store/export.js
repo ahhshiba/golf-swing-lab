@@ -7,6 +7,10 @@
 //   * a clip's Blob travels as { ...clip fields, data_b64, mime } and comes back as a Blob.
 //   * labels?[] (P14 owner annotations, store/labels.js) are included only with includeLabels; on import each one
 //     is checked with validateLabel and merged by revision like the shots. Event models are never exported.
+//   * rounds?[] (V04-SPEC §F.2, golf-round/1 simulated rounds): included by default when the export has no shot filter
+//     (includeRounds overrides); on import each one is checked with contract/round.js validateRound (loaded on first
+//     use) and merged by round_id / revision. The format stays golf-swing-lab-export/1: an older app ignores the
+//     unknown array (checkEnvelope never rejects unknown keys). golf-lab/1 records and drills are never exported.
 //
 // Shots are exported as golf-shot/2 (a stored golf-shot/1 record is migrated by contract/migrate.js on the way out;
 // LAUNCH-MONITOR-SPEC §2.1). importJSON accepts golf-shot/1 and golf-shot/2 shots (the contract validator checks a v1
@@ -149,14 +153,16 @@ function isoNow(now) {
 // No shot filter -> everything (also venues/presets/sessions that no shot uses yet).
 // With a shot filter -> the matching shots plus the venues/presets/sessions they reference, so the file stands alone.
 export async function exportJSON(repo, filter = {}) {
-  const { includePoses = false, includeClips = false, includeLabels = false, app_version: appVersion, now, ...shotFilter } = filter ?? {};
+  const { includePoses = false, includeClips = false, includeLabels = false, includeRounds, app_version: appVersion, now, ...shotFilter } = filter ?? {};
   assertShotFilter(shotFilter);
   const filtered = Object.values(shotFilter).some((v) => v !== undefined && v !== null);
+  const withRounds = (includeRounds ?? !filtered) && Boolean(repo.stores?.rounds);
 
   const names = ['venues', 'presets', 'sessions', 'shots'];
   if (includePoses) names.push('poses');
   if (includeClips) names.push('clips');
   if (includeLabels) names.push('labels');
+  if (withRounds) names.push('rounds');
   const snap = await repo.snapshot(names);
 
   const shots = filterShots(snap.shots, shotFilter);
@@ -189,6 +195,7 @@ export async function exportJSON(repo, filter = {}) {
   if (includePoses) out.poses = poses.map(encodeTyped);
   if (includeClips) out.clips = await Promise.all(clips.map(encodeClip));
   if (includeLabels) out.labels = labels;
+  if (withRounds) out.rounds = snap.rounds;
   return out;
 }
 
@@ -280,7 +287,7 @@ export function resolveDefaultValidator() {
 // ---------------------------------------------------------------------------------------------- importJSON
 
 const REQUIRED_ARRAYS = ['venues', 'presets', 'sessions', 'shots'];
-const ID_FIELD = { venues: 'venue_id', presets: 'preset_id', sessions: 'session_id', shots: 'shot_id', poses: 'shot_id', clips: 'clip_id', labels: 'shot_id' };
+const ID_FIELD = { venues: 'venue_id', presets: 'preset_id', sessions: 'session_id', shots: 'shot_id', poses: 'shot_id', clips: 'clip_id', labels: 'shot_id', rounds: 'round_id' };
 const MAX_LISTED = 5;
 
 function parseInput(data) {
@@ -311,7 +318,7 @@ function checkEnvelope(data) {
   if (missing.length) {
     throw new ImportError(`missing or malformed fields: ${missing.join(', ')}; nothing imported`, missing, { reason: 'missing_fields', params: { fields: missing.join(', ') } });
   }
-  for (const k of ['poses', 'clips', 'labels']) {
+  for (const k of ['poses', 'clips', 'labels', 'rounds']) {
     if (data[k] !== undefined && !Array.isArray(data[k])) {
       throw new ImportError(`field ${k} is malformed; nothing imported`, [k], { reason: 'bad_field', params: { field: k } });
     }
@@ -391,6 +398,17 @@ export async function importJSON(repo, data, { validate } = {}) {
     for (const l of byStore.labels) {
       const v = validateLabel(l);
       if (!v.ok) problems.push(`labels ${l.shot_id}: ${v.errors.map(describeError).join('; ')}`);
+    }
+  }
+
+  if (env.rounds !== undefined) {
+    byStore.rounds = dedupe('rounds', env.rounds, problems, warnings);
+    if (byStore.rounds.length) {
+      const { validateRound } = await import('../contract/round.js');
+      for (const r of byStore.rounds) {
+        const v = validateRound(r);
+        if (!v.ok) problems.push(`rounds ${r.round_id}: ${v.errors.map(describeError).join('; ')}`);
+      }
     }
   }
 

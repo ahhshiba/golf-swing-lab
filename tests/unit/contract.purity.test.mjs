@@ -36,7 +36,10 @@ test('index.js starts with an API summary and re-exports every public name', asy
   const src = readFileSync(join(DIR, 'index.js'), 'utf8');
   assert.ok(src.startsWith('//') && src.includes('API summary'));
   const idx = await import('../../app/src/contract/index.js');
-  for (const f of files.filter((x) => x !== 'index.js')) {
+  // round.js (golf-round/1, golf-lab/1) is lazy (V04-SPEC §F.7): index.js is in the boot graph, so it only names round.js
+  // in its API summary and never re-exports it
+  assert.ok(src.includes('round.js'));
+  for (const f of files.filter((x) => x !== 'index.js' && x !== 'round.js')) {
     const mod = await import(`../../app/src/contract/${f}`);
     for (const name of Object.keys(mod).filter((k) => k !== 'default')) assert.ok(name in idx, `${name} from ${f} missing in index.js`);
   }

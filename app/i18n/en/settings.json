@@ -156,5 +156,7 @@
   "lm.gap_min": "Smallest useful gap",
   "lm.gap_max": "Largest useful gap",
   "lm.gap.hint": "The distance table marks two neighbouring clubs whose carries are closer than the smallest gap, or further apart than the largest.",
-  "lm.gap.invalid": "Enter a smallest gap below the largest, both between {min} and {max}."
+  "lm.gap.invalid": "Enter a smallest gap below the largest, both between {min} and {max}.",
+  "quick": "Quick Read",
+  "quick.hint": "Show tempo and an estimated range right after the swing; the full analysis replaces it a few seconds later."
 }

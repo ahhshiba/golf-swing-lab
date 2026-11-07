@@ -1,0 +1,841 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "round-v1.schema.json",
+  "title": "golf-round/1",
+  "description": "A simulated round of golf-swing-lab (docs/V04-SPEC.md section F.2): the course geometry snapshot, the rules, 1–4 players and every stroke. The scorecard is not stored (sim/round.js scorecard derives it). Cross-field rules JSON Schema cannot express (stroke order, n sequence, uncertainty, replay, 256 KB size) are enforced by app/src/contract/round.js validateRound.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "round_id",
+    "created_at",
+    "updated_at",
+    "app_version",
+    "status",
+    "course",
+    "rules",
+    "players",
+    "strokes",
+    "current"
+  ],
+  "properties": {
+    "schema": {
+      "const": "golf-round/1"
+    },
+    "round_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "app_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "active",
+        "finished",
+        "abandoned"
+      ]
+    },
+    "course": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generator",
+        "style",
+        "seed",
+        "holes_n",
+        "tees",
+        "holes"
+      ],
+      "properties": {
+        "generator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "course generator version, 'course-1'"
+        },
+        "style": {
+          "enum": [
+            "parkland",
+            "links",
+            "desert",
+            "mixed"
+          ]
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "holes_n": {
+          "enum": [
+            9,
+            18
+          ]
+        },
+        "tees": {
+          "enum": [
+            "forward",
+            "middle",
+            "back"
+          ]
+        },
+        "holes": {
+          "type": "array",
+          "minItems": 9,
+          "maxItems": 18,
+          "items": {
+            "$ref": "#/$defs/hole"
+          }
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unobservedSide",
+        "putting",
+        "ob",
+        "maxScore",
+        "autoChipM",
+        "params_version"
+      ],
+      "properties": {
+        "unobservedSide": {
+          "enum": [
+            "sample",
+            "center"
+          ]
+        },
+        "putting": {
+          "enum": [
+            "auto",
+            "manual"
+          ]
+        },
+        "ob": {
+          "enum": [
+            "drop_2",
+            "stroke_distance"
+          ]
+        },
+        "maxScore": {
+          "enum": [
+            "double_par",
+            "none"
+          ]
+        },
+        "autoChipM": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 40
+        },
+        "params_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "players": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "player_id",
+          "name",
+          "handedness",
+          "kind",
+          "driver_carry_m",
+          "putt_skill"
+        ],
+        "properties": {
+          "player_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "handedness": {
+            "enum": [
+              "right",
+              "left"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "owner",
+              "guest"
+            ]
+          },
+          "driver_carry_m": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "putt_skill": {
+            "enum": [
+              0,
+              10,
+              20,
+              30
+            ]
+          }
+        }
+      }
+    },
+    "strokes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/stroke"
+      }
+    },
+    "current": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "hole",
+            "player_id"
+          ],
+          "properties": {
+            "hole": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18
+            },
+            "player_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "xy": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number"
+      }
+    },
+    "xyz": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "poly": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 24,
+      "items": {
+        "$ref": "#/$defs/xy"
+      },
+      "description": "[[x, y] …] metres, 0.1 m quantised, at most 24 points"
+    },
+    "lie": {
+      "enum": [
+        "tee",
+        "fairway",
+        "rough",
+        "bunker",
+        "green",
+        "water",
+        "ob"
+      ]
+    },
+    "reasonCode": {
+      "enum": [
+        "VIEW_DEPTH_AXIS",
+        "VIEW_PLANE_MISMATCH",
+        "FPS_TOO_LOW",
+        "TRACK_TOO_SHORT",
+        "TRACK_MAY_BE_SHORT",
+        "LAUNCH_DIR_UNOBSERVABLE",
+        "DEPENDS_ON_NULL",
+        "SPIN_ASSUMED",
+        "WIND_IGNORED",
+        "TIMESTAMPS_NOMINAL",
+        "TIMEBASE_SUSPECT",
+        "SETUP_UNVERIFIED",
+        "CALIB_STALE",
+        "PRESET_MISMATCH",
+        "DEPTH_DRIFT_SUSPECT",
+        "ROLLING_SHUTTER_ASSUMED",
+        "BODY_PLANE_ASSUMED",
+        "NO_GRAVITY_REF",
+        "AUDIO_UNAVAILABLE",
+        "THERMAL_DEGRADED",
+        "TEE_LIFT_ASSUMED",
+        "POSE_LOW_VISIBILITY",
+        "EVENTS_UNCERTAIN",
+        "OUT_OF_FRAME",
+        "IMPLAUSIBLE_VALUE",
+        "NOT_IMPLEMENTED",
+        "NO_CALIBRATION",
+        "CLIP_NOT_SAVED",
+        "SLOWMO_CORRECTED",
+        "DPLANE_MODEL",
+        "SPIN_MODELLED",
+        "SPIN_LOFT_ASSUMED",
+        "FLIGHT_MODELLED",
+        "ROLL_MODELLED",
+        "SMASH_ASSUMED",
+        "LAUNCH_V_ASSUMED",
+        "CROSS_VIEW_PRIOR",
+        "MIGRATED_V1",
+        "PROVISIONAL",
+        "GAPPING_PRIOR",
+        "REFERENCE_PRIOR",
+        "SIDE_SAMPLED",
+        "MANUAL_ENTRY",
+        "LIE_ADJUSTED",
+        "AUTO_PUTT",
+        "AUTO_CHIP",
+        "FAULT_INCONCLUSIVE"
+      ]
+    },
+    "value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "ci95",
+        "sigma",
+        "validity",
+        "origin",
+        "reason_codes"
+      ],
+      "description": "A simulated carry or side value. Validator: validity is never valid; a non-null value of a non-manual origin needs ci95 or sigma; origin manual needs MANUAL_ENTRY; a null value needs a reason code.",
+      "properties": {
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ci95": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number"
+              }
+            }
+          ]
+        },
+        "sigma": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "validity": {
+          "enum": [
+            "estimated",
+            "low_confidence",
+            "occluded",
+            "ambiguous",
+            "dropped",
+            "stale",
+            "not_observable",
+            "implausible",
+            "not_computed"
+          ]
+        },
+        "origin": {
+          "enum": [
+            "pose",
+            "ball_fit3d",
+            "ball_fit2d",
+            "club_track",
+            "ballistics",
+            "derived",
+            "manual",
+            "dplane",
+            "spin_model",
+            "flight_model",
+            "prior",
+            "sim"
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reasonCode"
+          }
+        }
+      }
+    },
+    "hole": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "n",
+        "par",
+        "style",
+        "template",
+        "length_m",
+        "tees",
+        "pin",
+        "green",
+        "fairway",
+        "bunkers",
+        "water",
+        "trees",
+        "bounds",
+        "centerline",
+        "elevation"
+      ],
+      "description": "Hole geometry snapshot (x east, y north, z up; metres). Outside bounds = OB; rough = inside bounds and in no other area. At most 30 polygons and 60 trees per hole (validator).",
+      "properties": {
+        "n": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18
+        },
+        "par": {
+          "enum": [
+            3,
+            4,
+            5
+          ]
+        },
+        "style": {
+          "enum": [
+            "parkland",
+            "links",
+            "desert"
+          ]
+        },
+        "template": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "length_m": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "tees": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "forward",
+            "middle",
+            "back"
+          ],
+          "properties": {
+            "forward": {
+              "$ref": "#/$defs/xyz"
+            },
+            "middle": {
+              "$ref": "#/$defs/xyz"
+            },
+            "back": {
+              "$ref": "#/$defs/xyz"
+            }
+          }
+        },
+        "pin": {
+          "$ref": "#/$defs/xy"
+        },
+        "green": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "poly",
+            "z",
+            "slope_pct"
+          ],
+          "properties": {
+            "poly": {
+              "$ref": "#/$defs/poly"
+            },
+            "z": {
+              "type": "number"
+            },
+            "slope_pct": {
+              "type": "number"
+            }
+          }
+        },
+        "fairway": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/poly"
+          }
+        },
+        "bunkers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/poly"
+          }
+        },
+        "water": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/poly"
+          }
+        },
+        "trees": {
+          "type": "array",
+          "maxItems": 60,
+          "items": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "type": "number"
+            }
+          },
+          "description": "[x, y, r, h]"
+        },
+        "bounds": {
+          "$ref": "#/$defs/poly"
+        },
+        "centerline": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/xy"
+          }
+        },
+        "elevation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tee_z",
+            "green_z"
+          ],
+          "properties": {
+            "tee_z": {
+              "type": "number"
+            },
+            "green_z": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "stroke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "player_id",
+        "hole",
+        "n",
+        "from",
+        "aim",
+        "club",
+        "source",
+        "shot_id",
+        "carry",
+        "side",
+        "draw",
+        "landing",
+        "rest",
+        "penalty",
+        "event"
+      ],
+      "description": "One stroke. Validator: seq strictly increasing; per player and hole n = 1, 2, 3 …; a manual stroke has shot_id null (manual numbers never feed stats or gapping).",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "player_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hole": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "from": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "lie"
+          ],
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "lie": {
+              "$ref": "#/$defs/lie"
+            }
+          }
+        },
+        "aim": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          }
+        },
+        "club": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "enum": [
+            "quick",
+            "shot",
+            "manual",
+            "auto_putt",
+            "auto_chip",
+            "penalty",
+            "pickup"
+          ]
+        },
+        "shot_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "carry": {
+          "$ref": "#/$defs/value"
+        },
+        "side": {
+          "$ref": "#/$defs/value"
+        },
+        "draw": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "seed",
+            "carry_m",
+            "side_m"
+          ],
+          "properties": {
+            "seed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "carry_m": {
+              "type": "number"
+            },
+            "side_m": {
+              "type": "number"
+            }
+          }
+        },
+        "landing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "z": {
+              "type": "number"
+            }
+          }
+        },
+        "rest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "lie"
+          ],
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "lie": {
+              "$ref": "#/$defs/lie"
+            }
+          }
+        },
+        "penalty": {
+          "enum": [
+            0,
+            1,
+            2
+          ]
+        },
+        "event": {
+          "enum": [
+            null,
+            "tree",
+            "water",
+            "ob",
+            "holed"
+          ]
+        }
+      }
+    },
+    "lab": {
+      "description": "golf-lab/1 (store 'lab', derived and recomputable, never exported): validator contract/round.js validateLabRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shot_id",
+        "view",
+        "algo",
+        "faults",
+        "computed_at"
+      ],
+      "properties": {
+        "shot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "view": {
+          "enum": [
+            "face_on",
+            "dtl",
+            "high_behind"
+          ]
+        },
+        "algo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "sha256"
+          ],
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "faults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "status",
+              "value",
+              "sigma",
+              "threshold",
+              "event",
+              "reason_codes"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "fault",
+                  "possible",
+                  "ok",
+                  "unknown"
+                ]
+              },
+              "value": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "sigma": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "threshold": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "event": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason_codes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/reasonCode"
+                }
+              }
+            }
+          }
+        },
+        "computed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

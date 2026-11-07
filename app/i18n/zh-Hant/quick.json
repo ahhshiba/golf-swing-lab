@@ -1,0 +1,10 @@
+{
+  "name": "速報",
+  "provisional": "速報",
+  "refined": "精算",
+  "change": "速報 {from} → 精算 {to}",
+  "source.pose": "來自揮桿",
+  "source.gapping": "距離表",
+  "source.reference": "一般球員",
+  "none": "這一桿沒有速報"
+}

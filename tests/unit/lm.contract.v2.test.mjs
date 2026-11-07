@@ -149,7 +149,7 @@ test('validator v2 rules one by one (rule names in the messages)', () => {
 const schema = JSON.parse(readFileSync(join(ROOT, 'schema/shot-v2.schema.json'), 'utf8'));
 const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
 const isType = (t, v) => (t === 'integer' ? Number.isInteger(v) : t === 'number' ? typeof v === 'number' && Number.isFinite(v) : typeOf(v) === t);
-const ANN = new Set(['$schema', '$id', 'title', 'description', '$defs']);
+const ANN = new Set(['$schema', '$id', '$comment', 'title', 'description', '$defs']);
 function check(s, v, p, e) {
   for (const k of Object.keys(s)) if (!ANN.has(k) && !KW[k]) throw new Error(`keyword ${k}`);
   for (const k of Object.keys(s)) if (KW[k]) KW[k](s[k], s, v, p, e);
@@ -191,7 +191,7 @@ test('schema/shot-v2.schema.json: lists agree with enums.js; every valid v2 fixt
   for (const id of C.METRIC_IDS) assert.equal(schema.properties.metrics.properties[id].allOf[1].properties.unit.const, C.METRIC_UNITS[id]);
   assert.equal(C.METRIC_UNITS.spin_rate_rpm, 'rpm');
   assert.deepEqual([...schema.$defs.reasonCode.enum].sort(), [...C.REASON_CODE_LIST].sort());
-  assert.equal(C.REASON_CODE_LIST.length, 38);
+  assert.equal(C.REASON_CODE_LIST.length, 47);
   assert.deepEqual(schema.$defs.metric.properties.value_origin.enum, [...C.VALUE_ORIGINS]);
   for (const o of ['dplane', 'spin_model', 'flight_model', 'prior']) assert.ok(C.VALUE_ORIGINS.includes(o));
   assert.deepEqual(schema.required, [...C.SHOT_REQUIRED_KEYS]);

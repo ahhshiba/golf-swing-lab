@@ -8,7 +8,8 @@
     "session", "storage", "diag", "update", "offline",
     "model", "events",
     "settings", "about", "privacy", "help", "legal", "licence",
-    "tiles", "viz", "drill", "stats", "gapping"
+    "tiles", "viz", "drill", "stats", "gapping",
+    "quick", "sim", "course", "score", "share", "lab", "fault", "patterns"
   ],
   "owners": {
     "foundation": ["app", "common", "screen", "nav", "unit", "validity", "view", "mode", "club", "event", "metric", "reason", "error", "a11y", "time"],
@@ -20,6 +21,10 @@
     "lm-c": ["viz"],
     "lm-d": ["tiles"],
     "lm-e": ["drill"],
-    "lm-f": ["stats", "gapping"]
+    "lm-f": ["stats", "gapping"],
+    "v4-b": ["quick"],
+    "v4-d": ["sim", "course", "score"],
+    "v4-e": ["share"],
+    "v4-f": ["lab", "fault", "patterns"]
   }
 }

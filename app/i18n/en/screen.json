@@ -19,5 +19,10 @@
   "drills.title": "Practice drills",
   "drill.title": "Drill",
   "stats.title": "Statistics",
-  "gapping.title": "Distance gaps"
+  "gapping.title": "Distance gaps",
+  "course.title": "Virtual Course",
+  "round.title": "Round",
+  "scorecard.title": "Scorecard",
+  "lab.title": "Swing Lab",
+  "patterns.title": "Swing patterns"
 }

@@ -51,7 +51,7 @@ test('check_contract passes on the real tree', async () => {
   assert.deepEqual(problems, []);
   assert.ok(info.some((i) => /valid \+ \d+ bad golf-shot\/1 fixtures/.test(i)));
   assert.ok(info.some((i) => /valid \+ [7-9]\d* bad golf-shot\/2 fixtures/.test(i)), info.join('; '));
-  assert.ok(info.includes('38 reason codes'));
+  assert.ok(info.includes('47 reason codes'));
 });
 
 test('node scripts/check_contract.mjs exits 0', () => {

@@ -1,0 +1,21 @@
+{
+  "empty.title": "還沒有回合",
+  "empty.body": "用自己的揮桿打原創球場；每個數字都是帶範圍的估計",
+  "new": "新回合",
+  "active": "進行中",
+  "finished": "已完成",
+  "style.parkland": "林間",
+  "style.links": "海風",
+  "style.desert": "荒漠",
+  "style.mixed": "混合",
+  "holes": "{n} 洞",
+  "seed": "球場編號",
+  "tees.forward": "前發球台",
+  "tees.middle": "中發球台",
+  "tees.back": "後發球台",
+  "players": "球員",
+  "player.owner": "你",
+  "player.guest": "訪客",
+  "putt_skill": "推桿程度",
+  "hint.face_on": "打回合建議用正面機位，距離估計最好"
+}

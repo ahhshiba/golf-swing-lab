@@ -1,0 +1,12 @@
+{
+  "none.title": "還沒有記分卡",
+  "none.body": "在回合中打完一洞就會出現記分卡",
+  "disclaimer": "模擬成績由估計距離算出，不等於真實球場成績",
+  "out": "前九",
+  "in": "後九",
+  "total": "總計",
+  "putts": "推桿",
+  "penalties": "罰桿",
+  "to_par": "對標準桿",
+  "simulated": "模擬"
+}

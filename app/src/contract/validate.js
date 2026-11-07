@@ -390,7 +390,7 @@ function checkFlight(f, carry, path, err) {
 function checkTracks(tr, path, err) {
   if (tr === null) return;
   if (!isObj(tr)) { err(path, 'tracks must be null or an object'); return; }
-  checkKeys(tr, ['ball_px', 'impact_frame', 'view'], [], path, err);
+  checkKeys(tr, ['ball_px', 'impact_frame', 'view'], ['club_px'], path, err);
   const at = (k) => join(path, k);
   if (has(tr, 'ball_px')) {
     const b = tr.ball_px;
@@ -400,6 +400,18 @@ function checkTracks(tr, path, err) {
         const pp = join(at('ball_px'), i);
         if (!isPoint(p, 4) || !isInt(p[0]) || p[0] < 0 || p[3] < 0) { err(pp, 'point must be [frame (integer >= 0), u, v, r_px (>= 0)]'); return; }
         if (i > 0 && isPoint(b[i - 1], 4) && !(p[0] > b[i - 1][0])) err(pp, `frame ${p[0]} must be greater than the previous point's ${b[i - 1][0]} (tracks_frame_increasing)`);
+      });
+    }
+  }
+  // V04-SPEC §F.1 (golf-shot/2 rev 2): optional club-head track [frame, u, v]
+  if (has(tr, 'club_px')) {
+    const c = tr.club_px;
+    if (!Array.isArray(c) || c.length > TRACK_MAX_POINTS) err(at('club_px'), `club_px must be an array of at most ${TRACK_MAX_POINTS} [frame, u, v] points`);
+    else {
+      c.forEach((p, i) => {
+        const pp = join(at('club_px'), i);
+        if (!isPoint(p, 3) || !isInt(p[0]) || p[0] < 0) { err(pp, 'point must be [frame (integer >= 0), u, v]'); return; }
+        if (i > 0 && isPoint(c[i - 1], 3) && !(p[0] > c[i - 1][0])) err(pp, `frame ${p[0]} must be greater than the previous point's ${c[i - 1][0]} (tracks_club_frame_increasing)`);
       });
     }
   }

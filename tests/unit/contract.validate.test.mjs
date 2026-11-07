@@ -189,7 +189,7 @@ test('reason codes: known, unique, strings; every defined code is accepted', () 
   assert.deepEqual(texts(validateShot(s)), []);
   // golf-shot/1 knows only its 29 codes
   expectOne('valid_face_on_240', (s2) => { s2.metrics.head_depth_y_m.reason_codes = [RC.MIGRATED_V1]; }, 'reason code MIGRATED_V1 does not exist in golf-shot/1');
-  assert.equal(Object.keys(REASON_CODES).length, 38);
+  assert.equal(Object.keys(REASON_CODES).length, 47);
 });
 
 test('metric truth table: validateMetric agrees with an independent oracle on 720 combinations', () => {

@@ -1,0 +1,21 @@
+{
+  "empty.title": "No rounds yet",
+  "empty.body": "Play an original course with your own swings. Every number is an estimate with a range.",
+  "new": "New round",
+  "active": "In progress",
+  "finished": "Finished",
+  "style.parkland": "Parkland",
+  "style.links": "Links",
+  "style.desert": "Desert",
+  "style.mixed": "Mixed",
+  "holes": "{n} holes",
+  "seed": "Course number",
+  "tees.forward": "Forward tees",
+  "tees.middle": "Middle tees",
+  "tees.back": "Back tees",
+  "players": "Players",
+  "player.owner": "You",
+  "player.guest": "Guest",
+  "putt_skill": "Putting level",
+  "hint.face_on": "Face-on gives the best distance estimates for a round."
+}

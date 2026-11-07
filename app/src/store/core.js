@@ -16,6 +16,11 @@
 //                                                         label stay until purgeDeleted(); restore() moves it back)
 //   drills[drill_id]   created_at, template              (v4, LAUNCH-MONITOR-SPEC §5.0-7: practice drills / tests in
 //                                                         progress or done; record shape owned by practice/drills.js)
+//   rounds[round_id]   created_at, status               (v5, V04-SPEC §F.2: golf-round/1 simulated rounds; validator
+//                                                         contract/round.js; exported as rounds[])
+//   lab[shot_id]       computed_at, view                (v5, V04-SPEC §F.2: golf-lab/1 derived swing-lab results;
+//                                                         recomputable, never exported; deleteStale(version) drops
+//                                                         records of another algorithm version)
 // Records are plain JSON-like objects; the repository never adds or changes fields (export -> import must be exact).
 // One exception (LAUNCH-MONITOR-SPEC §2.1): the shot shortcuts repo.shots.get / repo.shots.list and queryShots return
 // golf-shot/2 (a stored golf-shot/1 record is migrated on read by contract/migrate.js, loaded on first use);
@@ -37,7 +42,7 @@
 import { RC } from '../contract/reason-codes.js';
 
 export const DB_NAME = 'golf-swing-lab';
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 function deepFreeze(o) {
   for (const v of Object.values(o)) if (v !== null && typeof v === 'object') deepFreeze(v);
@@ -69,6 +74,9 @@ export const STORE_DEFS = deepFreeze({
   trash: { keyPath: 'shot_id', indexes: { deleted_at: 'deleted_at' } },
   // v4 (additive): practice drills / tests (LAUNCH-MONITOR-SPEC §3.5, §5.0-7)
   drills: { keyPath: 'drill_id', indexes: { created_at: 'created_at', template: 'template' } },
+  // v5 (additive): simulated rounds and swing-lab results (V04-SPEC §F.2)
+  rounds: { keyPath: 'round_id', indexes: { created_at: 'created_at', status: 'status' } },
+  lab: { keyPath: 'shot_id', indexes: { computed_at: 'computed_at', view: 'view' } },
 });
 
 /** The stores of schema version 1 (tests open an old database with exactly these). */
@@ -87,6 +95,7 @@ export const MIGRATIONS = Object.freeze([
   Object.freeze({ version: 2, up: async () => { /* additive: labels + models stores are created empty */ } }),
   Object.freeze({ version: 3, up: async () => { /* additive: trash store is created empty */ } }),
   Object.freeze({ version: 4, up: async () => { /* additive: drills store is created empty */ } }),
+  Object.freeze({ version: 5, up: async () => { /* additive: rounds + lab stores are created empty */ } }),
 ]);
 
 /** Default batch size of the background write-back of migrated shots (LAUNCH-MONITOR-SPEC §2.1). */
@@ -337,6 +346,14 @@ export class Repository {
       });
     }
     if (this.labels) this.labels.unlabelledWithClips = () => this.unlabelledWithClips();
+    // V04-SPEC §F.2: drop golf-lab/1 records computed by another algorithm version -> number deleted
+    if (this.lab) {
+      this.lab.deleteStale = (version) => this.transaction(['lab'], 'readwrite', async (tx) => {
+        let n = 0;
+        for (const r of await tx.getAll('lab')) if (r?.algo?.version !== version) { await tx.delete('lab', r.shot_id); n++; }
+        return n;
+      });
+    }
   }
 
   _def(store) {

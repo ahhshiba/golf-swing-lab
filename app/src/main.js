@@ -43,7 +43,15 @@ export const SCREEN_MODULES = Object.freeze({
   drill: ['./ui/drill.js', 'mountDrill'],
   stats: ['./ui/stats.js', 'mountStats'],
   gapping: ['./ui/gapping.js', 'mountGapping'],
+  // V04-SPEC §G.0 (lazy files)
+  course: ['./ui/course.js', 'mountCourse'],
+  round: ['./ui/round.js', 'mountRound'],
+  scorecard: ['./ui/scorecard.js', 'mountScorecard'],
+  lab: ['./ui/lab.js', 'mountLab'],
+  patterns: ['./ui/patterns.js', 'mountPatterns'],
 });
+/** Lazy screen stylesheets (V04-SPEC §F.6): screen id → styles/screens/<name>.css, applied before the screen mounts. */
+export const SCREEN_STYLES = Object.freeze({ course: 'sim', round: 'sim', scorecard: 'sim', lab: 'lab', patterns: 'lab' });
 /** Pause between background write-back batches of migrated shots (LAUNCH-MONITOR-SPEC §2.1). */
 const MIGRATE_PAUSE_MS = 400;
 /** Screens whose first show waits for the media/devtools modules and the session controller. */
@@ -138,6 +146,50 @@ export function createDrillState() {
       return cur;
     },
     onChange(fn) { subs.add(fn); return () => subs.delete(fn); },
+  };
+}
+
+/**
+ * app.sim (V04-SPEC §G.0-3): the simulated stroke being played. The round screen sets the context
+ * { round_id, hole, player_id, stroke_n, club } before it sends the player to live / import; those screens read
+ * active() and hand the result back with submit({ kind: 'quick', result } | { kind: 'shot', shot } |
+ * { kind: 'manual', carry_m, side_m }); the round screen listens with onSubmit(fn) -> off.
+ * submit() returns the number of listeners that took it (0 = no round screen listening); a bad input throws TypeError.
+ */
+export function createSimState() {
+  let cur = null;
+  const subs = new Set();
+  return {
+    active: () => cur,
+    set(ctx) { cur = ctx ?? null; return cur; },
+    submit(input) {
+      if (!['quick', 'shot', 'manual'].includes(input?.kind)) throw new TypeError('app.sim.submit({ kind: quick|shot|manual, … })');
+      let n = 0;
+      for (const fn of [...subs]) { try { fn(input, cur); n++; } catch (_) { /* a listener must not break the others */ } }
+      return n;
+    },
+    onSubmit(fn) { subs.add(fn); return () => subs.delete(fn); },
+  };
+}
+
+/** app.loadStyles(name) (V04-SPEC §F.6): add styles/screens/<name>.css once; resolves when it has loaded. */
+export function createStyleLoader(doc = globalThis.document) {
+  const loading = new Map();
+  return (name) => {
+    if (!/^[a-z][a-z0-9-]*$/.test(String(name))) return Promise.reject(new TypeError(`bad stylesheet name ${name}`));
+    if (!loading.has(name)) {
+      const p = new Promise((resolve, reject) => {
+        const l = doc.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = `styles/screens/${name}.css`;
+        l.dataset.lazyCss = name;
+        l.addEventListener('load', () => resolve(l));
+        l.addEventListener('error', () => { loading.delete(name); l.remove(); reject(Object.assign(new Error(`stylesheet ${name} failed to load`), { code: 'STYLES_UNAVAILABLE' })); });
+        doc.head.append(l);
+      });
+      loading.set(name, p);
+    }
+    return loading.get(name);
   };
 }
 
@@ -269,6 +321,8 @@ async function boot() {
     settings: () => settings,
     updateSettings: (s) => { settings = s; applyTheme(s?.theme); applyDataTheme(s?.theme, roots); },
     drill: createDrillState(),
+    sim: createSimState(),
+    loadStyles: createStyleLoader(document),
     e2e: createE2EStates(),
     vision: null,
     // PRODUCT-SPEC §8.0.4
@@ -397,6 +451,7 @@ async function boot() {
         // the rare screens' catalog part (build.mjs LAZY_I18N_NAMESPACES) loads in the background; home and onboarding
         // use none of it, every other screen may (settings → help/privacy/licences, shot → teach labels)
         if (id !== 'home' && id !== 'onboarding') await i18nComplete();
+        if (SCREEN_STYLES[id]) await app.loadStyles(SCREEN_STYLES[id]).catch((e) => errors.report(e, { where: `styles.${id}`, silent: true }));
         let mod = null;
         if (present(spec[0])) {
           try { mod = await import(spec[0]); } catch (e) { errors.report(e, { where: `mount.${id}`, silent: true }); }

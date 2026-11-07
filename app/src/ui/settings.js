@@ -242,7 +242,9 @@ function renderRoot(ctx) {
     h('div', { class: 'field set-field' }, h('span', { class: 'field-label', id: 'set-live-metrics', text: t('settings.live.metrics') }),
       h('div', { class: 'set-toggles', role: 'group', 'aria-labelledby': 'set-live-metrics', 'data-testid': 'settings-live-metrics' }, toggles),
       h('p', { class: 'hint', text: t('settings.live.metrics.hint') }), metricsErr),
-    voice));
+    voice,
+    // V04-SPEC §A.2, §F.4: quick read (速報) right after the swing; settings.quick.enabled absent = on
+    C.switchRow({ label: t('settings.quick'), hint: t('settings.quick.hint'), checked: st.quick?.enabled !== false, testid: 'settings-quick', onChange: (on) => save({ quick: { enabled: on } }) })));
 
   // ---- units ----
   const unitSeg = (dim, testid) => C.segmented({
