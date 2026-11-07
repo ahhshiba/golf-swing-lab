@@ -247,3 +247,61 @@ test('bad input: unknown warning -> RangeError; contract violation -> ContractEr
   assert.throws(() => assembleShot({ ...b.input, calibration: null }), TypeError);
   assert.throws(() => assembleShot({ ...b.input, capture: { ...b.input.capture, view: 'side' } }), RangeError);
 });
+
+// ---- V04-SPEC §F.1 / §G.3 V4-E 3: tracks.club_px (golf-shot/2 rev 2) from the track/club.js observations
+import { clubPx, withClubPx } from '../../app/src/pipeline/assemble.js';
+import { validateShot } from '../../app/src/contract/validate.js';
+
+test('face_on 240 synthetic clip: tracks.club_px non-empty, frames increasing, valid golf-shot/2', () => {
+  const b = buildE2EShot({ ...SETS.main[0], render: true });
+  const first = assembleShot(b.input);
+  assert.ok(first.shot.tracks && first.shot.tracks.ball_px.length > 0, 'the synthetic face_on 240 shot has a ball track');
+  // the synthetic renderer draws no club (club: null), so the club-head observations of track/club.js are injected:
+  // a head sweeping into the resting ball over the last 8 frames before the departure (full-image px, as analyzeClip)
+  const rest = first.track.restBall;
+  const times = b.input.ballFrames.times;
+  const dep = first.track.info?.departure ?? 30;
+  const clubTrack = Array.from({ length: 8 }, (_, k) => ({ frame: dep - 8 + k, t_s: times[dep - 8 + k], u: rest.u - (8 - k) * 9, v: rest.v - (8 - k) * 2, conf: 0.4 }));
+  const { shot } = assembleShot({ ...b.input, track: { ...first.track, clubTrack } });
+  assertContract(shot);
+  const c = shot.tracks.club_px;
+  assert.ok(Array.isArray(c) && c.length === 8, JSON.stringify(c));
+  for (let i = 1; i < c.length; i++) assert.ok(c[i][0] > c[i - 1][0], `frame ${c[i][0]} after ${c[i - 1][0]}`);
+  assert.ok(c.every((p) => p.length === 3 && Number.isInteger(p[0]) && p[0] >= 0));
+  // club frames are capture-frame numbers on the same scale as ball_px: the head reaches the ball before it leaves
+  assert.ok(c[c.length - 1][0] <= shot.tracks.ball_px[0][0] + 1, `${c[c.length - 1][0]} vs ball ${shot.tracks.ball_px[0][0]}`);
+  assert.equal(validateShot(shot).ok, true);
+  // without club observations nothing is added (no empty club_px)
+  assert.equal('club_px' in first.shot.tracks, false);
+});
+
+test('high_behind 240 with a club-head track: tracks.club_px written and valid', () => {
+  const s = highBehindShot({ seed: 4, i: 0 });
+  const { shot } = assembleShot(highBehindInput(s, { seed: 4, i: 0 }));
+  assertContract(shot);
+  assert.ok(shot.tracks && shot.tracks.ball_px.length > 0, "the fixture has a ball track (club_px needs ball_px next to it)");
+  assert.ok(shot.tracks.club_px.length >= 2);
+  assert.equal(validateShot(shot).ok, true);
+});
+
+test('clubPx: nearest capture frame, duplicates dropped, unsorted input sorted, thinned to 40 evenly', () => {
+  const times = Array.from({ length: 500 }, (_, i) => i / 240);
+  const obs = [{ t_s: 10 / 240, u: 1.234, v: 2 }, { t_s: 9 / 240, u: 0, v: 0 }, { t_s: 10.2 / 240, u: 5, v: 5 }, { t_s: NaN, u: 1, v: 1 }];
+  assert.deepEqual(clubPx(obs, times, 240), [[9, 0, 0], [10, 1.23, 2]]);
+  assert.deepEqual(clubPx([{ t_s: 0.5, u: 1, v: 1 }], null, 240), [[120, 1, 1]]);
+  const many = Array.from({ length: 100 }, (_, i) => ({ t_s: i / 240, u: i, v: i }));
+  const out = clubPx(many, times, 240);
+  assert.equal(out.length, 40);
+  assert.deepEqual(out[0], [0, 0, 0]);
+  assert.deepEqual(out[39], [99, 99, 99]);
+  for (let i = 1; i < out.length; i++) assert.ok(out[i][0] > out[i - 1][0]);
+});
+
+test('withClubPx: all-non-finite club observations → no club_px key (never club_px: [])', () => {
+  const tracks = { ball_px: [[1, 2, 3]] };
+  assert.deepEqual(withClubPx(tracks, [{ t_s: NaN, u: 1, v: 1 }, { t_s: 0.1, u: Infinity, v: 2 }], null, 240), tracks);
+  assert.ok(!('club_px' in withClubPx(tracks, [{ t_s: NaN, u: 1, v: 1 }], null, 240)));
+  assert.deepEqual(withClubPx(tracks, [{ t_s: 0.5, u: 1, v: 1 }], null, 240).club_px, [[120, 1, 1]]);
+  assert.equal(withClubPx(null, [{ t_s: 0.5, u: 1, v: 1 }], null, 240), null);
+  assert.equal(withClubPx(tracks, [], null, 240), tracks);
+});

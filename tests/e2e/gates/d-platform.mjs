@@ -478,9 +478,13 @@ export const recorder = {
 // frame is CLIP_FRAME_H_M = 2.0 m tall, torso 0.25 frame heights (0.5 m), so the fixture's hand path (rise 0.5 frame
 // heights in 0.9 s, back down in 0.3 s) is a 1 m backswing and a ~3.3 m/s downswing: a swing for events/rules.js.
 export const CLIP_FRAME_H_M = 2.0;
-export function installClipPoseStandIn({ frameH }) {
+// With `code` (the m5 frame-index code, as for m5.mjs installPoseStandIn) it also decodes each clip frame's fixture
+// frame index: self.clip.codes = [[job, t_s (clip time), frame_index | -1]], job = self.clip.job, which ui/live.js sets
+// (e2e only) to the 1-based index of the live job in __GSL_E2E__.segStarts (its segment's t_media_start_s), so a gate
+// can tell where a recorded segment really starts on the media timeline.
+export function installClipPoseStandIn({ frameH, code = null }) {
   const self = (globalThis.__GSL_E2E__ ??= {});
-  self.clip = { frames: 0, found: 0 };
+  self.clip = { frames: 0, found: 0, codes: [], job: 0 };
   const BODY = {
     0: [0.5, 0.2], 1: [0.505, 0.19], 2: [0.51, 0.19], 3: [0.515, 0.19], 4: [0.495, 0.19], 5: [0.49, 0.19], 6: [0.485, 0.19],
     7: [0.525, 0.2], 8: [0.475, 0.2], 9: [0.505, 0.215], 10: [0.495, 0.215],
@@ -495,6 +499,26 @@ export function installClipPoseStandIn({ frameH }) {
     g.drawImage(bitmap, 0, 0);
     bitmap.close?.();
     const d = g.getImageData(0, 0, bw, bh).data;
+    if (code && self.clip.codes.length < 20000) {
+      const roi0 = o && o.crop && o.crop.roi ? o.crop.roi : null;
+      const W0 = (o && o.crop && o.crop.W) || code.w, H0 = (o && o.crop && o.crop.H) || code.h;
+      const kx = W0 / code.w, ky = H0 / code.h;
+      const at = (X, Y) => {
+        const fx = X * kx - (roi0 ? roi0.x : 0), fy = Y * ky - (roi0 ? roi0.y : 0);
+        const bx = Math.floor((fx / (roi0 ? roi0.w : W0)) * bw), by = Math.floor((fy / (roi0 ? roi0.h : H0)) * bh);
+        if (bx < 0 || by < 0 || bx >= bw || by >= bh) return NaN;
+        const i = 4 * (by * bw + bx);
+        return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      };
+      let fi = 0, par = 0, ok = true;
+      for (let k = 0; k <= code.bits; k++) {
+        const l = at(code.x0 + (k + 0.5) * code.cell, code.rows / 2);
+        if (!Number.isFinite(l)) { ok = false; break; }
+        const b = l > 125 ? 1 : 0;
+        if (k < code.bits) { fi |= b << k; par ^= b; } else if (b !== par) ok = false;
+      }
+      self.clip.codes.push([self.clip.job, t_s, ok ? fi : -1]);
+    }
     let sx = 0, sy = 0, n = 0;
     for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
       const i = 4 * (y * bw + x);

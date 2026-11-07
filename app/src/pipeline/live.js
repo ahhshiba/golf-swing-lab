@@ -8,7 +8,8 @@
 //                    analyzePractice = false, idle_hz = 10, swing_hz = 30, impact_min_db = 20, now?() -> ms, newIds?() -> ids,
 //                    onShot?(r), onEvent?(ev), onError?(e), onDegrade?(decision), onStopLive?(decision),
 //                    getClub?() -> club (controller.club(): the club of the NEXT job), onQueue?(ev),
-//                    livePoseModel = 'lite', queueLimit = 2, idleCutMs = 8000 })
+//                    livePoseModel = 'lite', queueLimit = 2, idleCutMs = 8000,
+//                    quick?: tap | () => tap (quick/live.js createQuickTap: sample / impact / shot / compare hooks) })
 //     -> { handleFrame(bitmap, t_media_s, meta) -> Promise, handleOnset(t_media_s, level_db?) (< impact_min_db dropped; buffered until a frame at or
 //          after t_media_s has its pose, so the detector sees media-time order), touch(), stats(), state(),
 //          degrade(decision?), idle() -> Promise (all queued analyses done) }
@@ -32,6 +33,9 @@
 // Diag logs (bounded, last LOG_MAX): live.shot_log = [{ kind, t_impact, t_peak, t_finish, impact_source }] per detected
 // shot and live.onset_log = [[t_media_s, level_db]] per impact-candidate onset (media time, as fed to the detector), so
 // the e2e gate m5 can match detections to the fixture's truth by impact time.
+// 0.4.0 quick read (V04-SPEC §A.3): every wrist sample (with its pose row), 'impact' and 'shot' event also goes to the quick tap (lazy
+// quick/live.js: it computes the quick read at impact + 0.02 s and logs live.quick*); the tap's result for a swing rides
+// with its job to onShot ({ quick }) and is compared with the refined shot. Nothing of it is written into the shot.
 
 import { createLiveDetector } from '../events/live.js';
 import { RC } from '../contract/reason-codes.js';
@@ -105,6 +109,8 @@ export function createLiveLoop(o) {
   const jobLog = []; // live.jobs: [{ ms, latency_s, ok, code, queued }] per analysis (latency = detection lag + job)
   const pushLog = (arr, x, path) => { arr.push(x); if (arr.length > LOG_MAX) arr.shift(); diagRecord(path, arr.slice()); };
   let lastFrameT = -Infinity;
+  // 0.4.0 quick read: the lazy tap (quick/live.js createQuickTap) when the UI gives one
+  const quickTap = () => (typeof o.quick === 'function' ? o.quick() : o.quick) ?? null;
   const flushAudio = (upTo) => {
     while (pendingAudio.length && pendingAudio[0] <= upTo) onEvents(det.feed({ type: 'audio', t_s: pendingAudio.shift() }));
   };
@@ -139,7 +145,7 @@ export function createLiveLoop(o) {
   }
 
   async function runJob(job) {
-    const { ev, segP, detectedAt, lag_s } = job;
+    const { ev, segP, detectedAt, lag_s, quick } = job;
     let blob;
     try { blob = await segP; } catch (e) { st.failed += 1; o.onError?.(e); return; }
     const t0 = Number.isFinite(blob && blob.t_media_start_s) ? blob.t_media_start_s : 0;
@@ -178,7 +184,8 @@ export function createLiveLoop(o) {
       const decision = thermal.push({ latency_s, dropped_frac });
       if (decision && decision.action === 'degrade') api.degrade(decision);
       else if (decision && decision.action === 'stop_live') { diagRecord('thermal.stop_live', true); o.onStopLive?.(decision); }
-      o.onShot?.({ shot: res.shot, timings_ms: res.timings_ms, latency_s, kind: ev.kind, event: ev, segment: blob });
+      if (quick) quickTap()?.compare(quick, res.shot);
+      o.onShot?.({ shot: res.shot, timings_ms: res.timings_ms, latency_s, kind: ev.kind, event: ev, segment: blob, quick: quick ?? null });
     } catch (e) {
       durations.push(now() - a0);
       if (durations.length > 5) durations.shift();
@@ -200,11 +207,11 @@ export function createLiveLoop(o) {
     });
   }
 
-  function analyse(ev, detectedAt, lag_s) {
+  function analyse(ev, detectedAt, lag_s, quick) {
     const segP = Promise.resolve().then(() => o.recorder.cut());
     segP.catch(() => {});
     lastCutAt = now();
-    waiting.push({ ev, segP, detectedAt, lag_s, n: st.shots });
+    waiting.push({ ev, segP, detectedAt, lag_s, n: st.shots, quick });
     while (waiting.length > queueLimit) {
       waiting.shift(); // the oldest waiting segment is released (its blob is garbage now)
       st.dropped += 1;
@@ -221,8 +228,11 @@ export function createLiveLoop(o) {
         if (ev.to === 'ADDRESS' && ev.from === 'IDLE') cutDiscard('address');
         if (ev.to === 'SWING') { o.setFps?.(swingHz); o.recorder.hold?.(true); }
         if (ev.to === 'IDLE' || ev.to === 'ADDRESS') { o.setFps?.(idleHz); o.recorder.hold?.(false); }
+      } else if (ev.type === 'impact') {
+        quickTap()?.impact(ev);
       } else if (ev.type === 'shot') {
         st.detections += 1;
+        const quick = quickTap()?.shot(ev, o.analyzePractice) ?? null; // this swing's quick read rides with its job
         pushLog(shotLog, { kind: ev.kind, t_impact: r3(ev.t_impact), t_peak: r3(ev.t_peak), t_finish: r3(ev.t_finish), impact_source: ev.impact_source ?? null }, 'live.shot_log');
         if (ev.kind === 'practice') st.practice += 1;
         else st.shots += 1;
@@ -233,7 +243,7 @@ export function createLiveLoop(o) {
         if (ev.kind === 'swing' || o.analyzePractice) {
           const m = mediaClock();
           const lag = Number.isFinite(m) && Number.isFinite(ev.t_finish) ? Math.max(0, m - ev.t_finish) : 0;
-          analyse(ev, now(), lag);
+          analyse(ev, now(), lag, quick);
         } else {
           cutDiscard('practice');
         }
@@ -259,6 +269,7 @@ export function createLiveLoop(o) {
       if (s) {
         st.wrist += 1;
         onEvents(det.feed({ ...s, t_s }));
+        quickTap()?.sample({ ...s, t_s }, row);
       }
       // R6: an idle bay must not grow one unbounded recorder segment
       if (det.state() === 'IDLE' && now() - lastCutAt >= idleCutMs) { st.idle_cuts += 1; cutDiscard('idle'); }

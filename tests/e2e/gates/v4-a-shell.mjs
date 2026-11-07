@@ -112,7 +112,8 @@ export async function run(ctx) {
       return { before, n1, n2, got, bad, active, after: app.sim.active(), same: p1 === p2, badName, shareLinks };
     });
     need(api.before === null && api.active === 'r1' && api.after === null, `app.sim active/set: ${JSON.stringify(api)}`);
-    need(api.n1 === 1 && api.n2 === 0 && JSON.stringify(api.got) === JSON.stringify([['manual', 3]]) && api.bad === 'TypeError', `app.sim submit/onSubmit: ${JSON.stringify(api)}`);
+    // the mounted round screen (V4-D) keeps its own listener (it ignores a ctx that is not its round): count ours only
+    need(api.n1 - api.n2 === 1 && api.n2 >= 0 && JSON.stringify(api.got) === JSON.stringify([['manual', 3]]) && api.bad === 'TypeError', `app.sim submit/onSubmit: ${JSON.stringify(api)}`);
     need(api.same && api.shareLinks === 1 && api.badName === 'TypeError', `app.loadStyles: ${JSON.stringify(api)}`);
     notes.push('app.sim active/set/submit/onSubmit and app.loadStyles (once per sheet, bad name rejected) OK');
 

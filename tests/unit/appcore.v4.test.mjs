@@ -13,7 +13,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const APP = path.join(ROOT, 'app');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
-/** The frozen cross-package interface (V04-SPEC §G.0-4): module → export names; functions throw PACKAGE_PENDING. */
+/** The frozen cross-package interface (V04-SPEC §G.0-4): module → export names (all packages landed; no stub is left). */
 export const FROZEN = Object.freeze({
   'quick/estimate.js': ['quickEstimate'],
   'ui/quickcard.js': ['mountQuickCard'],
@@ -91,27 +91,26 @@ test('every 0.4.0 module and the 3 screen stylesheets are lazy; the frozen files
   }
 });
 
-test('stubs: every frozen function of B–F throws { code: PACKAGE_PENDING }; constants have their frozen values', async () => {
-  const stubs = {
-    'quick/estimate.js': ['quickEstimate'], 'ui/quickcard.js': ['mountQuickCard'], 'course/generate.js': ['generateCourse'],
-    'course/validate.js': ['validateCourse'], 'course/model.js': ['lieAt'], 'sim/engine.js': ['shotOutcome'],
-    'sim/round.js': ['playStroke', 'scorecard', 'replayRound'], 'sim/putting.js': ['autoPutt'], 'sim/recommend.js': ['recommendClub'],
-    'course/draw2d.js': ['drawHole2d'], 'course/draw3d.js': ['createFlyover'], 'ui/sim-banner.js': ['mountSimBanner'],
-    'share/card.js': ['drawShotCard', 'drawSessionCard', 'drawRoundCard'], 'lab/lines.js': ['computeLines'], 'lab/overlay.js': ['drawLines'],
-    'lab/faults.js': ['evaluateFaults'], 'lab/trends.js': ['faultTrends'],
+test('no stubs remain (§G.4-4): no PACKAGE_PENDING anywhere in app/src; every frozen function of B–F is real; constants have their frozen values', async () => {
+  const hits = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.m?js$/.test(e.name) && fs.readFileSync(p, 'utf8').includes('PACKAGE_PENDING')) hits.push(path.relative(ROOT, p));
+    }
   };
-  for (const [rel, names] of Object.entries(stubs)) {
+  walk(path.join(APP, 'src'));
+  assert.deepEqual(hits, [], 'PACKAGE_PENDING stubs or handlers left in app/src');
+  // a call with junk input may throw a real error (TypeError, VIDEO_UNSUPPORTED in Node …) but never PACKAGE_PENDING
+  for (const [rel, names] of Object.entries(FROZEN)) {
     const mod = await import(pathToFileURL(path.join(APP, 'src', rel)).href);
     for (const n of names) {
-      // a package that has landed replaces its stub: then the function no longer throws PACKAGE_PENDING (skip it)
+      if (typeof mod[n] !== 'function' || /^mount/.test(n) || n === 'openShareSheet') continue; // screens / sheets need a DOM
       let code = null;
-      try { mod[n]({}, {}, {}); } catch (e) { code = e?.code ?? null; }
-      if (code !== null) assert.equal(code, 'PACKAGE_PENDING', `${rel} ${n}`);
+      try { const r = mod[n]({}, {}, {}); if (r && typeof r.then === 'function') await r.then(() => {}, (e) => { code = e?.code ?? null; }); } catch (e) { code = e?.code ?? null; }
+      assert.notEqual(code, 'PACKAGE_PENDING', `${rel} ${n}`);
     }
-  }
-  for (const [rel, n] of [['share/compose.js', 'composeShotVideo'], ['ui/share.js', 'openShareSheet']]) {
-    const mod = await import(pathToFileURL(path.join(APP, 'src', rel)).href);
-    await mod[n]({}, {}).then(() => {}, (e) => assert.equal(e?.code, 'PACKAGE_PENDING', `${rel} ${n}`));
   }
   const { TRAIL_TOKENS } = await import('../../app/src/share/trails.js');
   assert.deepEqual(TRAIL_TOKENS.map((x) => x.token), Array.from({ length: 8 }, (_, i) => `--trail-${i + 1}`));

@@ -2,7 +2,7 @@
 //  m6     store round trip in a real IndexedDB: create 3 shots -> exportJSON -> clear -> importJSON -> the same 3 shots.
 //         Uses the app's own modules (src/store) served by the dev server, in a scratch database, so it needs no UI.
 //  m6-ui  the same through the screens: after importing the export file in the app, the history list shows 3 shots,
-//         the shots / stats / gapping control is there (history-seg × 3, LAUNCH-MONITOR-SPEC §3.7) and the export
+//         the shots / stats / gapping / patterns control is there (history-seg × 4, LM-SPEC §3.7, V04 §E.4) and the export
 //         button produces a JSON download that parses (needs data-testids from docs/e2e-hooks.md).
 // The fixtures are golf-shot/1: the store reads them back as golf-shot/2 (lossless migration, LAUNCH-MONITOR-SPEC §2.1),
 // so "identical" means identical to migrateShot(original).
@@ -78,7 +78,7 @@ export const ui = {
       await waitFor(() => page.evaluate(() => document.querySelectorAll('[data-testid="shot-row"], [data-screen="history"] button.linklike').length === 3), { timeout: 20000, interval: 100, what: '3 rows' })
         .catch(() => { throw new Error('history did not show exactly 3 [data-testid="shot-row"] after the import'); });
       const segs = await page.evaluate(() => [...document.querySelectorAll('[data-screen="history"] [data-testid="history-seg"]')].map((b) => b.dataset.seg).join(','));
-      need(segs === 'list,stats,gapping', `history-seg: ${segs || 'missing'}`);
+      need(segs === 'list,stats,gapping,patterns', `history-seg: ${segs || 'missing'}`);
       const btn = await testidOrFail(page, 'history-export-json', 'button exporting all shots as JSON', 15000, ['button:has-text("匯出 JSON")']);
       await btn.click();
       // the export button may only prepare a download link (a[download]); click it when it appears

@@ -221,6 +221,28 @@ function clubBlock(club, lieHint) {
   };
 }
 
+/**
+ * tracks.club_px (V04-SPEC §F.1, golf-shot/2 rev 2): track/club.js club-head observations ([{ t_s, u, v }], full-image
+ * px) as [frame, u, v] in capture-frame numbers (nearest container timestamp, else t·fps), frames strictly increasing,
+ * evenly thinned to ≤ 40 points. Written only next to a ball track (tracks needs ball_px); [] → no club_px.
+ */
+export function clubPx(obs, capTimes, fps) {
+  const pts = [];
+  for (const q of obs.filter((o) => [o.t_s, o.u, o.v].every(Number.isFinite)).sort((a, b) => a.t_s - b.t_s)) {
+    const f = capTimes?.length ? nearestFrame(capTimes, q.t_s) : Math.max(0, Math.round(q.t_s * fps));
+    if (!pts.length || f > pts[pts.length - 1][0]) pts.push([f, Math.round(q.u * 100) / 100, Math.round(q.v * 100) / 100]);
+  }
+  const n = pts.length;
+  return n <= 40 ? pts : Array.from({ length: 40 }, (_, k) => pts[Math.round((k * (n - 1)) / 39)]);
+}
+
+/** tracks + club_px when the club track has at least one finite observation (an empty club_px key is never written). */
+export function withClubPx(tracks, clubTrack, capTimes, fps) {
+  if (!tracks || !clubTrack?.length) return tracks;
+  const px = clubPx(clubTrack, capTimes, fps);
+  return px.length ? { ...tracks, club_px: px } : tracks;
+}
+
 // ------------------------------------------------------------------------------------------------ main
 
 /**
@@ -480,7 +502,8 @@ export function assembleShot(input) {
     shot_id: ids.shot_id, session_id: ids.session_id, venue_id: ids.venue_id ?? null, preset_id: ids.preset_id ?? null,
     created_at: ids.created_at, app_version: ids.app_version,
     algorithms: { ...algorithmsBlock(poseSeq, calibration, ev.source, input.algorithms), lm: lmr.algorithm },
-    capture, calibration, club: clubOut, handedness, events: ev.shot, metrics, flight: lmr.flight, tracks: lmr.tracks,
+    capture, calibration, club: clubOut, handedness, events: ev.shot, metrics, flight: lmr.flight,
+    tracks: withClubPx(lmr.tracks, lm.trk?.clubTrack, capTimes, fps),
     quality: {
       pose_mean_vis: meanVisibility(poseSeq),
       frames_analyzed: (poseSeq ? poseSeq.t_s.length : 0) + (bf?.frames?.length ?? 0),

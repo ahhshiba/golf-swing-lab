@@ -80,6 +80,11 @@ export function swingParams(rng, o = {}) {
     ankleH: 0.075 + u(-0.012, 0.012),
     heelH: 0.032 + u(-0.008, 0.008),
     toeH: 0.022 + u(-0.006, 0.006),
+    // downswing hand-path offset (world m, x / y / z as the other hand keys), zero at the top and at impact and full
+    // half-way down (sin bump): [0, 0, 0] (default, no rng draw so every seeded swing is unchanged) retraces the
+    // backswing path; a drop in z plus a move away from the ball shallows the downswing, a rise plus a move toward the
+    // ball is over the top. Lets lab tests build plane faults the 0.3.0 model could not (it had no shallowing).
+    downswingHands: [0, 0, 0],
   };
   return { ...p, ...o };
 }
@@ -202,7 +207,13 @@ export function buildSwingModel(P) {
     const oop = Math.tan(P.shaftOutOfPlaneTop_deg * DEG) * p ** 4;
     return normalize3(add3(add3(scale3(eD, Math.cos(sg)), scale3(eB, Math.sin(sg))), scale3(nP, oop)));
   };
-  const hands = (t) => handsAtP(pOf(t));
+  const dsh = Array.isArray(P.downswingHands) ? P.downswingHands : [0, 0, 0];
+  const hands = (t) => {
+    const h0 = handsAtP(pOf(t));
+    if (!(t > tT && t < tI) || !(dsh[0] || dsh[1] || dsh[2])) return h0;
+    const w = Math.sin((Math.PI * (t - tT)) / (tI - tT));
+    return add3(h0, scale3(dsh, w));
+  };
   const clubHead = (t) => add3(hands(t), scale3(shaftDir(t), P.clubLen));
   const hipSlow = (s) => smooth(Math.min(1, s / 0.8));
 

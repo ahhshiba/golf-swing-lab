@@ -21,6 +21,7 @@ export const ROUND_SCHEMA = 'golf-round/1';
 export const LAB_SCHEMA = 'golf-lab/1';
 export const ROUND_MAX_BYTES = 256 * 1024;
 export const REPLAY_TOLERANCE_M = 0.05;
+const DRAW_KEYS = Object.freeze(['seed', 'carry_m', 'side_m', 'apex_m', 'land_deg']);
 export const ROUND_STATUSES = Object.freeze(['active', 'finished', 'abandoned']);
 export const HOLE_STYLES = Object.freeze(['parkland', 'links', 'desert']);
 export const COURSE_STYLES = Object.freeze([...HOLE_STYLES, 'mixed']);
@@ -126,6 +127,12 @@ function checkStroke(s, path, ctx, err) {
   checkValue(s.carry, `${path}.carry`, err);
   checkValue(s.side, `${path}.side`, err);
   if (!isObj(s.draw) || !(isInt(s.draw.seed) && s.draw.seed >= 0) || !isNum(s.draw.carry_m) || !isNum(s.draw.side_m)) err(`${path}.draw`, 'draw must be { seed (uint32), carry_m, side_m }', 'shape');
+  else {
+    // optional flight shape of an imported shot (sim/engine.js flightShape): apex_m > 0, land_deg 10–75; nothing else
+    if ('apex_m' in s.draw && !(isNum(s.draw.apex_m) && s.draw.apex_m > 0)) err(`${path}.draw.apex_m`, 'draw.apex_m must be a number > 0', 'shape');
+    if ('land_deg' in s.draw && !(isNum(s.draw.land_deg) && s.draw.land_deg >= 10 && s.draw.land_deg <= 75)) err(`${path}.draw.land_deg`, 'draw.land_deg must be a number in 10–75', 'shape');
+    for (const k of Object.keys(s.draw)) if (!DRAW_KEYS.includes(k)) err(`${path}.draw.${k}`, `unknown draw key ${k}`, 'shape');
+  }
   if (!isObj(s.landing) || !isNum(s.landing.x) || !isNum(s.landing.y) || !isNum(s.landing.z)) err(`${path}.landing`, 'landing must be { x, y, z }', 'shape');
   if (!isObj(s.rest) || !isNum(s.rest.x) || !isNum(s.rest.y) || !SIM_LIES.includes(s.rest.lie)) err(`${path}.rest`, 'rest must be { x, y, lie }', 'shape');
   if (![0, 1, 2].includes(s.penalty)) err(`${path}.penalty`, 'penalty must be 0, 1 or 2', 'shape');
@@ -134,7 +141,7 @@ function checkStroke(s, path, ctx, err) {
 
 /**
  * Validate a golf-round/1 record. opts.replayRound(round) -> { strokes: [{ rest: { x, y } }] } (or a strokes array)
- * enables the replay_matches rule; a replayRound that throws (e.g. PACKAGE_PENDING) is a replay_matches error.
+ * enables the replay_matches rule; a replayRound that throws is a replay_matches error.
  */
 export function validateRound(round, { replayRound = null } = {}) {
   const { errors, err } = checker();

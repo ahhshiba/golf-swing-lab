@@ -121,6 +121,52 @@ test('frame tap: ROI crop to <= 384 px, throttle on media time, rVFC mediaTime a
   assert.ok(Math.abs(tap.mediaTimeAt(1000 + 8 * 16.7 + 100) - (8 / 60 + 0.1)) < 1e-9);
 });
 
+test('recorder startClock (0.4.0 live timing fix): segment start = startClock() (number or Promise), not mediaClock; the blob waits for it', async () => {
+  class MR {
+    constructor() { this.state = 'inactive'; this.mimeType = 'video/webm'; }
+    start() { this.state = 'recording'; }
+    stop() { this.state = 'inactive'; setTimeout(() => { this.ondataavailable({ data: new Blob(['x'], { type: 'video/webm' }) }); this.onstop(); }, 1); }
+  }
+  let mt = 2.0;
+  let release;
+  const starts = [new Promise((r) => { release = r; }), 7.25];
+  const rec = createSegmentRecorder({}, { env: { MediaRecorder: MR, Blob }, mediaClock: () => mt, startClock: () => starts.shift() });
+  rec.start();
+  mt = 6.0;
+  const p1 = rec.cut();
+  let done = false;
+  p1.then(() => { done = true; });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(done, false, 'the blob waits for the first-frame time');
+  release(2.033);
+  const b1 = await p1;
+  assert.equal(b1.t_media_start_s, 2.033, 'start = the first recorded frame, not mediaClock() (2.0)');
+  assert.equal(b1.t_media_end_s, 6.0);
+  const b2 = await rec.stop();
+  assert.equal(b2.t_media_start_s, 7.25);
+  // a rejected / non-finite start → null (pipeline/live.js then treats the segment as starting at 0)
+  const rec2 = createSegmentRecorder({}, { env: { MediaRecorder: MR, Blob }, mediaClock: () => 1, startClock: () => Promise.reject(new Error('x')) });
+  rec2.start();
+  assert.equal((await rec2.stop()).t_media_start_s, null);
+});
+
+test('frame tap nextMediaTime: first presented frame at/after a media time; timeout resolves the asked time', async () => {
+  let cb = null;
+  const video = { videoWidth: 640, videoHeight: 360, currentTime: 0, requestVideoFrameCallback(f) { cb = f; return 1; }, cancelVideoFrameCallback() {} };
+  class OC { constructor(w, h) { this.width = w; this.height = h; } getContext() { return { drawImage() {} }; } transferToImageBitmap() { return { close() {} }; } }
+  const tap = createFrameTap(video, { fps: 10, env: { OffscreenCanvas: OC, setTimeout, clearTimeout }, onFrame: async () => {} });
+  tap.start();
+  const frame = (k) => { const f = cb; cb = null; f(1000 + k * 33.3, { mediaTime: k / 30, presentedFrames: k, captureTime: 1000 + k * 33.3 }); };
+  frame(0); frame(1);
+  const nowM = tap.mediaTimeAt(1000 + 1 * 33.3 + 20); // 20 ms after frame 1
+  assert.ok(Math.abs(nowM - (1 / 30 + 0.02)) < 1e-9);
+  const p = tap.nextMediaTime(nowM);
+  frame(2); // 2/30 = 0.0667 >= 0.0533
+  assert.ok(Math.abs((await p) - 2 / 30) < 1e-12, 'the next frame, not the last one');
+  assert.equal(await tap.nextMediaTime(99, 5), 99, 'no frame in time → the asked time');
+  tap.stop();
+});
+
 test('motion permission: requestPermission is the first call (sync), states recorded; gravity samples via the tracker', async () => {
   _resetMotionForTests();
   const order = [];

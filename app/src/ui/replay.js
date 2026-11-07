@@ -10,8 +10,9 @@
 //   clampFrame(f, maxFrame)         integer frame in [0, maxFrame]
 //
 //   createReplay({ clipBlob, poseSeq, fps, events, detected, onEventsChange(events, { dirty }), editable = true,
-//                  showControls = true }) ->
+//                  showControls = true, onDraw(g, { W, H, t }) }) ->   (onDraw: an overlay after each frame, V04 §E.1)
 //     { el, events(), setEvents(ev), destroy(), time(), frame(), seek(t_s), seekFrame(f), setEventAt(name, t_s?),
+//       duration(), redraw(),
 //       select(name), selected(), undo(), canUndo(), resetEvent(name?), dirty(), markSaved(), hasMedia() }
 //   Timeline: 12 px dots (lane-assigned, no text on the track) with a 44 px hit box, role=slider (arrow ±1 frame,
 //   Shift+arrow ±10, Home/End), the selected event's name in one chip above, an event ChipRow below, big ◀ ▶ frame
@@ -83,7 +84,7 @@ const css = (el, name, fallback) => {
   try { const v = getComputedStyle(el).getPropertyValue(name).trim(); return v || fallback; } catch (_) { return fallback; }
 };
 
-export function createReplay({ clipBlob = null, poseSeq = null, fps = 60, events = {}, detected = null, onEventsChange = () => {}, editable = true, showControls = true } = {}) {
+export function createReplay({ clipBlob = null, poseSeq = null, fps = 60, events = {}, detected = null, onEventsChange = () => {}, editable = true, showControls = true, onDraw = null } = {}) {
   const FPS = fps > 0 ? fps : 60;
   let ev = copy(events);
   const original = copy(detected ?? events);
@@ -142,6 +143,7 @@ export function createReplay({ clipBlob = null, poseSeq = null, fps = 60, events
         }
       }
     }
+    onDraw?.(g, { W, H, t: tt });
   }
 
   // ------------------------------------------------------------------ timeline
@@ -391,6 +393,8 @@ export function createReplay({ clipBlob = null, poseSeq = null, fps = 60, events
     markSaved() { saved = JSON.stringify(ev); undoStack.length = 0; paintButtons(); },
     hasMedia: () => media,
     layout,
+    duration: () => duration,
+    redraw: draw,
     destroy() { try { ro?.disconnect(); } catch (_) { /* ignore */ } if (url) URL.revokeObjectURL(url); video.removeAttribute('src'); clear(el); },
   };
   return api;

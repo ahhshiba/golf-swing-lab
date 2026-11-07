@@ -63,5 +63,6 @@
   "missing.title": "Shot not found",
   "missing.body": "It may have been deleted.",
   "load_failed.title": "Could not open this shot",
-  "load_failed.body": "Try again. If it keeps happening, copy the report in Settings › Diagnostics."
+  "load_failed.body": "Try again. If it keeps happening, copy the report in Settings › Diagnostics.",
+  "share.clip": "Tracer Clip"
 }

@@ -162,13 +162,13 @@ poly = [[x,y]…]（≤ 24 點，0.1 m 量化）；每洞多邊形 ≤ 30、樹 
 | 項目 | 決定（UNVERIFIED 經驗值，皆可調） |
 |---|---|
 | 球位對下一桿 | 球道／tee ×1.00；粗草 carry ×0.90、σ ×1.3（木桿 ×0.85）；球道沙坑 ×0.85（木桿 ×0.70，推薦不給 driver）；果嶺旁沙坑（距 pin ≤ 30 m）照常揮桿或自動切桿 |
-| 高低差 | 落點 = 飛行軌跡與斜面的交點：有 `flight.samples`（匯入球）用樣本線段求交；否則用 `Δcarry = −Δz / tan(落地角先驗)` |
+| 高低差 | 落點 = 飛行軌跡與斜面的交點：有 `flight.samples`（匯入球）用樣本線段求交；否則用 `Δcarry = −Δz / tan(落地角先驗)`。**更正（整合）**：樣本本身不存進 round，存的是它的形狀 `draw.apex_m`／`draw.land_deg`（`flightShape`，schema 選填欄位），斜面、樹高、滾動都用它，重演可重現 |
 | 滾動 | `physics/lm/roll.js rollFrac(落地角, ground)`；粗草 ×0.35、沙坑／水 0、果嶺用 `soft` |
 | 樹 | 飛行路徑任一點落在樹圓內且 z < h → 球停在該點正下方（不滾），標「打到樹」 |
 | 水 | +1 桿，從入水點沿來球線退回最近的非水區 2 m 處 |
-| OB | 預設 `drop_2`：+2 桿，從出界點最近的球道邊打（簡化版，等同現行規則的當地規則選項精神）；選項 `stroke_distance`（+1，回原位重打） |
+| OB | 預設 `drop_2`：+2 桿，從出界點最近的球道邊打（簡化版，等同現行規則的當地規則選項精神）；選項 `stroke_distance`（+1，回原位重打）。**更正（整合）**：拋球點（球道內 1 m）若落在果嶺上就換下一個候選點；都不行時用出界點本身（若是粗草），否則回原位 |
 | 每洞上限 | 預設 2×par（達到即撿起）；可關 |
-| 推桿（決定：距離模型自動推桿，不做點擊小遊戲） | 上果嶺後依距離 d 與「推桿程度」（`0／10／20／30` 差點帶）抽樣：一推進洞機率 `p(d) = clamp(exp(−(d/d50)^1.3·ln2), 0.02, 0.995)`，d50 依程度 2.4／1.8／1.4／1.1 m；未進則剩餘距離 \|N(0, 0.08 d + 0.25)\|；每洞最多 4 推（UNVERIFIED，`sim/putting.js`）。理由：鏡頭量不到推桿；點擊小遊戲量的是手指不是推桿，又要多 10+ KB UI。另提供「手動輸入推桿數」覆寫（標 `MANUAL_ENTRY`） |
+| 推桿（決定：距離模型自動推桿，不做點擊小遊戲） | 上果嶺後依距離 d 與「推桿程度」（`0／10／20／30` 差點帶）抽樣：一推進洞機率 `p(d) = clamp(exp(−(max(0, d − 0.45)/(d50 − 0.45))^1.3·ln2), 0.02, 0.995)`（**更正（整合）**：加了 0.45 m 的 tap-in 距離 `tap_in_m`，讓 0.5 m 一推率 ≥ 0.95 的驗收在各程度成立；UNVERIFIED），d50 依程度 2.4／1.8／1.4／1.1 m；未進則剩餘距離 \|N(0, 0.08 d + 0.25)\|；每洞最多 4 推（UNVERIFIED，`sim/putting.js`）。理由：鏡頭量不到推桿；點擊小遊戲量的是手指不是推桿，又要多 10+ KB UI。另提供「手動輸入推桿數」覆寫（標 `MANUAL_ENTRY`） |
 | 切桿 | 預設每桿都要揮；`settings.sim.autoChipM`（預設 0＝關，可設 10–40 m）以內可按「自動切上果嶺」：落點距 pin \|N(0, 0.12 d)\|＋程度修正，標 `AUTO_CHIP` |
 | 風 | 不做（沿用 `WIND_IGNORED`） |
 | 球桿推薦 | `recommendClub({ distance_m, lie, dz_m, player }) -> { club, carry: { median, p10, p90 }, alts: [2], source: 'gapping'|'reference', flags: ['small_sample'?] }`；plays-like = (距離 + dz × 1.0) / 球位係數；選中位數最接近者，P10–P90 帶一起畫在地圖上 |
@@ -289,6 +289,10 @@ high_behind 2 條（head_box、target_line）——hb 畫面上明講「這個�
 | `early_rise` | 提早起身 | face_on、dtl | `head_lift_z_m` | > +0.06 m | impact |
 | `weight_back` | 重心留在後腳 | face_on | `weight_shift_pct` | < 50% | impact |
 | `overswing` | 上桿過頭 | dtl（≥ 120 fps） | `top_shaft_angle_deg` | > +10°（過水平） | top |
+
+> **更正（2026-11-07 整合）**：`top_shaft_angle_deg` 在契約裡是頂點時桿身相對目標線的角度（across-the-line／laid-off，dtl 後方看到的水平方向偏差），
+> **不是**「過水平幾度」，用它判上桿過頭是錯的；上桿頂點附近也常沒有桿頭追蹤。`overswing` 規則因此停用：`lab/params.js` 標 `disabled: NOT_IMPLEMENTED`，
+> 結果一律 `unknown`＋`NOT_IMPLEMENTED`，練習卡隱藏。要做得等有「桿身過水平」的量值（0.4.x 之後）。
 | `tempo_off` | 節奏偏離 | 全部 | `tempo_ratio` | < 2.4 或 > 3.6 | 全程 |
 
 `settings.lab.sensitivity`：`standard`／`relaxed`（門檻 ×1.5）。**不做**：casting／提早釋放、擊球時手部前傾、桿面相關問題——
@@ -393,6 +397,10 @@ core（shell）只加：`screen.{course,round,scorecard,lab,patterns}.title`、`
 | V4-F | 2,000 | ui/shot.js、ui/replay.js、ui/history.js 的入口與掛勾 |
 | V4-C、V4-D | 0 | 全 lazy |
 | **整合上限** | **shell ≤ 992,000 B**（保留 ≥ 8 KB 給 0.4.x 修正） | |
+
+> **實測（2026-11-07 整合）**：shell 990,381 B（比基準 +13,642 B，在各包上限加總 17,100 B 之內；距整合上限只剩 1,619 B，
+> 對 `BUDGETS.shell_bytes` 1,000,000 的 8 KB 保留仍在）、precache 32,209,815 B（+329,213 B，≤ 32,500,000）。
+> 0.4.x 的修正若要加 shell，先把程式搬到 lazy 模組，**不放寬上限**。
 
 precache 估計新增（lazy，原始碼大小）：quick 20 KB、course 45 KB（含 draw2d／draw3d）、sim 45 KB、share 35 KB、lab 40 KB（含 overlay）、新 ui 95 KB、lazy CSS 9 KB、
 新 i18n 兩語系 60 KB、round schema／驗證 8 KB → **≈ 360 KB**；整合上限 **precache ≤ 32,500,000 B**。基準值在 V4-A drop 1 時寫入 `tests/fixtures/v4/budget-baseline.json`（當下 manifest 的 shell／precache）。

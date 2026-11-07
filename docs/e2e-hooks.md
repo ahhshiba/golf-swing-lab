@@ -18,10 +18,16 @@ A missing hook makes that gate FAIL with the testid in the message; nothing pass
   `node scripts/build.mjs --out <scratch>/dist-<pkg>` then
   `GSL_E2E_DIST=<scratch>/dist-<pkg> GSL_E2E_PORT=<8811…8816> node tests/e2e/run.mjs --only '<pkg>-*'`
   (`--dist` and `--port` do the same; `--list` prints the selected gates; `--only` takes ids and prefixes ending in `*`).
-- Integration screenshot matrix (§8.7 step 4): `node tests/e2e/screenshot_matrix.mjs --dist <dist> --out <dir> [--port N]
-  [--json file]` — by default every screen and state of LAUNCH-MONITOR-SPEC §5.3-4 (10 shell screens, drills, drill, stats,
-  gapping, shot:tiles|side|top|3d|video, drills:setup, drill:result|active) × 390/430 (+ 844×390 for setup and live) × light/dark/sun ×
-  zh-Hant/en × text 100/200 % (552 states; history seeded with the v1 and v2 `valid_*` fixtures, shot = v2 face_on), each screenshotted and checked for h-scroll, control overlap, obscured / clipped glance targets (live
+- Integration screenshot matrix (§8.7 step 4; V04-SPEC §G.4-5): `node tests/e2e/screenshot_matrix.mjs --dist <dist> --out <dir> [--port N]
+  [--json file] [--seed lab|base]` — by default every screen and state: the 0.3.0 set (10 shell screens, drills, drill, stats,
+  stats:session, gapping, gapping:hb, shot:tiles|side|top|3d|video, drills:setup, drill:result|active) and the 0.4.0 set (V04-SPEC §F.8:
+  shot:share|share_ready, course, course:new, round, round:flyover|aim|green|recommend|manual, scorecard, scorecard:full,
+  lab, lab:lines|phase|fault, patterns, live:provisional|refined; `round:perf` is gate-only) × 390/430 (+ 844×390 for setup
+  and all live states) × light/dark/sun × zh-Hant/en × text 100/200 % (1,080 states). History is seeded with the v1 and v2
+  `valid_*` fixtures (shot = v2 face_on); `--seed lab` (default) also imports pose-bearing swings (lab-sessions.json, 4 per
+  group, and `shot-lab-matrix-dtl`: valid_dtl_30 with a synthetic pose carrying an early-extension fault and a head-dip
+  "possible", the newest dtl swing, which the lab states open), so lab shows fault chips and patterns populated rows
+  (the matrix waits for them); `--seed base` = the 0.3.0 seed. Each state is screenshotted and checked for h-scroll, control overlap, obscured / clipped glance targets (live
   pill, hero tiles, count, club, toolbar; setup title, primary, ≥ 2 lines of the instruction in landscape), truncation,
   split words, spec codes, CJK in en and hero sizes; exit code = states with findings. verify runs it as gate
   `a-matrix` (browser-e2e stage, 0 findings required).
@@ -76,6 +82,8 @@ A missing hook makes that gate FAIL with the testid in the message; nothing pass
 | `workerDelayMs` (number > 0) | every message to the vision worker is delayed by that much (a stalled worker), so per-call timeouts fire (`ANALYSIS_TIMEOUT`) | d-worker-crash |
 | `vision` (set by workers/client.js) | the live vision client (`terminate()` it to simulate a worker crash) | d-worker-crash |
 | `analyzeClip(file, options, { onProgress }) -> Promise<result>` | the import queue uses it instead of the vision worker's analysis; probe, queue, save and every screen state stay real | c-import-batch |
+| `liveJobs` (set by ui/live.js when the object exists) | one entry per live analysis job: `{ t0 (the segment's recorded start, media s), t_impact (live impact, media s), impact_source, shot_id (after the analysis) }`; the clip pose stand-in tags its frames with the job (`clip.job`) | v4-b-latency (segment timing) |
+| `clip.codes` (set by d-platform.mjs `installClipPoseStandIn({ frameH, code })`) | `[[job, t_clip, frame_index | -1]]`: the m5 frame-index code decoded in every analysed clip frame, so a gate knows where a recorded segment really starts on the media timeline | v4-b-latency |
 | `onboarding` (truthy) | an automated browser (`navigator.webdriver`) shows onboarding on a fresh profile only when this is set before boot; otherwise onboarding is skipped so the older gates start on home | b-onboarding, f-privacy |
 
 ## Needed diag records (`diag.record(path, value)`, read by e2e through `src/diag/record.js`)
@@ -261,3 +269,53 @@ on any of them; renaming one is a contract change.
   `support-link`, `dev-off`, `dev-pose-model`, `dev-heavy-download`, `dev-spec-codes`, `dev-diag`, `model-status`,
   `model-import`, `model-json-input`, `model-bin-input`, `model-import-status`, `model-rollback`.
 - Diagnostics: `diag-summary`, `diag-errors`, `diag-no-errors`, `diag-copy`, `diag-save`, `diag-refresh`.
+
+## 0.4.0 (V04-SPEC; integration 2026-11-07)
+
+Gates: `v4-a-shell`, `v4-b-latency`, `v4-b-off`, `v4-d-round`, `v4-d-honesty`, `v4-d-perf`, `v4-d-motion`, `v4-d-import`,
+`v4-d-share`, `v4-e-video`, `v4-e-card`, `v4-f-lab`, `v4-f-patterns`, `v4-f-matrix` (`RUN_BROWSER_E2E=1 node tests/e2e/run.mjs --only 'v4-*'`).
+
+- e2e states (`app.e2e.registerState`, run by the matrix): `live:provisional|refined` (ui/live.js: the quick card in
+  each stage with demo numbers), `course:new` (the new-round sheet), `round:flyover` (static intro, reduced-motion frame),
+  `round:aim|recommend|manual|green` (a demo round: aim turned twice / the club sheet / the type-in sheet / on the green),
+  `round:perf` (gate only: fly-over frame times, hole change and skip latencies), `scorecard:full` (a demo round played out),
+  `lab:lines|phase|fault` (the lab on the newest dtl swing, else the newest: the line list / the impact phase / the first
+  fault chip's sheet, or the unknown list), `shot:share|share_ready` (registered lazily by ui/shot.js: the share sheet,
+  then a card made), `stats:session`, `gapping:hb`.
+- Quick read (V4-B): `quick-card` with `data-stage="provisional"|"refined"` and `data-t-impact` (media s); tiles
+  `.qc-tile[data-metric][data-stage]` with `.qc-tag` (quick.provisional / final) and `.mt-ci`. The v4-b-latency gate
+  installs `__V4B__` (`installQuickRecorder`: a MutationObserver log of the card's stage changes with perf / media
+  times). `nav.go('live', { focus, view, drill })`: `focus` is the first hero tile even when live mode cannot measure it
+  (then the tile says why); diag `live.quick` (`n, latency_ms_p50, latency_ms_p95, compared, miss`) and `live.quick_log`.
+- Live segment timing: a recorded segment's time 0 is its first recorded frame (capture/recorder.js `startClock`,
+  capture/frametap.js `nextMediaTime`), not the last tapped frame (the 0.3.0 bug, fixed in the integration step);
+  v4-b-latency checks it against the frame code (see `liveJobs`, `clip.codes` above).
+- Round (V4-D): the round screen root has `data-mode` (`loading intro handoff play holedone finished none`), `data-hole`,
+  `data-player`, `data-stroke-n`, `data-aim-m`, `data-to-pin-m`, `data-fly-frames`, `data-landing-frames` (the landing's
+  draw calls: 1 under reduced motion); `round-map` carries `data-params` (drawHole2d params: `ellipse, ellipses, source,
+  side, strokes, aim, hole, balls` = marker shape per player) and its aria-label. Testids: `round-aim-left`,
+  `round-aim-right`, `round-aim-reset`, `round-autochip`, `round-chip` (`data-dim` carry|side), `round-club`,
+  `round-empty`, `round-end`, `round-fly-canvas`, `round-flyover`, `round-flyover-skip`, `round-handoff`,
+  `round-handoff-go`, `round-holedone`, `round-hole-scores`, `round-import` (→ import { sink: 'sim' }), `round-last`,
+  `round-manual`, `round-manual-sheet`, `round-manual-carry`, `round-manual-side`, `round-manual-dir`,
+  `round-manual-error`, `round-manual-save`, `round-map`, `round-next`, `round-open-course`, `round-putting`,
+  `round-putts`, `round-putts-save`, `round-recommend`, `round-recommend-sheet`, `round-scorecard`, `round-straight`,
+  `round-swing` (→ live { sink: 'sim' }), `round-to-pin`, `round-turn`.
+- Course: `course-new`, `course-new-sheet`, `course-style`, `course-holes`, `course-tees`, `course-seed`,
+  `course-seed-new`, `course-player`, `course-player-add`, `course-player-name-<i>`, `course-rule-chip`,
+  `course-rule-{side,putting,ob,max,flyover}`, `course-start`, `course-new-error`, `course-empty`, `course-unsaved`.
+- Scorecard: `score-table`, `score-cell`, `score-cell-sheet`, `score-stroke`, `score-straight`, `score-status`,
+  `score-resume`, `score-share` (→ the round card), `score-disclaimer` (`data-i18n-key="score.disclaimer"`), `scorecard-empty`.
+- Round banner (live and import): `sim-banner` (`data-mode` live|import), `sim-banner-read`, `sim-banner-use`, `sim-banner-retake`.
+- Share sheet (V4-E): `share-sheet`, `share-ball-colour`, `share-club-colour`, `share-layout`, `share-opt-card` …,
+  `share-privacy`, `share-make`, `share-progress`, `share-status`, `share-cancel`, `share-preview`, `share-send`,
+  `share-make-card`, `share-card-preview` (`data-kind`), `share-card-send`, `share-download` / `share-card-download`
+  (fallback links without Web Share).
+- Lab (V4-F): `lab-pick`, `lab-empty`, `lab-missing`, `lab-no-pose`, `lab-hb-note`, `lab-replay`, `lab-frame-prev`,
+  `lab-frame-next`, `lab-fault-prev`, `lab-fault-next`, `lab-mark` (▲ on the time line), `lab-phase` (`data-event`),
+  `lab-fault` (`data-status` fault|possible), `lab-fault-sheet`, `lab-unknown`, `lab-step-status`, `lab-lines`,
+  `lab-line`, `lab-dynamic`, `lab-sensitivity`, `lab-drill`, `lab-drill-start` (→ live { focus, view, drill }),
+  `lab-drills-more`, `lab-to-patterns`; shot screen entry `shot-lab`.
+- Patterns: `patterns-view`, `patterns-period`, `patterns-top`, `patterns-row` (one view per row), `patterns-n`,
+  `patterns-ci`, `patterns-chart`, `patterns-change`, `patterns-progress`, `patterns-empty`; history segment
+  `history-seg[data-seg=patterns]`.

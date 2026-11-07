@@ -33,6 +33,7 @@ export function mountImport(root, app) {
   let cancelAll = false;
   let prefs = null;
   let dm = null; // ui/drill.js (lazy) while a practice drill is in progress: clip → drill slot (LAUNCH-MONITOR-SPEC §3.5)
+  let sim = null; // V4-D (V04-SPEC §C.4): opened with { sink: 'sim' } → the round banner; the first analysed shot goes to app.sim
 
   async function loadCalibs() {
     calibs = [];
@@ -197,6 +198,7 @@ export function mountImport(root, app) {
     }
     running = false;
     const done = todo.filter((x) => x.status === 'done');
+    if (sim?.use && done[0]) return sim.use(done[0].shot);
     if (todo.length === 1 && done.length === 1) { app.nav.go('shot', { shot_id: done[0].shot.shot_id, shot: done[0].shot, from: 'import' }); return; }
     render();
     if (done.length) C.toast.info(plural('import.batch.done', done.length));
@@ -314,6 +316,7 @@ export function mountImport(root, app) {
     const next = !running && done.length ? C.button({ label: t('import.next'), icon: 'film', variant: 'tinted', size: 'lg', block: true, testid: 'import-next', onClick: () => { for (const x of done) remove(x); picker.input.click(); } }) : null;
     clear(root,
       C.screenHeader({ title: t('screen.import.title'), back: true, onBack: leave }),
+      sim,
       h('div.list-group', {}, settingsRow()),
       guide(),
       picker,
@@ -323,6 +326,8 @@ export function mountImport(root, app) {
 
   return {
     async show(params = {}) {
+      sim = params.sink === 'sim' && h('div');
+      if (sim) import('./sim-banner.js').then((m) => m.simImport(sim, app));
       if (!running && !params.keep) { for (const it of [...items]) if (['done', 'cancelled'].includes(it.status)) items.splice(items.indexOf(it), 1); }
       prefs = null;
       render();

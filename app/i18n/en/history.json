@@ -59,5 +59,6 @@
   "seg.label": "View",
   "seg.list": "Shots",
   "seg.stats": "Stats",
-  "seg.gapping": "Gapping"
+  "seg.gapping": "Gapping",
+  "seg.patterns": "Patterns"
 }

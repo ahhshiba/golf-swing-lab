@@ -1,5 +1,9 @@
 # 0.4.0 frozen interfaces (V4-A drop 1, 2026-11-07)
 
+**Status 2026-11-07 (integration, §G.4-4): every package (V4-A…F) has landed; no stub and no `PACKAGE_PENDING` code is left
+in app/src** (`tests/unit/appcore.v4.test.mjs` "no stubs remain" greps for it and calls every frozen function). The
+§4 rows below are real implementations; "stub" in this file is history. Integration changes are listed in §8.
+
 What V4-B…F build against. Spec: `docs/V04-SPEC.md` (§ numbers below). Behaviour is defined by the code; this file is
 the index (same format as `docs/LM-INTERFACES.md`). **Stub** = a placeholder created by V4-A that the owning package
 replaces: a function that throws `{ code: 'PACKAGE_PENDING' }`, a screen with a header and an empty state, or an
@@ -65,7 +69,7 @@ Tokens (`tokens.css`, `:root` only, theme-independent): `--trail-1 … --trail-8
 `tokens.v4`. Lazy sheets `styles/screens/{sim,lab,share}.css` hold one probe rule (`--lazy-css: <name>`) the gates read;
 keep it.
 
-## 4. Package interfaces — signatures FROZEN (stubs until the package lands)
+## 4. Package interfaces — signatures FROZEN (all landed)
 
 | Pkg | File (stub) | Exports / signature |
 |---|---|---|
@@ -131,3 +135,25 @@ Stub screens show the screen header (h1, back) and an empty state; replace the w
 Every `PACKAGE_PENDING` stub of §4 replaced; the stub-skipping branch in `tests/unit/appcore.v4.test.mjs` (a landed
 function no longer throws `PACKAGE_PENDING`) kept or tightened; `LAZY_*` final lists; this file's status column; the
 round fixtures regenerated against the real generator if V4-C asks for it.
+
+## 8. Integration step (2026-11-07) — done
+
+- Stubs: all replaced; the `PACKAGE_PENDING` fallbacks in `share/card.js` (scorecard fallback), `share/compose.js`
+  (`lines_pending`) and `ui/shot.js` (`shot.share.clip_na`, key removed) are gone; the appcore.v4 stub test is now
+  "no stubs remain".
+- "95 %" landing ellipses are joint 2-D regions: radius `ELLIPSE_K95 = 2.4477 σ` (`sim/params.js`, chi-square 2 dof) in
+  `sim/engine.js`, `sim/putting.js`, `course/draw2d.js` and `ui/round.js previewEllipse` (1.96 σ per axis covered only
+  ~85 %); one-axis "±" texts keep 1.96 σ. Test `sim.ellipse` (Monte Carlo coverage).
+- `ui/round.js simRows(player, rows, club)`: shotOutcome and previewEllipse get the whole gapping table
+  (`rows.gapping`), the one recommendClub uses, so an unmeasured club flies the scaled carry it recommended
+  (test `ui.sim.gapping`).
+- golf-round/1: `stroke.draw` gains optional `apex_m` (> 0) and `land_deg` (10–75), no other key (schema
+  `additionalProperties: false`; `validateRound` rule `shape`). Test `v4.contract.round_schema` (the engine-played
+  goldens in `tests/fixtures/rounds/v4c` pass the JSON schema and the replay). The hand-built `tests/fixtures/rounds/
+  valid_*` stay contract fixtures: nothing replays them, so they were not regenerated.
+- Live timing (0.3.0 bug): a segment's `t_media_start_s` is its first recorded frame (`capture/recorder.js startClock`
+  + `capture/frametap.js nextMediaTime`), no longer the last tapped frame; gate `v4-b-latency` measures it.
+- `pipeline/assemble.js withClubPx`: no `club_px: []` key. `course/draw2d.js PLAYER_SHAPES`: per-player ball markers
+  (circle / square / triangle / diamond, matching `.player-swatch`). `share/compose.js drawLinesInRect`: alignment lines
+  clipped to the video rect (test in `share.compose`).
+- New gates `v4-d-import`, `v4-d-share`; matrix: every 0.4.0 state, `--seed lab`, 1,080 states (`a-matrix`).

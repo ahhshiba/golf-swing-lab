@@ -7,7 +7,7 @@
 // with a size estimate), spreadsheet (CSV), restore; navigator.share({ files }) when available, else a download link.
 //
 // Exports for other screens: buildFilter, shotOps(app), shareOrDownload(blob, name, outEl, opts), fileStamp(iso),
-// groupShots(shots, venues), historySeg(app, current) (shots / stats / gapping, LAUNCH-MONITOR-SPEC §3.7),
+// groupShots(shots, venues), historySeg(app, current) (shots / stats / gapping / patterns, LM-SPEC §3.7, V04 §E.4),
 // loadedShots() (the shots this screen last loaded, so stats opens without a second read of the store).
 import { h, clear, downloadLink } from './dom.js';
 import * as C from './components.js';
@@ -128,12 +128,12 @@ let lastShots = null;
 export const loadedShots = () => lastShots;
 
 /**
- * Segmented control shots / stats / gapping (testid history-seg, data-seg); stats and gapping are sub screens.
+ * Segmented control shots / stats / gapping / patterns (testid history-seg, data-seg); the last three are sub screens.
  * onLeave runs before navigating away (the list empties its hidden root: it re-renders from cache on show).
  */
 export function historySeg(app, cur, onLeave) {
   const nav = app.nav;
-  const g = C.segmented({ options: ['list', 'stats', 'gapping'].map((k) => [k, t(`history.seg.${k}`)]), value: cur, label: t('history.seg.label'),
+  const g = C.segmented({ options: ['list', 'stats', 'gapping', 'patterns'].map((k) => [k, t(`history.seg.${k}`)]), value: cur, label: t('history.seg.label'),
     onChange: (v) => {
       if (v === cur) return;
       onLeave?.();
@@ -153,6 +153,13 @@ const val = (m) => (m && Number.isFinite(m.value) ? m.value : null);
  * Headline numbers of a shot row: carry · ball speed when measured, else tempo · club speed. validity = the least certain
  * of the numbers shown ('estimated' | 'low_confidence' | null), which the row marks with the shared confidence pill.
  */
+/** Row chevron: the icon itself carries .lr-chevron (no wrapper span: 50 nodes fewer per page of rows). */
+function chevron() {
+  const ic = C.icon('chevron-right');
+  ic.classList.add('lr-chevron');
+  return ic;
+}
+
 function headline(shot, units) {
   const m = shot.metrics ?? {};
   const pick = val(m.carry_m) !== null ? ['carry_m', 'ball_speed_mps'] : ['tempo_ratio', 'club_speed_mps'];
@@ -237,7 +244,7 @@ export function mountHistory(root, app) {
     const open = h('button.shot-row', { type: 'button', 'data-testid': 'shot-row', 'data-shot': s.shot_id },
       h('span.club-chip', { 'aria-hidden': 'true' }, clubName(s.club?.type)),
       h('span.sr-main', {}, h('span.sr-primary', primary, pill ? ' ' : null, pill), h('span.sr-secondary', h('span.sr-club', `${clubName(s.club?.type)} · `), [time, viewName(s.capture?.view)].join(' · '), tag ? ' ' : null, tag)),
-      h('span.lr-chevron', {}, C.icon('chevron-right')));
+      chevron());
     open.addEventListener('click', () => app.nav.go('shot', { shot_id: s.shot_id }, { opener: open }));
     const star = h('button.icon-btn.star-btn', { type: 'button', 'data-testid': 'shot-star', 'aria-pressed': String(Boolean(s.starred)), 'aria-label': t(s.starred ? 'history.row.unstar' : 'history.row.star', { time }) }, C.icon(s.starred ? 'star-filled' : 'star'));
     star.addEventListener('click', async () => {

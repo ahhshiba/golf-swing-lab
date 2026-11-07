@@ -150,6 +150,7 @@ details.revisions > summary { color: var(--accent); }
 .sr-pill[data-validity="low_confidence"]::before { content: "▲"; content: "▲" / ""; }
 .sr-pill { vertical-align: middle; margin-inline-start: var(--s-1); white-space: normal; max-width: 100%; } /* the pill drops to its own line (and its words wrap) in a narrow row */
 .history-row .lr-chevron { flex: none; }
+.shot-row > .lr-chevron { flex: none; width: 1.1em; height: 1.1em; }
 /* large text: a number group keeps together while it fits and wraps inside itself only when it cannot (no overflow);
    in a narrow row (200 % text) the club chip gives its width to the numbers and the club moves into the meta line */
 .sr-primary .nowrap { display: inline-block; white-space: normal; }

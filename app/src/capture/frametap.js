@@ -3,7 +3,10 @@
 //   createFrameTap(videoEl, { fps = 10, roi?: () => {x,y,w,h} | null, maxWidth = 384,
 //                             onFrame(bitmap, t_media_s, meta) -> void | Promise, env? })
 //     -> { start(), stop(), setFps(fps), stats() -> { delivered, dropped, busy_skips, dropped_pct },
-//          mediaTimeAt(perf_ms) -> t_media_s | null, lastMediaTime() }
+//          mediaTimeAt(perf_ms) -> t_media_s | null, lastMediaTime(),
+//          nextMediaTime(after_s, timeoutMs = 500) -> Promise<t_media_s | null> }
+//   nextMediaTime: the media time of the first frame presented with mediaTime >= after_s (minus 2 ms); after
+//   timeoutMs without one it resolves after_s (or null). ui/live.js uses it for a recorded segment's first frame.
 //   meta = { roi: {x,y,w,h} (video pixels), W, H (video size), scale, width, height (bitmap size), presentedFrames }
 //   cropRect(roi, W, H, maxWidth) -> { sx, sy, sw, sh, dw, dh, scale }      (pure, exported for tests)
 //   createThrottle(fps) -> { due(t_s) -> boolean, setFps(fps) }              (pure)
@@ -57,6 +60,7 @@ export function createFrameTap(videoEl, opts = {}) {
   let ctx = null;
   let lastPresented = null;
   let pair = null; // { perf_ms, media_s }
+  let waiters = []; // nextMediaTime: [{ after, resolve, timer }]
   const st = { delivered: 0, dropped: 0, busy_skips: 0 };
 
   function surface(w, h) {
@@ -93,6 +97,13 @@ export function createFrameTap(videoEl, opts = {}) {
     const perf = md && Number.isFinite(md.captureTime) ? md.captureTime
       : md && Number.isFinite(md.presentationTime) ? md.presentationTime : now;
     if (Number.isFinite(t) && Number.isFinite(perf)) pair = { perf_ms: perf, media_s: t };
+    if (waiters.length && Number.isFinite(t)) {
+      const keep = [];
+      for (const w of waiters) {
+        if (t >= w.after - 0.002) { (env.clearTimeout ?? clearTimeout)(w.timer); w.resolve(t); } else keep.push(w);
+      }
+      waiters = keep;
+    }
     if (md && Number.isFinite(md.presentedFrames)) {
       if (lastPresented !== null && md.presentedFrames > lastPresented + 1) st.dropped += md.presentedFrames - lastPresented - 1;
       lastPresented = md.presentedFrames;
@@ -132,5 +143,13 @@ export function createFrameTap(videoEl, opts = {}) {
     },
     mediaTimeAt(perf_ms) { return pair ? pair.media_s + (perf_ms - pair.perf_ms) / 1000 : null; },
     lastMediaTime() { return pair ? pair.media_s : null; },
+    nextMediaTime(after_s, timeoutMs = 500) {
+      if (!Number.isFinite(after_s)) return Promise.resolve(pair ? pair.media_s : null);
+      return new Promise((resolve) => {
+        const w = { after: after_s, resolve };
+        w.timer = (env.setTimeout ?? setTimeout)(() => { waiters = waiters.filter((x) => x !== w); resolve(after_s); }, timeoutMs);
+        waiters.push(w);
+      });
+    },
   };
 }

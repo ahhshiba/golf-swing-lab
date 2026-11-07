@@ -6,5 +6,17 @@
   "more": "More",
   "period.7": "7 days",
   "period.30": "30 days",
-  "period.all": "All"
+  "period.all": "All",
+  "period.label": "Period",
+  "view.label": "Camera position",
+  "view.all": "All positions",
+  "n": "{k} of {n} swings in {s} sessions",
+  "ci": "Share {p}% (95% range {lo}–{hi}%)",
+  "no_change": "No clear change",
+  "axis": "Likely + possible (%)",
+  "chart_note": "Each bar is one session; the thin line is the 95% range",
+  "top_share": "{p}% ({view})",
+  "note": "Share = swings the rules call “likely” or “possible” ÷ swings from a camera position that can see the fault. Positions are counted apart; the thresholds are unverified rules of thumb.",
+  "quiet": "Faults not seen ({n})",
+  "analysing": "Analysing swings {i} / {n}…"
 }

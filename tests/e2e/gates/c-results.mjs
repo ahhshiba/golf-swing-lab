@@ -238,7 +238,7 @@ async function labels(ctx) {
 // ------------------------------------------------------------------ c-import-batch
 // The analysis stand-in returns the face-on fixture shot with the job's ids (a little slower per step so the queue and
 // the back-confirm can be observed); a file whose name contains "noswing" rejects with NO_SWING_FOUND.
-function installAnalysisStandIn(shotJson) {
+export function installAnalysisStandIn(shotJson) {
   const base = JSON.parse(shotJson);
   globalThis.__GSL_E2E__ = { ...(globalThis.__GSL_E2E__ ?? {}), analyzeClip: async (file, options, { onProgress, cancelled } = {}) => {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));

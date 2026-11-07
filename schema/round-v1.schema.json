@@ -672,8 +672,18 @@
             },
             "side_m": {
               "type": "number"
+            },
+            "apex_m": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "land_deg": {
+              "type": "number",
+              "minimum": 10,
+              "maximum": 75
             }
-          }
+          },
+          "description": "The values the stroke actually used (replayable). apex_m / land_deg (optional): the imported shot's flight shape (sim/engine.js flightShape); absent → the club prior."
         },
         "landing": {
           "type": "object",

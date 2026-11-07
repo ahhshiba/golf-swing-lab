@@ -18,6 +18,13 @@
 //      | { type: 'motion_ignored', t_s, peak_mps, rise_m }   (hands rose < 0.2 m: not a swing)
 //      | { type: 'shot', kind: 'swing'|'practice', t_address, t_swing, t_peak, t_impact, t_finish,
 //          impact_source: 'audio'|'wrist_peak', peak_mps, rise_m, conf, reason_codes }
+//      | { type: 'impact', t_impact, impact_source, t_address, t_swing, t_top, peak_mps, conf, reason_codes }
+// 'impact' (0.4.0 quick read, V04-SPEC §A.3) is extra and changes nothing else (the 'shot' events are the 0.3.0 ones):
+// at most one per swing, on the first wrist sample at or after an audio onset (after the top) once the hands are back
+// below half their rise (the downswing; a sound in the backswing waits for it and goes stale after 0.3 s), or - with
+// no onset - when the wrist speed falls below half its downswing peak and the profile is a real swing's (impact = that
+// peak, conf 0.5, the shot's reason code; with a microphone only 0.3 s after that peak, when no sound came). The IMPACT state itself is not used: at 10 Hz it can trip at the top of the
+// backswing. t_top = the highest wrist sample before the downswing. The 'shot' may still settle on another impact.
 
 import { RC } from '../contract/reason-codes.js';
 
@@ -54,6 +61,13 @@ export function initialLiveState(opts = {}) {
     impact_source: null,
     audioCands: [],
     holdSince: null,
+    t_top: null,
+    qTopY: -Infinity,
+    qDown: false, // hands back below half their rise after the top: the downswing
+    qPk: 0,
+    qTpk: null,
+    qSent: false,
+    qAud: [], // onsets of this swing not yet judged for the 'impact' event
   };
 }
 
@@ -69,7 +83,42 @@ function speedOf(hist, lag) {
 
 function resetSwing(s) {
   s.t_swing = null; s.peak = 0; s.t_peak = null; s.maxY = -Infinity; s.t_impact = null; s.impact_source = null;
-  s.audioCands = []; s.holdSince = null;
+  s.audioCands = []; s.holdSince = null; s.t_top = null; s.qTopY = -Infinity; s.qDown = false; s.qPk = 0; s.qTpk = null; s.qSent = false; s.qAud = [];
+}
+
+function realProfile(s, rise, peak = s.peak, tPeak = s.t_peak) {
+  const back = tPeak - s.t_swing;
+  return peak >= LIVE.real_peak_mps && rise >= LIVE.real_rise_m && back >= LIVE.real_backswing_min_s && back <= LIVE.real_backswing_max_s;
+}
+
+/** The 'impact' event bookkeeping of one wrist sample in SWING / IMPACT (does not touch the 0.3.0 state). */
+function qStep(s, t, y, v1, tMid, events) {
+  if (s.qSent) return;
+  if (!s.qDown) {
+    if (y > s.qTopY) { s.qTopY = y; s.t_top = t; }
+    if (s.t_top !== null && t > s.t_top && y <= s.y_address + 0.5 * (s.qTopY - s.y_address)) s.qDown = true;
+  }
+  if (s.qDown) {
+    if (v1 > s.qPk) { s.qPk = v1; s.qTpk = tMid; }
+    const ta = s.qAud.find((a) => a > s.t_top);
+    if (ta !== undefined) { qEvent(s, ta, 'audio', events); return; }
+    // with a microphone the impact sound may still come (down the line the hands slow before impact): wait 0.3 s
+    if (s.qPk > LIVE.swing_mps && v1 < 0.5 * s.qPk && (!s.audioAvailable || t - s.qTpk > LIVE.audio_peak_window_s) && realProfile(s, s.qTopY - s.y_address, s.qPk, s.qTpk)) {
+      qEvent(s, s.qTpk, 'wrist_peak', events);
+      return;
+    }
+  }
+  s.qAud = s.qAud.filter((a) => a > t - LIVE.audio_peak_window_s);
+}
+
+function qEvent(s, t, src, events) {
+  s.qSent = true;
+  s.qAud = [];
+  const audio = src === 'audio';
+  events.push({
+    type: 'impact', t_impact: t, impact_source: src, t_address: s.t_address, t_swing: s.t_swing, t_top: s.t_top,
+    peak_mps: s.peak, conf: audio ? 0.9 : 0.5, reason_codes: audio ? [] : [s.audioAvailable ? RC.EVENTS_UNCERTAIN : RC.AUDIO_UNAVAILABLE],
+  });
 }
 
 function go(s, to, t, events) {
@@ -91,9 +140,6 @@ function finishShot(s, t_finish, events) {
   const audio = bestAudio(s);
   for (const a of s.audioCands) if (a !== audio) events.push({ type: 'audio_ignored', t_s: a, reason: 'not_at_wrist_peak' });
   const rise = s.maxY - s.y_address;
-  const back = s.t_peak - s.t_swing;
-  const realProfile = s.peak >= LIVE.real_peak_mps && rise >= LIVE.real_rise_m &&
-    back >= LIVE.real_backswing_min_s && back <= LIVE.real_backswing_max_s;
   let kind;
   let codes = [];
   let conf;
@@ -101,7 +147,7 @@ function finishShot(s, t_finish, events) {
   let src;
   if (audio !== null) {
     kind = 'swing'; tImp = audio; src = 'audio'; conf = 0.9;
-  } else if (realProfile) {
+  } else if (realProfile(s, rise)) {
     kind = 'swing'; tImp = s.t_peak; src = 'wrist_peak'; conf = 0.5;
     codes = [s.audioAvailable ? RC.EVENTS_UNCERTAIN : RC.AUDIO_UNAVAILABLE];
   } else if (rise >= LIVE.practice_rise_m) {
@@ -121,7 +167,7 @@ function finishShot(s, t_finish, events) {
 export function liveStep(s, sample) {
   const events = [];
   if (sample.type === 'audio') {
-    if (s.mode === 'SWING' || s.mode === 'IMPACT') s.audioCands.push(sample.t_s);
+    if (s.mode === 'SWING' || s.mode === 'IMPACT') { s.audioCands.push(sample.t_s); if (!s.qSent) s.qAud.push(sample.t_s); }
     else events.push({ type: 'audio_ignored', t_s: sample.t_s, reason: 'no_motion' });
     return { state: s, events };
   }
@@ -165,6 +211,7 @@ export function liveStep(s, sample) {
     case 'IMPACT': {
       if (v1 > s.peak) { s.peak = v1; s.t_peak = tMid; }
       if (sample.y_m > s.maxY) s.maxY = sample.y_m;
+      qStep(s, t, sample.y_m, v1, tMid, events);
       if (s.mode === 'SWING' && s.peak > LIVE.swing_mps && v1 < 0.5 * s.peak) {
         s.t_impact = s.t_peak;
         go(s, 'IMPACT', t, events);

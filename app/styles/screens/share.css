@@ -1,4 +1,43 @@
 /* styles/screens/share.css — tracer clip / share card sheet (V04-SPEC §D.2). Lazy: never linked by index.html; ui/share.js
-   calls app.loadStyles('share') before it opens the sheet. Created empty by V4-A drop 1; owner V4-E.
+   calls app.loadStyles('share') before it opens the sheet. Owner V4-E.
    The probe rule below is checked by the share gate; keep it. */
 .share-sheet { --lazy-css: share; }
+
+.share-body { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
+.share-section { font: var(--t-headline); margin: var(--s-3) 0 0; color: var(--text); }
+.share-field { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
+.share-field-label { font: var(--t-footnote); color: var(--text-2); margin: 0; }
+
+/* trail colour swatches: 44 px targets; the chosen one ringed in --accent, the other trail's colour disabled */
+.share-swatches { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.share-swatch {
+  inline-size: 44px; block-size: 44px; min-inline-size: 44px; padding: 0; border-radius: var(--r-pill);
+  border: var(--border-control) solid var(--separator); background: var(--media-bg);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.share-swatch[aria-checked="true"] { outline: 3px solid var(--accent); outline-offset: 2px; }
+.share-swatch:disabled { opacity: .35; cursor: not-allowed; }
+.share-swatch:focus-visible { outline: 3px solid var(--border-focus); outline-offset: 2px; }
+.share-swatch-dot { inline-size: 26px; block-size: 26px; border-radius: var(--r-pill); }
+.swatch-trail-1 { background: var(--trail-1); }
+.swatch-trail-2 { background: var(--trail-2); }
+.swatch-trail-3 { background: var(--trail-3); }
+.swatch-trail-4 { background: var(--trail-4); }
+.swatch-trail-5 { background: var(--trail-5); }
+.swatch-trail-6 { background: var(--trail-6); }
+.swatch-trail-7 { background: var(--trail-7); }
+.swatch-trail-8 { background: var(--trail-8); }
+
+.share-progress-row { display: flex; align-items: center; gap: var(--s-3); }
+.share-progress-row:has(> [hidden]:first-child):has(> [hidden]:last-child) { display: none; }
+.share-progress { flex: 1; min-inline-size: 0; block-size: 8px; accent-color: var(--accent); }
+.share-status { font: var(--t-footnote); color: var(--text-2); margin: 0; overflow-wrap: anywhere; }
+.share-status:empty { display: none; }
+.share-result { display: flex; flex-direction: column; gap: var(--s-3); }
+.share-result[hidden] { display: none; }
+.share-preview, .share-card-preview {
+  display: block; inline-size: 100%; max-block-size: 50vh; object-fit: contain;
+  background: var(--media-bg); border-radius: var(--r-md);
+}
+.share-out:empty { display: none; }
+.share-out .download-link { inline-size: 100%; overflow-wrap: anywhere; }

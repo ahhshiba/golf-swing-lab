@@ -58,5 +58,6 @@
   "seg.label": "檢視方式",
   "seg.list": "每一球",
   "seg.stats": "統計",
-  "seg.gapping": "距離表"
+  "seg.gapping": "距離表",
+  "seg.patterns": "趨勢"
 }

@@ -1,10 +1,12 @@
 {
   "name": "Quick Read",
-  "provisional": "Quick read",
-  "refined": "Full analysis",
-  "change": "Quick {from} → full {to}",
+  "provisional": "Quick",
+  "refined": "Final",
+  "change": "Quick {from} → final {to}",
   "source.pose": "From your swing",
   "source.gapping": "Your gapping",
   "source.reference": "Typical player",
-  "none": "No quick read for this swing"
+  "none": "No quick read for this swing",
+  "summary": "Quick read: {items}",
+  "not_quick": "Shown after the full analysis (no quick read for this)"
 }

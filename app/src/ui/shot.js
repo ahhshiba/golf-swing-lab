@@ -1,7 +1,8 @@
 // ui/shot.js — the results screen (PRODUCT-SPEC §2.3; LAUNCH-MONITOR-SPEC §3.2, LM-D). Thin shell part: the top row,
 // hero visual, data tiles, tile editor and recompute live in the lazy ui/tiles.js. Below them: one Notice for shared
 // reasons · grouped compact tiles not already shown · disclosure of what was not measured (shot-unmeasured) · replay +
-// event correction with undo, revision list and a confirm before leaving unsaved edits · actions (star, delete, share).
+// event correction with undo, revision list and a confirm before leaving unsaved edits · actions (swing lab, tracer clip,
+// share, delete; V04 §E/§D).
 // The owner-label mode (P14) uses the teach editor on this one shot.
 //
 // Pure exports (tests): labelStartEvents, buildLabel, recomputeShot, splitMetrics.
@@ -148,6 +149,8 @@ export function mountShot(root, app) {
   const ops = shotOps(app);
 
   for (const st of STATES) app.e2e?.registerState('shot', st, async () => { await ready; return lm?.state(st) ?? false; });
+  // V4-E's sheet states (shot:share, shot:share_ready) live in the lazy ui/share.js: registered there on first use
+  for (const st of ['share', 'share_ready']) app.e2e?.registerState('shot', st, async (a) => { const m = await import('./share.js'); if (!m.registerShareStates) return false; m.registerShareStates(a); return a.e2e.runState('shot', st, a); });
 
   async function load(params) {
     tilesMod ??= await import('./tiles.js');
@@ -211,6 +214,9 @@ export function mountShot(root, app) {
     await shareOrDownload(new Blob([body], { type: 'application/json' }), name, actionsOut, { title: t('shot.share.title') });
   }
   let actionsOut = null;
+  // V04 §D.2: the tracer-clip / card sheet (V4-E, lazy)
+  const clip = (shot) => import('./share.js').then((m) => m.openShareSheet(app, { kind: 'shot', shot, clipBlob: data.clip?.blob ?? null, poseSeq: data.poseSeq }))
+    .catch((e) => app.errors?.report?.(e, { where: 'shot.clip' }));
 
   async function saveCorrection(events, why = 'edit') {
     const { shot, poseSeq } = data;
@@ -326,6 +332,8 @@ export function mountShot(root, app) {
     actionsOut = h('div.export-out', {});
     const actions = h('section.card.shot-actions', {},
       h('div.action-row', {},
+        C.button({ label: t('screen.lab.title'), icon: 'level', variant: 'secondary', size: 'lg', testid: 'shot-lab', onClick: () => app.nav.go('lab', { shot_id: shot.shot_id }) }),
+        C.button({ label: t('shot.share.clip'), icon: 'film', variant: 'secondary', size: 'lg', testid: 'shot-share-clip', onClick: () => clip(shot) }),
         C.button({ label: t('shot.share.button'), icon: 'share', variant: 'secondary', size: 'lg', testid: 'shot-share', onClick: () => share(shot) }),
         C.button({ label: t('common.delete'), icon: 'trash', variant: 'destructive', size: 'lg', testid: 'shot-delete', onClick: () => del(shot) })),
       actionsOut);

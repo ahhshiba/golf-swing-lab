@@ -1,0 +1,19 @@
+{
+  "schema": "gsl-course-golden/1",
+  "generator": "course-1",
+  "note": "sha256 of course/generate.js courseCanonical(generateCourse(opts)); key = style/seed/holes/tees. V4-D v4-d-perf compares the browser value of links/42/18/middle.",
+  "cases": {
+    "parkland/1/18/middle": "29645f0f86bdb1c30719267857311beeb4a86b7f5945073b229e98a43696ca6f",
+    "parkland/42/18/middle": "da217c678c1c6e9ceeef4193ee18dc83b780902abc7f0aa37f2dba0ad5355ce5",
+    "parkland/987654/18/middle": "d0562dd8a881e5b221d3847b10e1f811359997219e2febc9d8c1774d30c63d3d",
+    "links/1/18/middle": "9b239be497fbae76ddcd2ce1b446755908801dfbc97664194010a4cb787f18ac",
+    "links/42/18/middle": "ed31bb35897be98710095970f0eec59ddf3058c054bc84a1dbbd25f3b148324d",
+    "links/987654/18/middle": "4be0cd8b4441f4384ea29111cb80e4b92238b48e2eebc3147c4f13a56c7b2641",
+    "desert/1/18/middle": "03fc74e0dd688838ece406c6a0ca2b6da585403269386928edced6821c55bd2e",
+    "desert/42/18/middle": "6bbda2cee128b85c65970844f10542fed94c1e5d0868052d6128e37aca2df71d",
+    "desert/987654/18/middle": "0e82e3a9a2abe20ce396d396a0507392c3bf9f42476fc923d16af1b931f6a845",
+    "mixed/42/18/middle": "a53f99c9a69d02885f3534201591a7f2c0f347b16dc33ecbc3b1465eb62c397e",
+    "links/42/9/back": "5a113fd24954914988b4acaf2e5632985a3604ef4a8c08419904c9e4f7b382cf",
+    "desert/7/9/forward": "b6d098adcfe5040012a5791a3b857e1d9f724bda5f6f004d5e21f8e9dcab8f0b"
+  }
+}

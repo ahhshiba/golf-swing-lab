@@ -60,5 +60,6 @@
   "missing.title": "找不到這一球",
   "missing.body": "它可能已被刪除。",
   "load_failed.title": "無法讀取這一球",
-  "load_failed.body": "再試一次；一直發生的話，到設定 › 診斷複製報告。"
+  "load_failed.body": "再試一次；一直發生的話，到設定 › 診斷複製報告。",
+  "share.clip": "軌跡影片"
 }

@@ -6,5 +6,7 @@
   "source.pose": "來自揮桿",
   "source.gapping": "距離表",
   "source.reference": "一般球員",
-  "none": "這一桿沒有速報"
+  "none": "這一桿沒有速報",
+  "summary": "速報：{items}",
+  "not_quick": "這一項等完整分析後顯示（即時速報沒有）"
 }

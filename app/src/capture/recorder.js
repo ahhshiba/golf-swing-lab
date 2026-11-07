@@ -3,7 +3,7 @@
 //   RECORDER_CANDIDATES                     preference order (mp4/avc1 first, then webm)
 //   pickMimeType(isTypeSupported) -> string | ''     first supported candidate ('' = browser default)
 //   supportedTypes(isTypeSupported) -> string[]
-//   createSegmentRecorder(stream, { mimeType?, mediaClock?, videoBitsPerSecond?, env?, maxSegmentMs = 12000, now? })
+//   createSegmentRecorder(stream, { mimeType?, mediaClock?, startClock?, videoBitsPerSecond?, env?, maxSegmentMs = 12000, now? })
 //     -> { start(), cut() -> Promise<Blob>, stop() -> Promise<Blob | null>, mimeType, recording(), hold(bool),
 //          segmentAgeMs(), stats() -> { segments, auto_rolls, max_s, last_s, open_s } }
 //
@@ -11,6 +11,11 @@
 // and carries `t_media_start_s` / `t_media_end_s` (from mediaClock(), e.g. () => videoEl.currentTime, the same clock
 // as the frame tap) plus `mimeType`, so the live loop can map event times into segment time. A new MediaRecorder
 // is created per segment, so each segment is a complete, independently decodable file.
+// startClock() -> number | Promise<number> (optional, default mediaClock): the media time of the segment's FIRST
+// recorded frame, called at start(). Segment time 0 is that frame, not "the last frame the tap saw" (0.3.0 used
+// mediaClock = tap.lastMediaTime(), which is a frame or more older than the recording: every audio impact then landed
+// that much late in the clip, refined downswing long and tempo low). ui/live.js passes the frame tap's next frame at
+// or after the start call (capture/frametap.js nextMediaTime). The blob waits for it before it resolves.
 // R6 / PF-3 bound: a segment never runs longer than maxSegmentMs (12 s). When nobody cut it in time, the recorder
 // rolls it over by itself (the old segment is discarded) unless hold(true) is set (the live loop holds during a swing,
 // then the roll happens as soon as the hold is released). diag recorder.segments = stats() after every segment.
@@ -50,6 +55,7 @@ export function createSegmentRecorder(stream, opts = {}) {
   const mimeType = opts.mimeType ?? pickMimeType(isTS);
   diagRecord('media_recorder.chosen', mimeType || 'default');
   const clock = typeof opts.mediaClock === 'function' ? opts.mediaClock : () => null;
+  const startClock = typeof opts.startClock === 'function' ? opts.startClock : clock;
   const wall = typeof opts.now === 'function' ? opts.now : () => (env.performance ? env.performance.now() : Date.now());
   const maxMs = Number.isFinite(opts.maxSegmentMs) && opts.maxSegmentMs > 0 ? opts.maxSegmentMs : 12000;
   const setT = (env.setTimeout ?? globalThis.setTimeout).bind(env.setTimeout ? env : globalThis);
@@ -97,7 +103,9 @@ export function createSegmentRecorder(stream, opts = {}) {
     const myChunks = [];
     r.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) myChunks.push(ev.data); };
     chunks = myChunks;
-    tStart = clock();
+    let s0 = null;
+    try { s0 = startClock(); } catch { s0 = clock(); }
+    tStart = s0 && typeof s0.then === 'function' ? s0.then((v) => v, () => null) : s0;
     wallStart = wall();
     r.start();
     rec = r;
@@ -111,10 +119,9 @@ export function createSegmentRecorder(stream, opts = {}) {
       r.onstop = () => {
         const type = r.mimeType || mimeType || (myChunks[0] && myChunks[0].type) || '';
         const blob = new env.Blob(myChunks, type ? { type } : undefined);
-        blob.t_media_start_s = t0;
         blob.t_media_end_s = clock();
         blob.mimeType = type;
-        resolve(blob);
+        Promise.resolve(t0).then((v) => { blob.t_media_start_s = Number.isFinite(v) ? v : null; resolve(blob); });
       };
       r.onerror = (ev) => reject(ev && ev.error ? ev.error : new Error('MediaRecorder error'));
       try { r.stop(); } catch (e) { reject(e); }

@@ -1,0 +1,242 @@
+{
+  "format": "gsl-lab-sessions/1",
+  "note": "V04-SPEC F.8 / G.3 V4-F 3 and 6: synthetic swings with poses for the swing lab, as RECIPES (a few hundred pose sequences would be ~15 MB of JSON). Each swing = tests/synth/swing.js synthSwing({ seed, view, fps, params: { ...group.params } }) with its true events; metrics from metrics/compute.js computeMetrics. Expanded by tests/unit/lab.fixture.mjs (expandGroup, exportEnvelope -> a golf-swing-lab-export/1 file with shots + poses for the import). The injected fault is the group's params; 'truth' is the designed value of the lab quantity. Fault thresholds and these values are synthetic (UNVERIFIED against real swings).",
+  "generator": "tests/synth/swing.js synthSwing",
+  "template_shot": "tests/fixtures/shots/v2/valid_dtl_30.json",
+  "groups": [
+    {
+      "id": "dtl_clean",
+      "view": "dtl",
+      "fps": 30,
+      "session_id": "sess-lab-dtl-1",
+      "day": "2026-10-28",
+      "inject": null,
+      "params": {
+        "pelvisImp": [
+          0.06,
+          -0.005,
+          0.0
+        ]
+      },
+      "seeds": {
+        "from": 1001,
+        "n": 50
+      }
+    },
+    {
+      "id": "dtl_early_extension",
+      "view": "dtl",
+      "fps": 30,
+      "session_id": "sess-lab-dtl-2",
+      "day": "2026-11-03",
+      "inject": {
+        "fault": "early_extension",
+        "truth": 0.1
+      },
+      "params": {
+        "pelvisImp": [
+          0.06,
+          -0.1,
+          0.0
+        ]
+      },
+      "seeds": {
+        "from": 2001,
+        "n": 50
+      }
+    },
+    {
+      "id": "fo_clean",
+      "view": "face_on",
+      "fps": 30,
+      "session_id": "sess-lab-fo-1",
+      "day": "2026-10-29",
+      "inject": null,
+      "params": {
+        "stance": 0.4,
+        "pelvisTop": [
+          -0.01,
+          0.0,
+          0.0
+        ],
+        "pelvisImp": [
+          0.06,
+          0.0,
+          0.0
+        ]
+      },
+      "seeds": {
+        "from": 3001,
+        "n": 50
+      }
+    },
+    {
+      "id": "fo_sway",
+      "view": "face_on",
+      "fps": 30,
+      "session_id": "sess-lab-fo-2",
+      "day": "2026-11-02",
+      "inject": {
+        "fault": "sway",
+        "truth": 0.1
+      },
+      "params": {
+        "stance": 0.4,
+        "pelvisTop": [
+          -0.1,
+          0.0,
+          0.0
+        ],
+        "pelvisImp": [
+          0.06,
+          0.0,
+          0.0
+        ]
+      },
+      "seeds": {
+        "from": 4001,
+        "n": 50
+      }
+    },
+    {
+      "id": "fo_slide",
+      "view": "face_on",
+      "fps": 30,
+      "session_id": "sess-lab-fo-3",
+      "day": "2026-11-05",
+      "inject": {
+        "fault": "slide",
+        "truth": 0.1
+      },
+      "params": {
+        "stance": 0.4,
+        "pelvisTop": [
+          -0.01,
+          0.0,
+          0.0
+        ],
+        "pelvisImp": [
+          0.3,
+          0.0,
+          0.0
+        ]
+      },
+      "seeds": {
+        "from": 5001,
+        "n": 50
+      }
+    }
+  ],
+  "rates": {
+    "note": "Per-rule acceptance populations (tests/unit/lab.rates.test.mjs): per view, n clean swings whose fault parameters are drawn (seeded) from the 'clean' ranges below — realistic and clear of every rule — and, per rule, n swings = the clean draw plus the rule's injection. Ranges are [lo, hi] uniform; 'stance' is drawn too. over_the_top (dtl) is injected after projection: the hand landmarks (13–22) are moved by offset_m (mat frame, + y away from the ball… see lab.fixture.mjs) weighted by a sine bump over the downswing, because the generator's downswing hand path retraces the backswing path.",
+    "n": 50,
+    "fps": 30,
+    "seed_from": 7001,
+    "clean": {
+      "stance": [
+        0.36,
+        0.46
+      ],
+      "pelvisImp_x": [
+        0.04,
+        0.12
+      ],
+      "pelvisImp_y": [
+        -0.025,
+        0.02
+      ],
+      "pelvisTop_x": [
+        -0.03,
+        0.0
+      ],
+      "headImp_z": [
+        -0.025,
+        0.03
+      ],
+      "fwdTiltLossImp_deg": [
+        0,
+        4
+      ],
+      "spineSide_deg": [
+        6,
+        12
+      ],
+      "sideTiltTop_deg": [
+        -6,
+        -2
+      ],
+      "tempo": [
+        2.7,
+        3.3
+      ]
+    },
+    "inject": {
+      "early_extension": {
+        "view": "dtl",
+        "set": {
+          "pelvisImp_y": -0.1
+        }
+      },
+      "loss_of_posture": {
+        "view": "dtl",
+        "set": {
+          "fwdTiltLossImp_deg": 18
+        }
+      },
+      "over_the_top": {
+        "view": "dtl",
+        "hands_offset_m": [
+          0,
+          -0.1,
+          0.06
+        ]
+      },
+      "sway": {
+        "view": "face_on",
+        "set": {
+          "pelvisTop_x": -0.12
+        }
+      },
+      "slide": {
+        "view": "face_on",
+        "set": {
+          "pelvisImp_x": "stance/2+0.10"
+        }
+      },
+      "reverse_spine": {
+        "view": "face_on",
+        "set": {
+          "sideTiltTop_deg": "-(spineSide+12)"
+        }
+      },
+      "head_dip": {
+        "view": "face_on",
+        "set": {
+          "headImp_z": -0.12
+        }
+      },
+      "early_rise": {
+        "view": "dtl",
+        "set": {
+          "headImp_z": 0.13
+        }
+      },
+      "weight_back": {
+        "view": "face_on",
+        "set": {
+          "pelvisImp_x": -0.05
+        }
+      },
+      "tempo_off": {
+        "view": "face_on",
+        "set": {
+          "tempo": 1.8
+        }
+      }
+    },
+    "not_synthetic": {
+      "overswing": "disabled (NOT_IMPLEMENTED): no signal measures past-parallel at the top",
+      "over_the_top@high_behind": "reads club_path_deg from the 240 fps club track, which the pose generator does not produce; covered by lab.faults.logic"
+    }
+  }
+}

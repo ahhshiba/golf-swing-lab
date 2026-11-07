@@ -2,7 +2,7 @@
 // tests/e2e/screenshot_matrix.mjs — the integration screenshot matrix (PRODUCT-SPEC §8.7 step 4), machine-checked.
 //
 //   node tests/e2e/screenshot_matrix.mjs [--dist DIR] [--out DIR] [--port N] [--screens a,b] [--locales zh-Hant,en]
-//                                        [--themes light,dark,sun] [--scales 1,2] [--json FILE]
+//                                        [--themes light,dark,sun] [--scales 1,2] [--json FILE] [--seed lab|base]
 //
 // Screens (default = all): the 10 of the shell (home, venue, setup, live, import, shot, history, diag, settings, about),
 // the launch-monitor screens (drills, drill, stats, gapping), the 0.4.0 screens (course, round, scorecard, lab, patterns;
@@ -11,6 +11,12 @@
 // with app.e2e.registerState(screen, state, async (app) => …) is run; an unregistered state is a 'state' finding.
 // Files of a state are named <screen>~<state>-….png. History is seeded with tests/fixtures/shots/valid_*.json (v1) and
 // tests/fixtures/shots/v2/valid_*.json; the shot screen opens the v2 face_on shot (flight, tracks, the 14 new metrics).
+// --seed lab (default) also imports pose-bearing swings (tests/unit/lab.fixture.mjs: lab-sessions.json, 4 per group, and
+// valid_dtl_30 with a synthetic pose carrying an early-extension fault and a head-dip "possible", the newest dtl swing,
+// which the lab:* states open), so lab shows fault chips and patterns populated rows; --seed base = the 0.3.0 seed.
+// 0.4.0 states (V04-SPEC §F.8): live:provisional|refined, course:new, round:flyover|aim|green|recommend|manual,
+// scorecard:full, lab:lines|phase|fault, shot:share|share_ready (the share sheet opens over the shot screen; round:perf
+// is gate-only).
 // Widths: 390×844 and 430×932 for every screen; setup and live also 844×390 landscape. Themes light / dark / sun,
 // locales zh-Hant / en (each a fresh browser context in that locale), text 100 % and 200 % (html font-size).
 // Every state is screenshotted (full page) into --out as <screen>-<w>x<h>-<theme>-<locale>-<scale>x.png and checked:
@@ -43,7 +49,12 @@ const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0
 const DIST = path.resolve(opt('dist', process.env.GSL_E2E_DIST || path.join(ROOT, 'dist')));
 const OUT = path.resolve(opt('out', process.env.GSL_SHOTS_DIR || path.join(ROOT, 'tests', 'e2e', '.shots', 'matrix')));
 const PORT = Number(opt('port', process.env.GSL_E2E_PORT || 0));
-const ALL_SCREENS = 'home,venue,import,shot,shot:tiles,shot:side,shot:top,shot:3d,shot:video,history,stats,gapping,drills,drills:setup,drill,drill:result,drill:active,course,round,scorecard,lab,patterns,diag,settings,about,setup,live';
+const ALL_SCREENS = ['home', 'venue', 'import', 'shot', 'shot:tiles', 'shot:side', 'shot:top', 'shot:3d', 'shot:video', 'shot:share', 'shot:share_ready',
+  'history', 'stats', 'stats:session', 'gapping', 'gapping:hb', 'drills', 'drills:setup', 'drill', 'drill:result', 'drill:active',
+  'course', 'course:new', 'round', 'round:flyover', 'round:aim', 'round:green', 'round:recommend', 'round:manual', 'scorecard', 'scorecard:full',
+  'lab', 'lab:lines', 'lab:phase', 'lab:fault', 'patterns', 'diag', 'settings', 'about', 'setup', 'live', 'live:provisional', 'live:refined'].join(',');
+const SEED = opt('seed', 'lab');
+if (!['lab', 'base'].includes(SEED)) { console.error(`--seed must be lab or base, not ${SEED}`); process.exit(64); }
 const SCREENS = opt('screens', ALL_SCREENS).split(',');
 const LOCALES = opt('locales', 'zh-Hant,en').split(',');
 const THEMES = opt('themes', 'light,dark,sun').split(',');
@@ -279,7 +290,16 @@ async function main() {
     return x;
   }) : []);
   shots.push(...spread('driver', 1.17, [166, 172, 190, 197]), ...spread('7i', 0.94, [128, 134, 143, 150]));
-  fs.writeFileSync(fixture, JSON.stringify({ format: 'golf-swing-lab-export/1', exported_at: '2026-11-04T00:00:00.000Z', app_version: '0.2.0', venues: [], presets: [], sessions: [], shots }));
+  let poses = [];
+  if (SEED === 'lab') {
+    const { withSynthPose, exportEnvelope, loadLabSessions } = await import('../unit/lab.fixture.mjs');
+    const base = JSON.parse(fs.readFileSync(path.join(shotsDir, 'v2', 'valid_dtl_30.json'), 'utf8'));
+    const flagged = withSynthPose({ ...base, shot_id: 'shot-lab-matrix-dtl', created_at: '2026-11-05T10:00:00.000+08:00' }, { seed: 7, params: { pelvisImp: [0.06, -0.10, 0], headImp: [0, 0, -0.04] } });
+    const env = exportEnvelope(loadLabSessions(), { perGroup: 4, extra: [flagged] });
+    shots.push(...env.shots);
+    poses = env.poses;
+  }
+  fs.writeFileSync(fixture, JSON.stringify({ format: 'golf-swing-lab-export/1', exported_at: '2026-11-04T00:00:00.000Z', app_version: '0.2.0', venues: [], presets: [], sessions: [], shots, ...(poses.length ? { poses } : {}) }));
   try {
     for (const locale of LOCALES) {
       const context = await browser.newContext({ serviceWorkers: 'block', locale: BROWSER_LOCALE[locale] ?? locale, viewport: PORTRAIT[0], permissions: ['camera', 'microphone'] });
@@ -310,9 +330,15 @@ async function main() {
         }
         await setState(page, 'light', 1, PORTRAIT[0]);
       };
-      for (const entry of SCREENS.filter((s) => s !== 'setup' && s !== 'live')) {
+      for (const entry of SCREENS.filter((s) => s !== 'setup' && s.split(':')[0] !== 'live')) {
         const [screen, state = null] = entry.split(':');
         await go(page, screen, screen === 'shot' ? { shot } : {});
+        if (screen === 'patterns' && SEED === 'lab') {
+          // the lab records of the seeded swings are computed in the background after the import
+          await until(page, () => document.querySelectorAll('[data-screen="patterns"] [data-testid="patterns-row"]').length > 0, null, 'patterns rows from the lab seed', 90000)
+            .catch(() => missingStates.push(`${locale}: patterns showed no populated row with --seed lab`));
+          await page.waitForTimeout(400);
+        }
         if (state) {
           const ran = await page.evaluate(async ([sc, st]) => {
             const app = globalThis.__GSL_E2E__.app;
@@ -330,7 +356,8 @@ async function main() {
           await until(page, () => !document.querySelector('[aria-modal="true"]'), null, `${entry}: sheet closed`, 5000);
         }
       }
-      if (SCREENS.includes('setup') || SCREENS.includes('live')) {
+      const liveEntries = SCREENS.filter((s) => s.split(':')[0] === 'live');
+      if (SCREENS.includes('setup') || liveEntries.length) {
         await go(page, 'home');
         await page.locator('[data-testid="btn-start-practice"]').click();
         await page.locator('[data-screen="setup"]').waitFor({ state: 'visible', timeout: 30000 });
@@ -339,7 +366,20 @@ async function main() {
         await page.locator('[data-testid="btn-skip-setup"]').click();
         await page.locator('[data-screen="live"]').waitFor({ state: 'visible', timeout: 30000 });
         await page.waitForTimeout(2500);
-        if (SCREENS.includes('live')) await capture('live', [...PORTRAIT, LANDSCAPE]);
+        for (const entry of liveEntries) {
+          const state = entry.split(':')[1] ?? null;
+          if (state) {
+            const ran = await page.evaluate(async (st) => {
+              const app = globalThis.__GSL_E2E__.app;
+              if (!app.e2e?.has?.('live', st)) return false;
+              await app.e2e.runState('live', st, app);
+              return true;
+            }, state);
+            if (!ran) { missingStates.push(`${locale}: no e2e state live:${state} registered (app.e2e.registerState)`); continue; }
+            await page.waitForTimeout(500);
+          }
+          await capture('live', [...PORTRAIT, LANDSCAPE], state);
+        }
       }
       await context.close();
     }
