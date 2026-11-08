@@ -51,7 +51,7 @@ export const SCREEN_MODULES = Object.freeze({
   patterns: ['./ui/patterns.js', 'mountPatterns'],
 });
 /** Lazy screen stylesheets (V04-SPEC §F.6): screen id → styles/screens/<name>.css, applied before the screen mounts. */
-export const SCREEN_STYLES = Object.freeze({ course: 'sim', round: 'sim', scorecard: 'sim', lab: 'lab', patterns: 'lab' });
+export const SCREEN_STYLES = Object.freeze({ course: 'sim', round: 'sim', scorecard: 'sim', lab: 'lab', patterns: 'lab', live: 'quick' });
 /** Pause between background write-back batches of migrated shots (LAUNCH-MONITOR-SPEC §2.1). */
 const MIGRATE_PAUSE_MS = 400;
 /** Screens whose first show waits for the media/devtools modules and the session controller. */

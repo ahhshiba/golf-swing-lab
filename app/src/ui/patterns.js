@@ -13,7 +13,7 @@ import * as C from './components.js';
 import { t, fmtNum } from '../i18n/index.js';
 import { viewName } from './glossary.js';
 import { historySeg, loadedShots } from './history.js';
-import { faultTrends } from '../lab/trends.js';
+import { faultTrends, MIN_CHANGE_N } from '../lab/trends.js';
 import { evaluateFaults } from '../lab/faults.js';
 import { LAB_PARAMS } from '../lab/params.js';
 import { normalizeLab } from '../lab/settings.js';
@@ -69,7 +69,7 @@ export function mountPatterns(root, app) {
 
   function row(r, byId) {
     const cv = h('canvas.patterns-canvas', { 'data-testid': 'patterns-chart', role: 'img' });
-    const change = r.change ? t(`patterns.${r.change}`) : t('patterns.no_change');
+    const change = r.change ? t(`patterns.${r.change}`) : r.few ? t('patterns.too_few', { min: MIN_CHANGE_N }) : t('patterns.no_change');
     const el = h('section.card.patterns-row', { 'data-testid': 'patterns-row', 'data-fault': r.id, 'data-view': r.view },
       h('h2', {}, h('span', t(`fault.${r.id}`)), h('span.patterns-view-name', viewName(r.view))),
       h('p.patterns-n', { 'data-testid': 'patterns-n' }, t('patterns.n', { k: r.k, n: r.n, s: r.sessions.length })),
@@ -88,7 +88,8 @@ export function mountPatterns(root, app) {
     try { md = new Intl.DateTimeFormat(app.locale?.() ?? undefined, { month: 'numeric', day: 'numeric' }); } catch (_) { md = { format: (d) => d.toISOString().slice(5, 10) }; }
     for (const { cv, r } of items) {
       if (my !== seq || !cv.isConnected) return;
-      const bars = r.sessions.map((s) => ({ label: md.format(new Date(s.at)), value: 100 * s.p, lo: 100 * s.lo, hi: 100 * s.hi, validity: 'estimated', series: 0 }));
+      // each bar says how many swings it is (a 100 % over one swing is not a 100 % over twenty)
+      const bars = r.sessions.map((s) => ({ label: t('patterns.bar', { d: md.format(new Date(s.at)), n: s.n }), value: 100 * s.p, lo: 100 * s.lo, hi: 100 * s.hi, validity: 'estimated', series: 0 }));
       try {
         const res = V.drawBars(cv, { bars, palette: P, unit: '%', axisTitle: t('patterns.axis') });
         cv.setAttribute('aria-label', `${t(res.a11y, res.params)} ${t('patterns.chart_note')}`);

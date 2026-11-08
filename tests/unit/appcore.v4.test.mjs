@@ -64,7 +64,7 @@ test('state: 5 new sub-screens, 4 of them data screens; tabs (lab keeps the tab 
 test('main.js: SCREEN_MODULES maps the 5 screens to their lazy modules; SCREEN_STYLES; app.sim + app.loadStyles wired', () => {
   const src = read('app/src/main.js');
   for (const [id, fn] of Object.entries(NEW_SCREENS)) assert.match(src, new RegExp(`${id}: \\['\\./ui/${id}\\.js', '${fn}'\\]`), id);
-  assert.match(src, /SCREEN_STYLES = Object\.freeze\(\{ course: 'sim', round: 'sim', scorecard: 'sim', lab: 'lab', patterns: 'lab' \}\)/);
+  assert.match(src, /SCREEN_STYLES = Object\.freeze\(\{ course: 'sim', round: 'sim', scorecard: 'sim', lab: 'lab', patterns: 'lab', live: 'quick' \}\)/);
   assert.match(src, /sim: createSimState\(\)/);
   assert.match(src, /loadStyles: createStyleLoader\(document\)/);
   assert.match(src, /await app\.loadStyles\(SCREEN_STYLES\[id\]\)/);

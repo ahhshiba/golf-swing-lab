@@ -8,12 +8,18 @@
 // is on screen where the shot's numbers will be. provisional(r): tiles for the hero metrics the quick read has (settings
 // live.metrics, default tempo, club speed, carry; up to 3), each with the 速報 tag, its ± range (.mt-ci, from the ci95)
 // and, for carry, where the number comes from (from your swing / your gapping / typical player: §A.4 a prior is never
-// called measured). refined(shot): the same card turns into the full analysis in place (data-stage="refined"; full
-// numbers without ±, like the 0.3.0 hero: the shot screen has them); a number that changed shows "quick 41 → full 43"
-// once and fades after 2 s (reduced motion: removed without a fade; at 200 % text it is not shown, see practice.css); a
+// called measured). refined(shot): the same card turns into the full analysis in place (data-stage="refined"; every
+// number keeps its ± and its ValidityTag pill); a number that changed shows "quick 41 → full 43"
+// once and fades after 2 s (reduced motion: removed without a fade; at 200 % text it is not shown, see quick.css); a
 // metric the full analysis cannot give in live mode (carry needs the slow-motion import) keeps the quick value and its
 // 速報 tag. A refined shot of an older swing (a newer quick read is on screen) leaves the card alone (returns false).
 // data-testid="quick-card", data-stage="provisional"|"refined", data-t-impact = the quick read's impact time (media s).
+// One confidence system (CRITIC-1): each tile has the components ValidityTag (● 量測 ◐ 估計 ▲ 低可信; a quick value is
+// low_confidence by contract, so ▲) and a 速報 / 精算 sub-label (.qc-tag). Numbers are rounded to what their error
+// supports (honest(): ± to 2 significant figures, the value to the same step); when ± is over 30 % of the value the
+// range is the hero ("100–310 碼", ends rounded outward) and the point value is the small line ("中間值 210").
+// onQuick(stage, r, n) (attachQuick): the live screen's shot count and last line follow the card, so a quick read never
+// sits next to "0 shots / no shots yet" (the swing is counted from its quick read; a dropped one is uncounted).
 // gappingRow(club): the player's distance-table row of that club (store/stats.js gapping(), face-on shots, n ≥ 5) or
 // null, loaded once in the background when the card mounts.
 //
@@ -23,13 +29,34 @@
 // the current club), painting each quick read here and on the round banner (banner().quick(r), V4-D) and returning
 // the time after that frame was painted (rAF + task) for the latency log; mediaNow = the live <video> position.
 import { h, clear } from './dom.js';
-import { t, list } from '../i18n/index.js';
+import { validityTag } from './components.js';
+import { t, list, fmtNum } from '../i18n/index.js';
 import { fmtMetric } from '../i18n/units.js';
 import { RC } from '../contract/reason-codes.js';
 
 const QUICK_IDS = Object.freeze(['tempo_ratio', 'backswing_s', 'downswing_s', 'club_speed_mps', 'carry_m']);
 const CHANGE_MS = 2000;
 const HERO_N = 2;
+const RANGE_REL = 0.3;
+
+/**
+ * fmtMetric rounded to the precision its error supports: ± to 2 significant figures and the value to the same step
+ * (never finer than the unit's digits); rel. error > 30 % → range: true with lo / hi (rounded outward) and the value.
+ */
+export function honest(metric, units, id) {
+  const f = fmtMetric(metric ?? null, units, { id });
+  if (f.value === '—' || !f.ci) return { ...f, range: false };
+  const n = (x) => Number(String(x).replace(/[^\d.]/g, '')) * (/^[−-]/.test(x) ? -1 : 1);
+  const v = n(f.value), hd = n(f.ci);
+  if (!Number.isFinite(v) || !(hd > 0)) return { ...f, range: false };
+  const min = 10 ** -(Number.isInteger(f.digits) ? f.digits : 2);
+  const fmt = (x, step, r = Math.round) => fmtNum(r(x / step) * step, { digits: Math.max(0, Math.round(-Math.log10(step))) });
+  const st = Math.max(min, 10 ** (Math.floor(Math.log10(hd)) - 1));
+  // a range rounds outward (it never claims less spread than the ci95)
+  if (hd > RANGE_REL * Math.abs(v)) return { ...f, range: true, value: fmt(v, st), ci: fmt(hd, st), lo: fmt(v > 0 ? Math.max(0, v - hd) : v - hd, st, Math.floor), hi: fmt(v + hd, st, Math.ceil) };
+  const value = fmt(v, st), ci = fmt(Math.max(st, hd), st);
+  return { ...f, range: false, value, ci, text: f.text.replace(f.value, value).replace(f.ci, ci) };
+}
 
 /** Hero ids of the card: settings.live.metrics (default tempo, club speed, carry) that the quick read can have, 1–3. */
 export function quickIds(settingsLive) {
@@ -41,11 +68,29 @@ export function quickIds(settingsLive) {
 const reduced = () => { try { return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true; } catch (_) { return false; } };
 
 export async function attachQuick(el, app, live = () => ({})) {
-  const [{ quickEstimate }, { createQuickTap }] = await Promise.all([import('../quick/estimate.js'), import('../quick/live.js')]);
+  const [{ quickEstimate }, { createQuickTap }] = await Promise.all([import('../quick/estimate.js'), import('../quick/live.js'),
+    app.loadStyles?.('quick')?.catch?.(() => null)]);
   // the live screen's current state: { focus, clip (its clip options), banner, video, empty(null) (repaint the hero) }
   const clip = () => live().clip ?? {};
   const banner = () => live().banner;
-  const card = mountQuickCard(el, app, { focus: () => live().focus });
+  // the count and last line (live().n saved shots, live().els): a quick read is shot n + 1 while its analysis runs
+  let was = null;
+  const onQuick = (st, r, n) => {
+    const { els: e, n: saved = 0 } = live();
+    if (!e?.count || !e?.last) return;
+    if (st === 'drop') { if (was) { e.count.textContent = was.count; e.last.textContent = was.last; e.last.classList.toggle('has-shot', was.has); was = null; } return; }
+    if (st === 'provisional') {
+      was ??= { count: e.count.textContent, last: e.last.textContent, has: e.last.classList.contains('has-shot') };
+      e.count.textContent = t('live.count', { n: saved + 1 });
+      e.last.textContent = t('quick.pending', { n: saved + 1 });
+    } else {
+      was = null;
+      e.count.textContent = t('live.count', { n: Math.max(saved, 1) });
+      e.last.textContent = t('live.last.line', { n: Math.max(saved, 1), items: n || t('live.last.no_numbers') });
+    }
+    e.last.classList.add('has-shot'); // large text: it repeats the card, read out only (practice.css)
+  };
+  const card = mountQuickCard(el, app, { focus: () => live().focus, onQuick });
   const paint = (r) => {
     card.provisional(r);
     try { banner?.()?.quick(r); } catch (_) { /* the banner is V4-D's */ }
@@ -65,7 +110,7 @@ export async function attachQuick(el, app, live = () => ({})) {
   return card;
 }
 
-export function mountQuickCard(el, app, { focus } = {}) {
+export function mountQuickCard(el, app, { focus, onQuick } = {}) {
   let cur = null; // the QuickResult on screen
   let stage = null;
   let fadeTimer = 0;
@@ -91,18 +136,44 @@ export function mountQuickCard(el, app, { focus } = {}) {
   // the first HERO_N metrics as hero tiles (the 0.3.0 live hero size), the rest as one compact line each (carry by
   // default: the least certain number gets the smaller type, and the live glance targets still fit at 200 % text)
   function tile(id, metric, tileStage, extra = {}, i = 0) {
-    const f = fmtMetric(metric ?? null, units(), { id });
+    const f = honest(metric, units(), id);
     // a null says why (its first reason code after PROVISIONAL)
     const rc = f.value === '—' ? (metric?.reason_codes ?? []).find((c) => c !== RC.PROVISIONAL) : null;
-    // a metric the quick read does not compute at all (a nav focus metric): no 速報 tag, it comes with the full analysis
+    // a metric the quick read does not compute at all (a nav focus metric): no pill, it comes with the full analysis
     const none = !metric && tileStage === 'provisional';
     const note = extra.note ?? (none ? t('quick.not_quick') : rc ? t(`reason.${rc}.short`) : null);
     const mini = i >= HERO_N;
-    return h('div', { class: `hero-tile qc-tile${mini ? ' qc-mini' : ''}`, 'data-metric': id, 'data-stage': none ? 'none' : tileStage },
-      h('span.hero-label', {}, h('span', {}, t(`metric.${id}.label`)), none ? null : h(`span.qc-tag.qc-${tileStage}`, {}, t(`quick.${tileStage}`))),
-      h('span.hero-value', {}, h(mini ? 'span.qc-num' : 'span.live-hero-num', {}, f.value), f.unit && f.value !== '—' ? h('span.hero-unit', {}, f.unit) : null),
-      f.ci && tileStage === 'provisional' ? h('span.mt-ci', {}, `± ${f.ci}`) : null, // full numbers: as the 0.3.0 hero (± on the shot screen)
+    // the quick read is low confidence by contract (§A.2): a quick value without a validity still gets ▲
+    const validity = metric?.validity ?? (tileStage === 'provisional' ? 'low_confidence' : 'not_computed');
+    // the pill is drawn for the eye; its word is also a visually hidden span, so at large text the pill can shrink to
+    // its glyph (quick.css) without the word leaving the accessibility tree
+    const pill = none ? null : validityTag(validity);
+    pill?.setAttribute('aria-hidden', 'true');
+    // the compact lines (carry by default) are not hero tiles: at large text they move below the club row (quick.css)
+    return h('div', { class: mini ? 'qc-tile qc-mini' : 'hero-tile qc-tile', 'data-metric': id, 'data-stage': none ? 'none' : tileStage, 'data-range': f.range ? '1' : '0' },
+      h('span.hero-label', {}, h('span.qc-name', {}, t(`metric.${id}.label`)),
+        none ? null : h('span.qc-marks', {}, pill, h('span.visually-hidden', {}, pill.querySelector('.vtag-text')?.textContent ?? ''), h(`span.qc-tag.qc-${tileStage}`, {}, t(`quick.${tileStage}`)))),
+      h('span.hero-value', {}, h(mini ? 'span.qc-num' : 'span.live-hero-num', {}, f.range ? `${f.lo}–${f.hi}` : f.value), f.unit && f.value !== '—' ? h('span.hero-unit', {}, f.unit) : null),
+      f.ci ? h('span.mt-ci', {}, f.range ? t('quick.mid', { v: f.value }) : `± ${f.ci}`) : null,
       note ? h(extra.change ? 'span.qc-note.qc-change' : 'span.qc-note', {}, note) : null);
+  }
+  const said = (id, m) => { const f = honest(m, units(), id); return `${t(`metric.${id}.label`)} ${f.range ? t('quick.range_text', { lo: f.lo, hi: f.hi, unit: f.unit }) : f.text}`; };
+
+  // large text (quick.css sets --qc-large on the card inside its container query): .qc-large on the live screen lets
+  // .live grow with the stacked lines (a container query cannot style .live); kept in step by a ResizeObserver
+  const screenEl = () => el.closest?.('[data-screen="live"]');
+  const large = (on) => screenEl()?.classList.toggle('qc-large', on);
+  let ro = null;
+  function checkLarge() {
+    const c = el.querySelector?.('.quick-card');
+    let on = false;
+    try { on = Boolean(c) && getComputedStyle(c).getPropertyValue('--qc-large').trim() === '1'; } catch (_) { on = false; }
+    large(on);
+  }
+  function watchLarge() {
+    checkLarge();
+    const board = el.closest?.('.live-board');
+    if (!ro && board && typeof ResizeObserver === 'function') { ro = new ResizeObserver(() => checkLarge()); ro.observe(board); }
   }
 
   function frame(st, r, tiles, summary) {
@@ -112,6 +183,8 @@ export function mountQuickCard(el, app, { focus } = {}) {
       role: 'group', 'aria-label': t('quick.name'),
     }, ...tiles, h('span.visually-hidden', { role: 'status' }, summary));
     clear(el, card);
+    el.closest?.('.live-board')?.classList.add('has-quick');
+    watchLarge();
     return card;
   }
 
@@ -122,10 +195,11 @@ export function mountQuickCard(el, app, { focus } = {}) {
     const parts = [];
     const tiles = ids.map((id, i) => {
       const m = r?.metrics?.[id] ?? null;
-      if (Number.isFinite(m?.value)) parts.push(`${t(`metric.${id}.label`)} ${fmtMetric(m, units(), { id }).text}`);
+      if (Number.isFinite(m?.value)) parts.push(said(id, m));
       return tile(id, m, 'provisional', { note: id === 'carry_m' ? sourceText(r) : null }, i);
     });
     frame('provisional', r, tiles, t('quick.summary', { items: parts.length ? list(parts) : t('quick.none') }));
+    onQuick?.('provisional', r);
   }
 
   function refined(shot, { quick = undefined, hold = false } = {}) {
@@ -143,14 +217,16 @@ export function mountQuickCard(el, app, { focus } = {}) {
         // live mode cannot give it in full (carry): the quick value stays, still tagged 速報
         return tile(id, qm, 'provisional', { note: id === 'carry_m' ? sourceText(q) : null }, i);
       }
-      const a = Number.isFinite(qm?.value) ? fmtMetric(qm, units(), { id }).value : null;
-      const b = fmtMetric(fm, units(), { id }).value;
+      const a = Number.isFinite(qm?.value) ? honest(qm, units(), id).value : null;
+      const b = honest(fm, units(), id).value;
       const change = a !== null && b !== '—' && a !== b;
       if (change) changed += 1;
       return tile(id, fm, 'refined', change ? { note: t('quick.change', { from: a, to: b }), change: true } : {}, i);
     });
-    const card = frame('refined', q, tiles, '');
+    const items = list(ids.map((id) => { const m = Number.isFinite(shot?.metrics?.[id]?.value) ? shot.metrics[id] : q?.metrics?.[id]; return Number.isFinite(m?.value) ? said(id, m) : null; }).filter(Boolean));
+    const card = frame('refined', q, tiles, items);
     cur = null;
+    onQuick?.('refined', q, items);
     if (changed && !hold) {
       fadeTimer = setTimeout(() => {
         for (const n of card.querySelectorAll('.qc-change')) {
@@ -165,9 +241,9 @@ export function mountQuickCard(el, app, { focus } = {}) {
   return {
     provisional,
     refined,
-    clear() { clearTimeout(fadeTimer); cur = null; stage = null; clear(el); },
+    clear() { clearTimeout(fadeTimer); cur = null; stage = null; clear(el); el.closest?.('.live-board')?.classList.remove('has-quick'); large(false); },
     /** a practice swing after a provisional: the quick read is withdrawn */
-    drop(r) { if (!r || r === cur) { this.clear(); return true; } return false; },
+    drop(r) { if (!r || r === cur) { this.clear(); onQuick?.('drop'); return true; } return false; },
     gappingRow(club) {
       const type = club && typeof club === 'object' ? club.type : club;
       const row = rows?.find((x) => x.club === type);
@@ -175,18 +251,22 @@ export function mountQuickCard(el, app, { focus } = {}) {
     },
     /** e2e / screenshot states: a face-on quick read (and its full analysis) with made-up but plausible numbers */
     demo(st) {
+      // numbers that fit the club on the chip (a 7-iron must not carry like a driver)
+      const club = app.settings?.().club_type ?? 'i7';
+      const drv = club === 'driver';
       const m = (value, half, unit, codes, origin = 'pose') => ({ value, unit, ci95: [value - half, value + half], sigma: half / 1.96, validity: 'low_confidence', value_origin: origin, measured: false, reason_codes: [RC.PROVISIONAL, ...codes] });
       const r = {
-        stage: 'provisional', t_impact: 12.345, carry_source: 'pose', carry_merge: null, club: 'driver', view: 'face_on', events: null, timings_ms: { compute: 0.1 },
+        stage: 'provisional', t_impact: 12.345, carry_source: 'pose', carry_merge: null, club, view: 'face_on', events: null, timings_ms: { compute: 0.1 },
         metrics: {
           tempo_ratio: m(3.1, 0.45, 'ratio', [], 'derived'), backswing_s: m(0.84, 0.07, 's', []), downswing_s: m(0.27, 0.05, 's', []),
-          club_speed_mps: m(41.2, 12.1, 'm/s', []), carry_m: m(188, 95, 'm', [RC.SMASH_ASSUMED, RC.LAUNCH_V_ASSUMED, RC.FLIGHT_MODELLED], 'flight_model'),
+          club_speed_mps: drv ? m(41.2, 12.1, 'm/s', []) : m(33.5, 9.6, 'm/s', []),
+          carry_m: m(drv ? 188 : 132, drv ? 110 : 78, 'm', [RC.SMASH_ASSUMED, RC.LAUNCH_V_ASSUMED, RC.FLIGHT_MODELLED], 'flight_model'),
         },
       };
       provisional(r);
       if (st === 'refined') {
         const v = (value, half, unit, validity = 'valid') => ({ value, unit, ci95: [value - half, value + half], sigma: null, validity, value_origin: 'pose', measured: false, reason_codes: [] });
-        refined({ metrics: { tempo_ratio: v(3.0, 0.25, 'ratio'), backswing_s: v(0.83, 0.03, 's'), downswing_s: v(0.28, 0.03, 's'), club_speed_mps: v(43.4, 10.9, 'm/s', 'low_confidence'), carry_m: { value: null, unit: 'm', ci95: null, sigma: null, validity: 'not_computed', value_origin: 'ballistics', measured: false, reason_codes: [RC.DEPENDS_ON_NULL] } } }, { quick: r, hold: true });
+        refined({ metrics: { tempo_ratio: v(3.0, 0.25, 'ratio'), backswing_s: v(0.83, 0.03, 's'), downswing_s: v(0.28, 0.03, 's'), club_speed_mps: v(drv ? 43.4 : 35.1, drv ? 10.9 : 8.8, 'm/s', 'low_confidence'), carry_m: { value: null, unit: 'm', ci95: null, sigma: null, validity: 'not_computed', value_origin: 'ballistics', measured: false, reason_codes: [RC.DEPENDS_ON_NULL] } } }, { quick: r, hold: true });
       }
     },
   };

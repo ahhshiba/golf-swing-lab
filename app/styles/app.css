@@ -333,6 +333,10 @@ html.has-topstack main { padding-top: var(--s-2); }
   border-radius: var(--r-sm); font: var(--t-caption); letter-spacing: .02em; white-space: nowrap;
 }
 .vtag-glyph { font-size: .85em; line-height: 1; }
+/* ◐ drawn as a half disc: at caption size the font's ◐ read like "‹". The character keeps its box and baseline (so no
+   line grows) and is only painted transparent; the disc is a pseudo-element centred on it */
+.vtag-est .vtag-glyph, .glyph-est { display: inline-block; position: relative; min-inline-size: .7rem; -webkit-text-fill-color: transparent; }
+.vtag-est .vtag-glyph::before, .glyph-est::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%; inline-size: .7rem; block-size: .7rem; transform: translate(-50%, -50%); border: .1rem solid; border-radius: 50%; background: linear-gradient(90deg, currentColor 50%, transparent 0); }
 .vtag-valid { background: var(--tag-valid-bg); color: var(--tag-valid-fg); }
 .vtag-est { background: var(--tag-est-bg); color: var(--tag-est-fg); }
 .vtag-low { background: var(--tag-low-bg); color: var(--tag-low-fg); }

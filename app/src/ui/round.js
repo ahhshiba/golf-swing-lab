@@ -37,6 +37,7 @@ import { priorCarry, sidePrior } from '../sim/source.js';
 import { lieFactors } from '../sim/lies.js';
 import { normalizeSim } from '../sim/settings.js';
 import { ELLIPSE_K95 } from '../sim/params.js';
+import { honestDistance } from './sim-banner.js';
 
 const CLUB_IDS = CLUBS.map((c) => c[0]);
 const AIM_STEP_DEG = 2;
@@ -267,9 +268,9 @@ export function mountRound(root, app, opts = {}) {
     const canvas = h('canvas.round-fly', { 'data-testid': 'round-fly-canvas', role: 'img', 'aria-label': t('sim.flyover.a11y', { n: hole.n, par: hole.par, length: fmt(hole.length_m) }) });
     const stat = motionOff();
     const done = () => { if (mode !== 'intro') return; shownHole = round.current.hole; render(); };
-    const skip = C.button({ label: stat ? t('sim.flyover.continue') : t('sim.flyover.skip'), variant: 'primary', size: 'lg', block: true, testid: 'round-flyover-skip', onClick: () => (fly ? fly.skip() : done()) });
+    const skip = C.button({ label: t('sim.flyover.skip'), variant: 'primary', size: 'lg', block: true, testid: 'round-flyover-skip', onClick: () => (fly ? fly.skip() : done()) });
     const box = h('section.round-intro', { 'data-testid': 'round-flyover', 'data-static': stat ? '1' : '0' },
-      h('h2.round-intro-title', t('sim.hole_title', { n: hole.n })), h('p.round-intro-sub', holeLine(hole)), canvas, skip);
+      h('h2.round-intro-title', t('sim.hole_title', { n: hole.n })), h('p.round-intro-sub', t('sim.hole_meta', { of: round.course.holes_n, par: hole.par, length: fmt(hole.length_m) })), canvas, skip);
     box.addEventListener('click', (e) => { if (!e.target.closest?.('button')) fly?.skip(); });
     clear(root, header(), box);
     fly = createFlyover(canvas, { hole, palette: coursePalette(canvas), reducedMotion: stat, onDone: done, tees: round.course.tees });
@@ -316,10 +317,10 @@ export function mountRound(root, app, opts = {}) {
     pendingFocus = next ?? toCard;
   }
 
-  function chip(kind, value, dim) {
+  function chip(kind, value, dim, quick = false) {
     const v = value?.validity ?? 'estimated';
     return h('span.round-chip', { 'data-testid': 'round-chip', 'data-kind': kind, 'data-dim': dim },
-      C.validityTag(v), h('span.rc-src', t(`sim.source.${kind}`)));
+      C.validityTag(v), quick ? h('span.rc-sub', t('sim.quick_tag')) : null, h('span.rc-src', t(`sim.source.${kind}`)));
   }
 
   function lastCard(hole) {
@@ -330,12 +331,12 @@ export function mountRound(root, app, opts = {}) {
     const sg = strokeSigmas(s);
     const head = t('sim.last.head', { name: nameOf(p), n: s.n, club: clubName(s.club) });
     const carry = s.club === 'putter' ? t('sim.last.putt', { d: fmt(s.carry.value) })
-      : sg.carry ? t('sim.last.carry', { d: fmt(s.carry.value), pm: fmt(1.96 * sg.carry) }) : t('sim.last.carry_typed', { d: fmt(s.carry.value) });
+      : sg.carry ? t('sim.last.carry', { d: honestDistance(s.carry.value, 1.96 * sg.carry, units()).text }) : t('sim.last.carry_typed', { d: fmt(s.carry.value) });
     return h('section.card.round-last', { 'data-testid': 'round-last', 'data-source': sourceKind(s), 'data-side': sideKind(s) },
       h('h3.rl-head', {}, h('span.player-swatch', { 'data-p': String(playerIdx(s.player_id)), 'aria-hidden': 'true' }), head),
       h('p.rl-carry', carry),
-      h('div.rl-chips', {}, h('span.rl-dim', t('sim.dim.carry')), chip(sourceKind(s), s.carry, 'carry')),
-      s.club === 'putter' ? null : h('div.rl-chips', {}, h('span.rl-dim', t('sim.dim.side')), chip(sideKind(s), s.side, 'side')),
+      h('div.rl-chips', {}, h('span.rl-dim', t('sim.dim.carry')), chip(sourceKind(s), s.carry, 'carry', s.source === 'quick')),
+      s.club === 'putter' ? null : h('div.rl-chips', {}, h('span.rl-dim', t('sim.dim.side')), chip(sideKind(s), s.side, 'side', s.source === 'quick')),
       s.event ? h('p.rl-event', { 'data-event': s.event }, `${t(`sim.event.${s.event}`)}${s.penalty ? ` · ${plural('sim.penalty', s.penalty)}` : ''}`) : null,
       h('p.hint.rl-sim', t('sim.last.simulated')));
   }
@@ -359,7 +360,7 @@ export function mountRound(root, app, opts = {}) {
     const canvas = h('canvas.round-map', { 'data-testid': 'round-map' });
     const balls = round.players.map((q, k) => {
       const b = ballOf(round, q.player_id, hole.n);
-      return b.done ? null : { x: b.x, y: b.y, player: k, current: q.player_id === p.player_id };
+      return b.done ? null : { x: b.x, y: b.y, player: k, current: q.player_id === p.player_id, name: nameOf(q) };
     }).filter(Boolean);
     const strokesHere = round.strokes.filter((s) => s.hole === hole.n);
     const draw = (progress = landing) => {
@@ -403,6 +404,7 @@ export function mountRound(root, app, opts = {}) {
       const recBox = h('button.card.round-recommend', { type: 'button', 'data-testid': 'round-recommend', onclick: () => recommendSheet(rec, ctx) },
         h('span.rr-label', t('sim.recommend')),
         h('span.rr-club', clubName(rec.club)),
+        h('span.rr-tag', {}, C.validityTag(recValidity(rec))),
         h('span.rr-range', t('sim.likely_carry', { lo: fmt(rec.carry.p10), hi: fmt(rec.carry.p90) })),
         h('span.rr-src', `${t(rec.source === 'gapping' ? 'sim.source.gapping' : 'sim.source.reference')}${rec.flags.includes('small_sample') ? ` · ${t('sim.small_sample')}` : ''}`));
       const clubSel = select(CLUB_IDS.map((c) => [c, clubName(c)]), club, { 'data-testid': 'round-club', 'aria-label': t('sim.club'),
@@ -412,12 +414,16 @@ export function mountRound(root, app, opts = {}) {
         C.button({ label: t('sim.aim.right'), icon: 'chevron-right', testid: 'round-aim-right', onClick: () => setAim(rotateAim(from, aim, -AIM_STEP_DEG)) }),
         C.button({ label: t('sim.aim.reset'), variant: 'plain', testid: 'round-aim-reset', onClick: () => setAim(null) }));
       const aimInfo = h('p.hint.round-aim-info', t('sim.aim.info', { d: fmt(dist(from.x, from.y, aim.x, aim.y)), lo: fmt(pv.band.p10), hi: fmt(pv.band.p90) }));
+      // the primary stays in reach (pinned above the tab bar until its place scrolls into view; 200 % text puts it
+      // screens below the map): whose turn it is + Swing
+      const goBar = h('div.round-go', { role: 'group', 'aria-label': t('sim.turn', { name: nameOf(p) }) },
+        h('span.round-go-name', {}, h('span.player-swatch', { 'data-p': String(i), 'aria-hidden': 'true' }), nameOf(p)),
+        C.button({ label: t('sim.swing'), icon: 'camera', variant: 'primary', size: 'lg', testid: 'round-swing', onClick: () => go('live') }));
       const actions = h('div.round-actions', {},
-        C.button({ label: t('sim.swing'), icon: 'camera', variant: 'primary', size: 'lg', block: true, testid: 'round-swing', onClick: () => go('live') }),
         C.button({ label: t('sim.import'), icon: 'film', size: 'lg', block: true, testid: 'round-import', onClick: () => go('import') }),
         C.button({ label: t('sim.manual'), icon: 'ruler', size: 'lg', block: true, testid: 'round-manual', onClick: () => manualSheet(ctx) }),
         canAutoChip(ctx) ? C.button({ label: t('sim.auto_chip'), variant: 'tinted', size: 'lg', block: true, testid: 'round-autochip', onClick: () => doAutoChip(ctx) }) : null);
-      parts.push(recBox, h('label.field.round-club-field', {}, h('span.field-label', t('sim.club')), clubSel), aimRow, aimInfo, actions);
+      parts.push(recBox, h('label.field.round-club-field', {}, h('span.field-label', t('sim.club')), clubSel), aimRow, aimInfo, goBar, actions);
     }
     parts.push(notes.length ? h('ul.round-notes', {}, notes.map((n) => h('li', n.text))) : null, lastCard(hole),
       h('div.round-foot', {},
@@ -490,7 +496,7 @@ export function mountRound(root, app, opts = {}) {
     const u = units().distance;
     const carryIn = h('input', { type: 'text', inputmode: 'decimal', 'data-testid': 'round-manual-carry', autocomplete: 'off', 'aria-describedby': 'round-manual-hint' });
     const sideIn = h('input', { type: 'text', inputmode: 'decimal', 'data-testid': 'round-manual-side', autocomplete: 'off' });
-    let dir = 'right';
+    let dir; // no side typed: no direction chosen (the empty side is sampled)
     const dirSeg = C.segmented({ options: [['left', t('sim.manual.left')], ['right', t('sim.manual.right')]], value: dir, label: t('sim.manual.direction'), testid: 'round-manual-dir', onChange: (v) => { dir = v; } });
     const err = h('p.field-error', { role: 'alert', 'data-testid': 'round-manual-error' });
     const box = h('div.round-manual', {},
@@ -506,8 +512,9 @@ export function mountRound(root, app, opts = {}) {
       if (sideIn.value.trim()) {
         const s = parseInput(sideIn.value, u);
         if (!(typeof s === 'number' && Math.abs(s) <= 150)) { err.textContent = t('sim.manual.bad_side'); sideIn.focus(); return; }
+        if (!dir && Math.abs(s) > 0) { err.textContent = t('sim.manual.need_dir'); dirSeg.querySelector?.('[role="radio"]')?.focus(); return; }
         const hand = ctx.player.handedness === 'left' ? -1 : 1;
-        side = (dir === 'right' ? 1 : -1) * Math.abs(s) * hand;
+        side = s === 0 ? 0 : (dir === 'right' ? 1 : -1) * Math.abs(s) * hand;
       }
       sh.close();
       app.sim.set(simCtx());
@@ -519,10 +526,16 @@ export function mountRound(root, app, opts = {}) {
     return sh;
   }
 
+  // the suggestion is a prior, never a measurement: ◐ estimated from the player's own gapping, ▲ low from typical carries
+  // (a small sample is low too)
+  function recValidity(rec) {
+    return rec.source === 'gapping' && !rec.flags.includes('small_sample') ? 'estimated' : 'low_confidence';
+  }
+
   function recommendSheet(rec, ctx) {
     const box = h('div.round-rec', {},
       h('p', t('sim.rec.body', { club: clubName(rec.club), d: fmt(rec.plays_like_m) })),
-      h('p', t('sim.likely_carry', { lo: fmt(rec.carry.p10), hi: fmt(rec.carry.p90) })),
+      h('p.rr-sheet-range', {}, C.validityTag(recValidity(rec)), h('span', t('sim.likely_carry', { lo: fmt(rec.carry.p10), hi: fmt(rec.carry.p90) }))),
       h('p.hint', t(rec.source === 'gapping' ? 'sim.rec.gapping' : 'sim.rec.reference')),
       rec.flags.includes('small_sample') ? h('p.hint', t('sim.rec.small_sample')) : null,
       rec.alts.length ? h('p', t('sim.rec.alts', { a: rec.alts.map(clubName).join(' / ') })) : null,

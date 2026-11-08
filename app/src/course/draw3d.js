@@ -41,10 +41,12 @@ export function flyCamera(hole, u, w, h, tees = 'middle') {
   const L = polylineLength(cl);
   const g = (x, y) => elevationAt(hole, x, y);
   if (u === 'static') {
-    const a = pointAlong(cl, 0);
-    const m = pointAlong(cl, L * 0.6);
-    const back = 0.32 * L + 40;
-    const eye = [a.x - a.ux * back, a.y - a.uy * back, g(a.x, a.y) + 0.42 * L + 30];
+    const a = pointAlong(cl, L * 0.15);
+    const m = pointAlong(cl, L * 0.8);
+    // high over the first part of the hole, looking down it: the landing area and the green fill the picture (from
+    // behind the tee the green was a dot under a wide sky band)
+    const back = 0;
+    const eye = [a.x - a.ux * back, a.y - a.uy * back, g(a.x, a.y) + 0.32 * L + 14];
     return lookAt(eye, [m.x, m.y, g(m.x, m.y)], w, h);
   }
   const k = smooth(u);
@@ -101,11 +103,19 @@ function scene(hole) {
 
 function drawFrame(ctx, cam, sc, pal) {
   const { w, h } = cam;
-  ctx.fillStyle = pal.halo;
+  // sky: the water tone fading into the dark backdrop at the horizon (palette colours only; sun keeps the same map)
+  const sky = ctx.createLinearGradient ? ctx.createLinearGradient(0, 0, 0, h * 0.6) : null;
+  if (sky) { sky.addColorStop(0, pal.water); sky.addColorStop(1, pal.halo); }
+  ctx.fillStyle = sky ?? pal.halo;
   ctx.fillRect(0, 0, w, h);
   const outline = pal.outlined ? pal.outline : null;
   const g = projectPoly(cam, sc.ground);
-  if (g) fillPoly(ctx, g, pal.tree, null); // beyond the hole: dark surroundings (OB is drawn on the map)
+  if (g) { // beyond the hole: the rough, dimmed (OB is drawn on the map), so the dark tree cones stand out on it
+    fillPoly(ctx, g, pal.rough, null);
+    ctx.globalAlpha = 0.45;
+    fillPoly(ctx, g, pal.halo, null);
+    ctx.globalAlpha = 1;
+  }
   for (const [kind, polys] of sc.layers) for (const poly of polys) { const s = projectPoly(cam, poly); if (s) fillPoly(ctx, s, pal[kind], outline); }
   // trees: billboard cones, far → near
   const trees = [];
@@ -127,7 +137,7 @@ function drawFrame(ctx, cam, sc, pal) {
     ctx.closePath();
     ctx.fillStyle = pal.tree;
     ctx.fill();
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.5;
     ctx.strokeStyle = pal.fairway;
     ctx.stroke();
     ctx.beginPath();

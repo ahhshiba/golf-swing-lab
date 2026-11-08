@@ -5,7 +5,8 @@
 // lab shows fault chips and patterns populated rows) × 390/430 portrait (setup and live also 844×390 landscape) ×
 // light/dark/sun × zh-Hant/en × text 100 % and 200 % = 39 × 24 + 4 × 36 = 1,080 states. 0 findings of every kind is
 // required: hscroll, overlap, obscured (live pill / hero tiles / count / club / toolbar and setup title / primary /
-// instruction uncovered and unclipped as first shown, at 200 % too), truncation, word-break, spec-codes, cjk, hero, state;
+// instruction uncovered and unclipped as first shown, at 200 % too), reach (live tile text inside its tile and, scrolled
+// to the end, not under the pinned toolbar), truncation, word-break, spec-codes, cjk, hero, state;
 // no external request and no page error. Runs in its own server and browser (tens of minutes); screenshots go to
 // $GSL_SHOTS_DIR/matrix or the OS temp dir.
 import fs from 'node:fs';

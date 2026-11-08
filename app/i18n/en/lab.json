@@ -33,7 +33,7 @@
   "lines.not_here": "Lines not drawn from this camera position ({n})",
   "faults.title": "What the rules see",
   "faults.none": "With the current rules, no fault was seen in this swing",
-  "faults.ok": "Looks fine: {list}",
+  "faults.ok": "Not seen in this swing: {list}",
   "list_sep": ", ",
   "faults.unknown": "Cannot tell from this view or this clip ({n})",
   "faults.note": "The thresholds are common teaching rules of thumb: unverified and not fitted to you. Each fault is only judged from a camera position that can see it. “Possible” means the error range crosses the threshold.",

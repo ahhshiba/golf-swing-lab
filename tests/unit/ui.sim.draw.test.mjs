@@ -20,7 +20,7 @@ const rounds = readdirSync(V4C).filter((f) => f.endsWith('.json')).map((f) => JS
 
 // a palette whose every colour is a recognisable token name: anything else drawn is a literal colour
 const TOKENS = ['--course-fairway', '--course-rough', '--course-green', '--course-bunker', '--course-water', '--course-tree', '--course-ob',
-  '--course-pin', '--course-outline', '--media-bg', '--trail-1', '--trail-3', '--trail-4', '--trail-5', '--trail-6', '--font'];
+  '--course-pin', '--course-outline', '--media-bg', '--trail-1', '--trail-3', '--trail-4', '--trail-5', '--trail-6', '--trail-7', '--font'];
 function fakeEl(outline = 'transparent') {
   const vals = Object.fromEntries(TOKENS.map((k) => [k, `tok(${k})`]));
   vals['--course-outline'] = outline;
@@ -198,4 +198,31 @@ test('balls: each player\'s marker has its own shape (not colour only), as the l
   assert.equal(playerShape(5), 'square');
   const css = readFileSync(join(ROOT, 'app/styles/screens/sim.css'), 'utf8');
   for (const k of [1, 2, 3]) assert.match(css, new RegExp(`\\.player-swatch\\[data-p="${k}"\\][^}]*(border-radius|clip-path|transform)`), `swatch ${k} has its own shape`);
+});
+
+test('balls: two players on one spot are pulled apart (every ball visible); separate balls stay put', async () => {
+  const { ballOffsets } = await import('../../app/src/course/draw2d.js');
+  const off = ballOffsets([[100, 100], [101, 100], [300, 50]]);
+  const a = [100 + off[0][0], 100 + off[0][1]], b = [101 + off[1][0], 100 + off[1][1]];
+  assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) >= 14, `pulled apart ${JSON.stringify(off)}`);
+  assert.deepEqual(off[2], [0, 0]);
+});
+
+test('scorecard: short column names (≤ 4 letters / 2 Han, unique) and score marks by strokes − par', async () => {
+  const { shortNames, relKind } = await import('../../app/src/ui/scorecard.js');
+  assert.deepEqual(shortNames(['Alex', 'Samantha', '王小明', 'Sam']), ['Alex', 'Sam.', '王小', 'Sam']);
+  assert.deepEqual(shortNames(['Samuel', 'Samantha']), ['Sam.1', 'Sam.2']);
+  assert.deepEqual([-3, -2, -1, 0, 1, 2, 4, null].map(relKind), ['eagle', 'eagle', 'birdie', 'par', 'bogey', 'double', 'double', '']);
+});
+
+test('honestDistance: rounded to what the ± supports; a range when ± is over 30 % of the value', async () => {
+  const { honestDistance } = await import('../../app/src/ui/sim-banner.js');
+  const m = { distance: 'm' };
+  const wide = honestDistance(206, 104, m);
+  assert.equal(wide.range, true);
+  assert.match(wide.text, /^100–310 /);
+  const narrow = honestDistance(107.4, 12.3, m);
+  assert.equal(narrow.range, false);
+  assert.match(narrow.text, /^107 ± 12 /);
+  assert.equal(honestDistance(150, null, m).range, false);
 });

@@ -40,7 +40,7 @@
   "recommend": "推薦球桿",
   "likely_carry": "可能的飛行距離 {lo} 到 {hi}",
   "small_sample": "球數少",
-  "rec.body": "{club}：從這裡打起來像 {d}",
+  "rec.body": "{club}：實際要打 {d}",
   "rec.gapping": "依你自己的距離表（正面機位的球）",
   "rec.reference": "依一般球員的典型距離，按你輸入的一號木距離縮放；你的紀錄還不夠",
   "rec.small_sample": "這支桿不到 5 球，範圍只能參考",
@@ -64,7 +64,7 @@
   "source.auto": "模擬",
   "source.penalty": "罰桿",
   "last.head": "{name}・第 {n} 桿・{club}",
-  "last.carry": "飛行 {d} ± {pm}",
+  "last.carry": "飛行 {d}",
   "last.carry_typed": "飛行 {d}（手動）",
   "last.putt": "推桿 {d}",
   "last.simulated": "球停在哪裡是依這些數字模擬出來的",
@@ -77,7 +77,6 @@
   },
   "picked_up": "撿起（{n}）",
   "flyover.skip": "略過",
-  "flyover.continue": "繼續",
   "flyover.a11y": "第 {n} 洞，標準桿 {par}，{length}：從發球台後方看",
   "handoff.pass": "把手機交給",
   "handoff.go": "我是 {name}，繼續",
@@ -109,6 +108,10 @@
   "banner.line": "第 {n} 洞・第 {stroke} 桿・{club}・{name}",
   "banner.wait": "準備好就揮桿，速報會成為這一桿",
   "banner.import": "第一個分析完成的影片會成為這一桿",
-  "banner.read": "速報：飛行 {d} {pm}",
-  "banner.read_none": "速報：這一揮沒有飛行距離，改用你這支桿的平常距離"
+  "banner.read": "飛行 {d}",
+  "banner.read_none": "速報：這一揮沒有飛行距離，改用你這支桿的平常距離",
+  "hole_meta": "標準桿 {par}・{length}・共 {of} 洞",
+  "quick_tag": "速報",
+  "banner.read_range": "飛行約 {d}（中間值 {about}）",
+  "manual.need_dir": "有輸入左右距離時，請選左或右"
 }

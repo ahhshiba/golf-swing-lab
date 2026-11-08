@@ -1,8 +1,7 @@
 {
   "intro": "Play an original course with your own swings, alone or with up to four players on one phone.",
-  "note": "Courses are original and generated from the course number. Every distance in a round is an estimate with a range.",
+  "note": "Every distance in a round is an estimate with a range.",
   "empty.title": "No rounds yet",
-  "empty.body": "Play an original course with your own swings. Every number is an estimate with a range.",
   "unsaved": "Storage is unavailable: this round will not be saved.",
   "new": "New round",
   "start": "Start round",

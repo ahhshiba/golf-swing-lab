@@ -106,3 +106,22 @@ test('course tokens: neighbours ≥ 1.5, pin ≥ 3.0 on the green in default and
     }
   }
 });
+
+test('share swatches (V04-SPEC §D.4, CRITIC-1): every trail dot readable on its well and the well edge on the sheet, in every theme; no faded swatch', () => {
+  const themes = { light: root, dark: { ...root, ...dark }, sun: { ...root, ...sun } };
+  const fails = [];
+  for (const [name, th] of Object.entries(themes)) {
+    // the well behind the dot, the strike over a taken colour, the well's edge against the sheet background (.sheet = --surface)
+    for (let i = 1; i <= 8; i++) if (!(ratio(th[`--trail-${i}`], th['--media-bg']) >= 4.5)) fails.push(`${name} --trail-${i} on --media-bg`);
+    if (!(ratio(th['--on-media'], th['--media-bg']) >= 4.5)) fails.push(`${name} --on-media strike on --media-bg`);
+    if (!(ratio(th['--control-border'], th['--surface']) >= 3.0)) fails.push(`${name} well edge --control-border on --surface`);
+  }
+  assert.deepEqual(fails, []);
+  const css = fs.readFileSync(path.join(ROOT, 'app', 'styles', 'screens', 'share.css'), 'utf8');
+  const rule = (sel) => { const i = css.indexOf(`${sel} {`); assert.ok(i >= 0, sel); return css.slice(i, css.indexOf('}', i)); };
+  assert.match(rule('.share-swatch'), /background: var\(--media-bg\)/);
+  assert.match(rule('.share-swatch'), /solid var\(--control-border\)/);
+  assert.doesNotMatch(rule('.share-swatch:disabled'), /opacity/, 'a taken colour keeps its full colour');
+  assert.match(rule('.share-swatch:disabled::after'), /var\(--on-media\)/);
+  assert.match(css, /\.sheet|share-sheet/);
+});

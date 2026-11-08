@@ -69,7 +69,7 @@ export function mountCourse(root, app, opts = {}) {
     const parts = [C.screenHeader({ title: app.screenTitle('course'), back: true, onBack: () => app.nav.back() }),
       h('p.course-intro', t('course.intro')), newBtn];
     if (!app.repo?.rounds) parts.push(C.notice({ variant: 'caution', title: t('course.unsaved'), testid: 'course-unsaved' }));
-    if (!list.length) parts.push(C.emptyState({ icon: 'flag', title: t('course.empty.title'), body: t('course.empty.body'), testid: 'course-empty' }));
+    if (!list.length) parts.push(C.emptyState({ icon: 'flag', title: t('course.empty.title'), testid: 'course-empty' }));
     if (active.length) parts.push(h('section.course-group', {}, h('h2.section-title', t('course.active')), h('div.list', {}, active.map(row))));
     if (old.length) parts.push(h('section.course-group', {}, h('h2.section-title', t('course.finished')), h('div.list', {}, old.slice(0, 30).map(row))));
     parts.push(h('p.hint.course-note', t('course.note')));

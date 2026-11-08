@@ -8,5 +8,8 @@
   "source.reference": "Typical player",
   "none": "No quick read for this swing",
   "summary": "Quick read: {items}",
-  "not_quick": "Shown after the full analysis (no quick read for this)"
+  "not_quick": "Shown after the full analysis (no quick read for this)",
+  "pending": "Shot {n}: quick read shown, full analysis running",
+  "mid": "midpoint {v}",
+  "range_text": "{lo} to {hi} {unit}"
 }

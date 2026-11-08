@@ -4,7 +4,7 @@
 // --media-bg for halos) through coursePalette(el), the same way viz/palette.js vizPalette does.
 //
 //   coursePalette(el) -> frozen { fairway, rough, green, bunker, water, tree, ob, pin, outline, outlined, halo,
-//                         players: [4], aim, ellipse, text, font }
+//                         players: [4], aim, ellipse (--trail-7), text, font }
 //   PLAYER_TOKENS     the four player colours (trail tokens, each ≥ 4.5 on black: readable on the dark map)
 
 export const PLAYER_TOKENS = Object.freeze(['--trail-1', '--trail-4', '--trail-3', '--trail-5']);
@@ -36,7 +36,7 @@ export function coursePalette(el) {
     halo: get('--media-bg'),
     players: Object.freeze(PLAYER_TOKENS.map(get)),
     aim: get('--trail-6'),
-    ellipse: get('--trail-1'),
+    ellipse: get('--trail-7'), // not a player colour: the next shot's area is never mistaken for a ball
     text: get('--trail-6'),
     font: fam || 'system-ui, sans-serif',
   });

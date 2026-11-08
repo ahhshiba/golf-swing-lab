@@ -267,8 +267,9 @@ function line(ctx, v, pts, colour, width, halo, dash = null) {
 export const PLAYER_SHAPES = Object.freeze(['circle', 'square', 'triangle', 'diamond']);
 export const playerShape = (k) => PLAYER_SHAPES[(Number.isInteger(k) && k >= 0 ? k : 0) % PLAYER_SHAPES.length];
 
-function dot(ctx, v, x, y, r, fill, ring, shape = 'circle') {
-  const [px, py] = v.toPx(x, y);
+function dot(ctx, v, x, y, r, fill, ring, shape = 'circle', off = [0, 0]) {
+  const [px0, py0] = v.toPx(x, y);
+  const px = px0 + off[0], py = py0 + off[1];
   ctx.beginPath();
   if (shape === 'square') {
     const a = r * 0.9;
@@ -289,18 +290,44 @@ function dot(ctx, v, x, y, r, fill, ring, shape = 'circle') {
   ctx.stroke();
 }
 
-function label(ctx, v, x, y, text, pal) {
+function label(ctx, v, x, y, text, pal, { off = [0, 0], dy = -10, colour = null, bold = false, left = false } = {}) {
   if (!text) return;
-  const [px, py] = v.toPx(x, y);
-  ctx.font = `600 12px ${pal.font}`;
+  const [px0, py0] = v.toPx(x, y);
+  const px = px0 + off[0], py = py0 + off[1];
+  ctx.font = `${bold ? 700 : 600} 12px ${pal.font}`;
   ctx.textBaseline = 'middle';
   const wd = ctx.measureText(text).width;
-  const lx = Math.min(Math.max(2, px + 9), v.w - wd - 4);
+  let lx = left ? px - 11 - wd : px + 11;
+  if (lx + wd > v.w - 4 || lx < 2) lx = left ? px + 11 : px - 11 - wd; // no room on that side: the other side
+  lx = Math.max(2, lx);
   ctx.lineWidth = 3;
   ctx.strokeStyle = pal.halo;
-  ctx.strokeText(text, lx, py - 10);
-  ctx.fillStyle = pal.text;
-  ctx.fillText(text, lx, py - 10);
+  ctx.strokeText(text, lx, py + dy);
+  ctx.fillStyle = colour ?? pal.text;
+  ctx.fillText(text, lx, py + dy);
+}
+
+/** Pixel offsets that pull apart balls closer than `min` px (a ring of radius `min`/1.6 around the group's centre), so
+ *  every player's ball stays visible when two share a spot (e.g. both on the green). Same order as `balls`. */
+export function ballOffsets(pts, min = 14) {
+  const off = pts.map(() => [0, 0]);
+  const seen = new Array(pts.length).fill(false);
+  for (let i = 0; i < pts.length; i++) {
+    if (seen[i]) continue;
+    const grp = [i];
+    seen[i] = true;
+    for (let j = i + 1; j < pts.length; j++) {
+      if (!seen[j] && grp.some((k) => Math.hypot(pts[k][0] - pts[j][0], pts[k][1] - pts[j][1]) < min)) { grp.push(j); seen[j] = true; }
+    }
+    if (grp.length < 2) continue;
+    const cx = grp.reduce((a, k) => a + pts[k][0], 0) / grp.length, cy = grp.reduce((a, k) => a + pts[k][1], 0) / grp.length;
+    const r = min / 1.6 + 2 * (grp.length - 2);
+    grp.forEach((k, n) => {
+      const a = -Math.PI / 2 + (2 * Math.PI * n) / grp.length;
+      off[k] = [cx + r * Math.cos(a) - pts[k][0], cy + r * Math.sin(a) - pts[k][1]];
+    });
+  }
+  return off;
 }
 
 const dist = (units, m) => fmtQuantity(m, 'distance', units).text;
@@ -356,23 +383,14 @@ export function drawHole2d(canvas, opts) {
     }
   });
   const lastS = shown[shown.length - 1] ?? null;
-  if (lastS && progress >= 1 && lastS.club !== 'putter') label(ctx, v, lastS.landing.x, lastS.landing.y, labels.simulated, pal);
+  if (lastS && progress >= 1 && lastS.club !== 'putter') label(ctx, v, lastS.landing.x, lastS.landing.y, labels.simulated, pal, { left: true }); // left: the ball names are on the right
 
   // the shot being aimed: aim line, the P10–P90 carry band, the 95 % ellipse
   if (aim && from) {
     const [ux, uy] = unit(from, aim);
     line(ctx, v, [[from.x, from.y], [aim.x, aim.y]], pal.aim, 1.5, pal.halo, [6, 5]);
-    if (band && band.p90 > band.p10) {
-      const a0 = Math.atan2(-uy, ux);
-      const [fx, fy] = v.toPx(from.x, from.y);
-      ctx.strokeStyle = pal.ellipse;
-      ctx.lineWidth = 2;
-      for (const r of [band.p10, band.p90]) {
-        ctx.beginPath();
-        ctx.arc(fx, fy, r * v.k, a0 - 0.2, a0 + 0.2);
-        ctx.stroke();
-      }
-    }
+    // one shape for the next shot: its 95 % ellipse (the P10–P90 carry band is in the text under the map, not a second
+    // outline on top of it)
     if (ellipse && ellipse.sx > 0 && ellipse.sy > 0) {
       ellipseAt(ctx, v, ellipse.x, ellipse.y, ellipse.sy, ellipse.sx, ux, uy);
       ctx.setLineDash([7, 4]);
@@ -392,12 +410,16 @@ export function drawHole2d(canvas, opts) {
     ctx.moveTo(ax - 7, ay); ctx.lineTo(ax + 7, ay); ctx.moveTo(ax, ay - 7); ctx.lineTo(ax, ay + 7);
     ctx.stroke();
   }
-  for (const b of balls) {
+  // every ball: its player's shape and colour, pulled apart when they share a spot, the name beside it; only the
+  // current player's ball has the ring
+  const offs = ballOffsets(balls.map((b) => v.toPx(b.x, b.y)));
+  balls.forEach((b, k) => {
     const c = pal.players[(b.player ?? 0) % pal.players.length];
     const shape = playerShape(b.player ?? 0);
-    if (b.current) dot(ctx, v, b.x, b.y, 8, pal.halo, c, shape);
-    dot(ctx, v, b.x, b.y, 4.5, c, pal.halo, shape);
-  }
+    if (b.current) dot(ctx, v, b.x, b.y, 8, pal.halo, c, shape, offs[k]);
+    dot(ctx, v, b.x, b.y, 4.5, c, pal.halo, shape, offs[k]);
+  });
+  balls.forEach((b, k) => { if (b.name) label(ctx, v, b.x, b.y, b.name, pal, { off: offs[k], dy: 0, colour: pal.players[(b.player ?? 0) % pal.players.length], bold: b.current }); });
 
   const params = {
     ellipse: nEll > 0, ellipses: nEll, source: sourceKind(lastS), side: sideKind(lastS), strokes: shown.length, aim: Boolean(aim && from), hole: hole.n,

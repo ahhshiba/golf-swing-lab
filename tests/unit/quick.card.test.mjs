@@ -106,3 +106,59 @@ test('quick catalogs: same keys and placeholders in both locales', () => {
   const ph = (v) => [...v.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
   for (const k of Object.keys(zh)) assert.deepEqual(ph(zh[k]), ph(en[k]), k);
 });
+
+test('quick card (CRITIC-1): honest rounding, range hero over 30 %, ValidityTag pill on quick and refined tiles, count follows the card', async () => {
+  const I = await import('../../app/src/i18n/index.js');
+  await I.initI18n({ locale: 'zh-Hant', fetchImpl: fsFetch, base: 'mem:/' });
+  const doc = fakeDocument();
+  globalThis.document = doc;
+  globalThis.Node = Object.getPrototypeOf(doc.createTextNode('').constructor);
+  try {
+    const { honest, mountQuickCard } = await import('../../app/src/ui/quickcard.js');
+    const yd = { distance: 'yd', speed: 'mph' };
+    // 41.2 ± 12.1 m/s = 92.2 ± 27.1 mph: ± to 2 significant figures, value to the same step
+    const cs = honest(metric(41.2, 12.1, 'm/s'), yd, 'club_speed_mps');
+    assert.equal(cs.range, false);
+    assert.equal(cs.value, '92');
+    assert.equal(cs.ci, '27');
+    // 188 ± 95 m = 206 ± 104 yd (50 %): the range is the hero, 1 significant figure
+    const cy = honest(metric(188, 95, 'm'), yd, 'carry_m');
+    assert.equal(cy.range, true);
+    assert.equal(`${cy.lo}–${cy.hi}`, '100–310');
+    assert.equal(cy.value, '210');
+    // a small error keeps the unit's digits
+    assert.equal(honest(metric(3.1, 0.45, 'ratio'), yd, 'tempo_ratio').value, '3.10');
+    assert.equal(honest(metric(3.1, 0.45, 'ratio'), yd, 'tempo_ratio').ci, '0.45');
+
+    const el = doc.createElement('div');
+    doc.body.append(el);
+    const calls = [];
+    const card = mountQuickCard(el, { settings: () => ({ live: {} }), units: () => yd }, { onQuick: (st, r, items) => calls.push([st, items]) });
+    const r = { ...quickResult(5), metrics: { tempo_ratio: metric(3.1, 0.45, 'ratio'), club_speed_mps: metric(41.2, 12.1, 'm/s'), carry_m: metric(188, 95, 'm', { value_origin: 'flight_model' }) } };
+    card.provisional(r);
+    for (const tl of el.querySelectorAll('.qc-tile')) {
+      const pill = tl.querySelector('.vtag');
+      assert.ok(pill, `${tl.getAttribute('data-metric')}: ValidityTag pill`);
+      assert.equal(pill.getAttribute('data-validity'), 'low_confidence', 'a quick value is ▲ low confidence');
+      assert.ok(tl.querySelector('.qc-tag').textContent === I.t('quick.provisional'), '速報 sub-label');
+      assert.ok(tl.textContent.includes(I.t('validity.low_confidence')), 'the pill word stays in the text (a visually hidden copy at large text)');
+      assert.ok(tl.querySelector('.mt-ci'), '± or midpoint');
+    }
+    const carry = el.querySelector('[data-metric="carry_m"]');
+    assert.equal(carry.getAttribute('data-range'), '1');
+    assert.equal(carry.querySelector('.qc-num').textContent, '100–310');
+    assert.equal(calls.at(-1)[0], 'provisional');
+    const shot = { metrics: { tempo_ratio: { value: 3.0, unit: 'ratio', ci95: [2.75, 3.25], sigma: null, validity: 'valid', value_origin: 'derived', measured: false, reason_codes: [] },
+      club_speed_mps: { value: 43.4, unit: 'm/s', ci95: [32.5, 54.3], sigma: null, validity: 'low_confidence', value_origin: 'pose', measured: false, reason_codes: [] } } };
+    card.refined(shot, { quick: r, hold: true });
+    const tempo = el.querySelector('[data-metric="tempo_ratio"]');
+    assert.equal(tempo.querySelector('.vtag').getAttribute('data-validity'), 'valid', 'refined keeps its pill');
+    assert.equal(tempo.querySelector('.mt-ci').textContent, '± 0.25', 'refined keeps its ±');
+    assert.equal(el.querySelector('[data-metric="club_speed_mps"]').querySelector('.mt-ci').textContent, '± 24');
+    assert.equal(calls.at(-1)[0], 'refined');
+    assert.ok(calls.at(-1)[1].includes(I.t('metric.tempo_ratio.label')));
+  } finally {
+    delete globalThis.document;
+    delete globalThis.Node;
+  }
+});

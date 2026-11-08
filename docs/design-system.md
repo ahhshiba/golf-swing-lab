@@ -91,7 +91,7 @@ app.css classes only.
 | `segmented({ options: [[v, label]], value, onChange, label, testid })` | `role=radiogroup` of `role=radio` buttons (≥ 44 px), arrow keys move; `.value` get/set (set does not fire onChange) |
 | `chipRow({ items: [[v, label]], value, onChange, label, testid })` | same semantics, horizontally scrolling pill chips with scroll-snap |
 | `switchRow({ label, checked, onChange, testid, hint })` | row with a 51×31 `role=switch` button (`aria-checked`); `.checked`, `.control` (has the testid) |
-| `validityTag(validity)` | `<span class="vtag">` glyph + word: ● valid, ◐ estimated, ▲ low confidence, — not measurable |
+| `validityTag(validity)` | `<span class="vtag">` glyph + word: ● valid, ◐ estimated, ▲ low confidence, — not measurable. ◐ is drawn as a CSS half disc (the text stays in the DOM; fonts drew it like ‹ at caption size); a ◐ in running text goes in `span.glyph-est` |
 | `metricTile({ metric, size: 'hero'|'compact', units, id, label })` | caption label (`metric.<id>.label`) + ValidityTag, value (`--t-display` hero / `--t-title2` compact) + unit, `± ci` footnote (hidden when it rounds to 0); null → `—` and `.is-null`. Uses `fmtMetric`. |
 | `statePill({ state, text, testid })` | persistent `role=status aria-live=polite`; states `ready ✓ · swinging ● · analysing ◌ · done ✓ · error ✕`; `.update(state, text)` |
 | `notice({ variant: 'info'|'caution'|'error', title, items, body, collapsible, testid })` | 4 px left bar on a tint; `collapsible` → `<details>`; error → `role=alert` |

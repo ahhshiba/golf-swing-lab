@@ -1,0 +1,58 @@
+/* styles/screens/quick.css — the quick read card on the live screen (V04-SPEC §A, ui/quickcard.js). Lazy: never linked
+   by index.html; main.js SCREEN_STYLES live → 'quick' adds it before the live screen first mounts (not at session start:
+   a stylesheet landing while the live loop sets up its clocks costs the main thread then); attachQuick asks again
+   (a no-op once loaded). Owner V4-B.
+   One confidence system (CRITIC-1): the components ValidityTag pill plus a plain 速報 / 精算 sub-label (.qc-tag, not a
+   second coloured pill); every number keeps its ± (≥ 15 px, --t-callout) or, when the range is the hero, its midpoint. */
+.quick-card { --lazy-css: quick; display: grid; gap: inherit; grid-template-columns: inherit; grid-column: 1 / -1; }
+.qc-tile .hero-label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
+.qc-marks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
+.qc-tag { font: var(--t-caption); color: var(--text-2); white-space: nowrap; }
+.qc-tile .mt-ci { margin-inline-start: auto; font: var(--t-callout); color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qc-note { flex: 1 0 100%; max-inline-size: 100%; font: var(--t-footnote); color: var(--text-2); }
+.qc-num { font: var(--t-title1); font-variant-numeric: tabular-nums; }
+/* a range hero ("100–310") is twice as long as a number: it takes the line under the label */
+.qc-tile[data-range="1"] .hero-value { flex: 1 0 auto; justify-content: flex-end; }
+/* a value never runs out of its tile: the number and its unit each stay whole, the unit wraps under the number when
+   the tile is narrow (landscape side panel at large text: "59–229 碼", "75 英里/時") */
+.qc-tile .hero-value { flex-wrap: wrap; white-space: normal; min-width: 0; max-width: 100%; }
+.qc-tile .hero-value > * { white-space: nowrap; }
+/* compact line (not a hero tile: HERO_N = 2): the hero tile's box */
+.qc-mini { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 var(--s-3); padding: var(--s-2) var(--s-4); border-radius: var(--r-lg); background: var(--surface); min-width: 0; }
+:root[data-theme="sun"] .qc-mini { border: 2px solid var(--control-border); }
+/* large text: nothing is dropped. The two hero tiles, shot count and club stay above the fold (the glance targets); the
+   compact lines stack under the club row and the screen scrolls to them (the card's wrappers become display: contents
+   so the board's column can order them). The pill keeps its glyph (its word is the tile's visually hidden span), the ±
+   goes up beside the label, and the transient "quick → full" line and the last-shot line (it repeats the card, whose
+   status line is read out) are not shown */
+@container live (max-width: 18em) {
+  .quick-card { --qc-large: 1; } /* read by ui/quickcard.js: sets .qc-large on the live screen (a query cannot reach .live) */
+  .qc-change, .qc-tile .vtag-text, .live-last.has-shot { display: none; }
+  .qc-tile .mt-ci { order: -1; }
+  .qc-tile .hero-label { order: -2; }
+}
+/* portrait only (the landscape board is a side panel of two hero columns that scrolls; the compact line follows them) */
+@media not ((orientation: landscape) and (max-height: 500px)) {
+  @container live (max-width: 18em) {
+    /* .has-quick is set by ui/quickcard.js while a card is on the board (no :has(): it re-matches on every DOM change
+       of the live board, and the live loop shares the main thread); without a card the 0.3.0 layout stays */
+    .has-quick .live-hero, .live-hero > .quick-card { display: contents; }
+    .live-hero > .quick-card > .hero-tile { margin-block-end: calc(var(--s-2) - var(--s-3)); }
+    .has-quick .live-last-row { order: 2; }
+    .quick-card > .qc-mini { order: 1; }
+  }
+}
+/* large text, portrait: the stacked lines make the board taller than the screen. .live then grows with its content
+   (the preview held at its smallest) instead of shrinking under it, so the pinned toolbar, which sits right after
+   .live, never ends up over the last line (matrix check 'reach') */
+@media not ((orientation: landscape) and (max-height: 500px)) {
+  [data-screen="live"].qc-large .live { flex: 1 0 auto; }
+  [data-screen="live"].qc-large .live-media { flex: none; block-size: min(4.5rem, 12dvh); }
+}
+/* landscape side panel: the compact line takes the panel's full width under the two hero columns */
+@media (orientation: landscape) and (max-height: 500px) {
+  .quick-card > .qc-mini { grid-column: 1 / -1; }
+  /* the landscape hero tile is a wrapping column: a 100 % basis would be a height and push the note into a new column */
+  .hero-tile.qc-tile .qc-note { flex: none; }
+}
+@media (prefers-reduced-motion: no-preference) { .qc-change { transition: opacity var(--dur-slow); } .qc-change.is-fading { opacity: 0; } }

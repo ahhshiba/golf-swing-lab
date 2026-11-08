@@ -25,6 +25,9 @@
 //                reachable) no two visible interactive controls intersect (> 2 px each way, neither contains the other): flow vs
 //                flow and fixed vs fixed at scroll 0; scrolled to the end, no flow control under a fixed bar or a stuck
 //                sticky element (content must be able to scroll clear of the tab bar and the pinned primary)
+//   reach        live: no number-tile text (label, pill, value, ±) overflows its tile horizontally, and scrolled to the
+//                end of every scrolling ancestor no on-screen tile part is under a fixed / sticky bar and the last tile
+//                fits fully on screen (the carry line at 200 % text must be reachable, not hidden by the toolbar)
 //   truncation   no element with its own text has scrollWidth > clientWidth + 1 (scroll containers and form fields
 //                excepted), and no text-overflow: ellipsis that is actually cutting text
 //   word-break   no Latin word (4+ letters) or "n %" split across two lines (overflow-wrap: anywhere)
@@ -175,6 +178,49 @@ function pageChecks([screen, locale, vp]) {
         else if (covered(body, c)) add('obscured', `setup instruction covered by ${label(covered(body, c))}`);
       }
     }
+  }
+  // reach (live, CRITIC-1 fix round 2): every number tile's text stays inside its tile (no horizontal overflow of the
+  // label, pill, value or ±), and scrolled to the end of every scrolling ancestor, each tile part that is on screen is
+  // not under a fixed / sticky bar (the pinned toolbar), and the last tile can be scrolled fully into view
+  if (screen === 'live') {
+    const tiles = [...document.querySelectorAll('[data-screen="live"] .hero-tile, [data-screen="live"] .qc-tile')].filter(visible);
+    const parts = (t) => [...t.querySelectorAll('.qc-name, .hero-label > span:first-child, .vtag, .qc-tag, .hero-value, .live-hero-num, .qc-num, .hero-unit, .mt-ci, .qc-note')]
+      .filter((x) => visible(x) && !x.closest('.visually-hidden'));
+    for (const t of tiles) {
+      const tr = t.getBoundingClientRect();
+      for (const x of parts(t)) {
+        const r = x.getBoundingClientRect();
+        if (r.right > tr.right + 1 || r.left < tr.left - 1) add('reach', `${label(x)} "${x.textContent.trim().slice(0, 30)}" overflows its tile ${label(t)} (${Math.round(r.left)}..${Math.round(r.right)} of ${Math.round(tr.left)}..${Math.round(tr.right)})`);
+      }
+    }
+    const scrollers = new Set();
+    for (const t of tiles) for (let a = t.parentElement; a; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (/(auto|scroll)/.test(cs.overflowY) && a.scrollHeight > a.clientHeight + 1) scrollers.add(a);
+    }
+    const saved = [...scrollers].map((a) => [a, a.scrollTop]);
+    for (const a of scrollers) a.scrollTop = a.scrollHeight;
+    if (document.scrollingElement) document.scrollingElement.scrollTop; // flush layout
+    const inside = (r) => r.top >= -1 && r.bottom <= innerHeight + 1 && r.left >= -1 && r.right <= innerWidth + 1;
+    for (const t of tiles) {
+      for (const x of parts(t)) {
+        const r = x.getBoundingClientRect();
+        if (!inside(r)) continue;
+        const c = clipRect(x); // scrolled out of a scrolling panel (landscape board): clipped, not covered
+        if (c.top - r.top > 1 || r.bottom - c.bottom > 1) continue;
+        const top = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+        // a bar at the top (session bar) only covers what was scrolled past, which scrolls back; a bar in the lower half
+        // (the pinned toolbar) at the end of the scroll hides it for good
+        if (top && !t.contains(top) && !top.contains(t) && top.getBoundingClientRect().bottom > innerHeight / 2) add('reach', `scrolled to the end: ${label(x)} "${x.textContent.trim().slice(0, 30)}" covered by ${label(top)}`);
+      }
+    }
+    const last = tiles.reduce((m, t) => (!m || t.getBoundingClientRect().bottom > m.getBoundingClientRect().bottom ? t : m), null);
+    if (last) {
+      const r = last.getBoundingClientRect();
+      const c = clipRect(last);
+      if ((!inside(r) || c.top - r.top > 1 || r.bottom - c.bottom > 1) && r.height < innerHeight) add('reach', `scrolled to the end: last tile ${label(last)} not fully on screen (${Math.round(r.top)}..${Math.round(r.bottom)} of ${innerHeight})`);
+    }
+    for (const [a, y] of saved) a.scrollTop = y;
   }
   // truncation: elements that own a non-empty text node
   const owners = new Set();
@@ -394,7 +440,7 @@ async function main() {
   const bad = states.filter((s) => s.findings.length);
   const summary = {
     states: states.length, screenshots: states.length, with_findings: bad.length,
-    checks: Object.fromEntries(['hscroll', 'overlap', 'obscured', 'truncation', 'word-break', 'spec-codes', 'cjk', 'hero', 'state'].map((k) => [k, (byKind[k] ?? []).length])),
+    checks: Object.fromEntries(['hscroll', 'overlap', 'obscured', 'reach', 'truncation', 'word-break', 'spec-codes', 'cjk', 'hero', 'state'].map((k) => [k, (byKind[k] ?? []).length])),
     hero: { live: [...new Set(states.filter((s) => s.hero.live).flatMap((s) => s.hero.live))].sort((a, b) => a - b), shot: [...new Set(states.filter((s) => s.hero.shot).flatMap((s) => s.hero.shot))].sort((a, b) => a - b) },
     external_requests: [...new Set(external)], page_errors: pageErrors, out: OUT,
   };

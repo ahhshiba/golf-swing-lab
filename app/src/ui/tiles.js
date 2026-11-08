@@ -24,6 +24,9 @@ import { RC } from '../contract/reason-codes.js';
 import { nowIso } from '../session/ids.js';
 import { clubName, viewName, metricName } from './glossary.js';
 
+/** Text with its ◐ in span.glyph-est: drawn as a half disc in CSS (app.css), since at caption size the font's ◐ read like "‹". */
+export const halfGlyph = (s) => String(s).split(/(◐)/).filter(Boolean).map((x) => (x === '◐' ? h('span.glyph-est', {}, x) : x));
+
 /** Editor groups (§3.4: club / ball / flight) plus the swing and body numbers (the dtl defaults). */
 export const TILE_GROUPS = Object.freeze({
   club: Object.freeze(['club_speed_mps', 'attack_angle_deg', 'club_path_deg', 'dynamic_loft_deg', 'face_angle_deg', 'face_to_path_deg', 'spin_loft_deg']),
@@ -235,7 +238,7 @@ export function createResults(ctx) {
   paintTiles();
   // one confidence system for the page: the same pills as the tiles and the result list below (components vtag)
   const tilesEl = h('section.lm-tiles-wrap', { 'aria-label': t('shot.hero.label') }, grid,
-    h('p.lm-legend', tx('legend')));
+    h('p.lm-legend', {}, ...halfGlyph(tx('legend'))));
 
   function fmtRange(m, id) {
     if (!Array.isArray(m?.ci95) || !m.ci95.every(Number.isFinite)) return null;

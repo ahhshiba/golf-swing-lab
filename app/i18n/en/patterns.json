@@ -18,5 +18,7 @@
   "top_share": "{p}% ({view})",
   "note": "Share = swings the rules call “likely” or “possible” ÷ swings from a camera position that can see the fault. Positions are counted apart; the thresholds are unverified rules of thumb.",
   "quiet": "Faults not seen ({n})",
-  "analysing": "Analysing swings {i} / {n}…"
+  "analysing": "Analysing swings {i} / {n}…",
+  "too_few": "Too few swings to call a change yet (at least {min} in the latest session and before it)",
+  "bar": "{d} (n={n})"
 }

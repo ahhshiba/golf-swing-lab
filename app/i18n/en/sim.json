@@ -40,7 +40,7 @@
   "recommend": "Suggested club",
   "likely_carry": "Likely carry {lo} to {hi}",
   "small_sample": "few shots",
-  "rec.body": "{club}: the hole plays like {d} from here.",
+  "rec.body": "{club}: actually plays {d}.",
   "rec.gapping": "From your own gapping (face-on shots).",
   "rec.reference": "From typical carries scaled to the driver carry you entered; your own records are not enough yet.",
   "rec.small_sample": "Fewer than five shots with this club: the range is a rough guide.",
@@ -64,7 +64,7 @@
   "source.auto": "Simulated",
   "source.penalty": "Penalty",
   "last.head": "{name} · stroke {n} · {club}",
-  "last.carry": "Carry {d} ± {pm}",
+  "last.carry": "Carry {d}",
   "last.carry_typed": "Carry {d} (typed in)",
   "last.putt": "Putt {d}",
   "last.simulated": "Where the ball landed is simulated from these numbers.",
@@ -78,7 +78,6 @@
   },
   "picked_up": "Picked up ({n})",
   "flyover.skip": "Skip",
-  "flyover.continue": "Continue",
   "flyover.a11y": "Hole {n}, par {par}, {length}: view from behind the tee",
   "handoff.pass": "Pass the phone to",
   "handoff.go": "I'm {name}: continue",
@@ -112,6 +111,10 @@
   "banner.line": "Hole {n} · stroke {stroke} · {club} · {name}",
   "banner.wait": "Swing when ready. The quick read becomes this stroke.",
   "banner.import": "The first analysed clip becomes this stroke.",
-  "banner.read": "Quick read: carry {d} {pm}",
-  "banner.read_none": "Quick read: no carry for this swing; your usual carry with this club is used."
+  "banner.read": "Carry {d}",
+  "banner.read_none": "Quick read: no carry for this swing; your usual carry with this club is used.",
+  "hole_meta": "Par {par} · {length} · {of} holes",
+  "quick_tag": "Quick read",
+  "banner.read_range": "Carry about {d} (middle {about})",
+  "manual.need_dir": "You typed a sideways distance: choose left or right."
 }

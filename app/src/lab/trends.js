@@ -3,14 +3,15 @@
 //
 //   faultTrends(labRecords, { days, view, shots?, now?, sessions? }) ->
 //     { top: [fault id …≤ 3], rows: [{ id, view, n, k, p, lo, hi, sessions: [{ session_id, p, lo, hi, n, k, at }],
-//       change: 'fewer'|'more'|null }] }
+//       change: 'fewer'|'more'|null, few: boolean }] }
 //   * days 7 | 30 | null (all), view a view or null (all, still one row per fault × view).
 //   * shots (optional, Map or array of golf-shot records) gives each record its session_id and created_at; without it a
 //     record's session is its computed_at day and its time is computed_at.
 //   * A fault only counts on the swings of a view that can observe it: `unknown` records are left out of n (they were
 //     not seen, not "ok"). Sessions = the latest `sessions` (default 10) that have a judged swing, oldest first.
 //   * change compares the latest session with all earlier sessions in the window pooled: 'fewer' / 'more' only when the
-//     two Wilson intervals do not overlap; otherwise null (no claim).
+//     two Wilson intervals do not overlap and each side has ≥ MIN_CHANGE_N judged swings; otherwise null (no claim;
+//     few: true when it is the sample size that withholds it — 0 %, 0 %, 100 % over 1–3 swings is not a trend).
 //   * top = up to 3 fault ids with the highest pooled share (k ≥ 1), ties by k then table order.
 //   wilson(k, n, z = 1.96) -> { p, lo, hi }
 
@@ -18,6 +19,8 @@ import { FAULT_IDS } from './params.js';
 
 const DAY = 86400000;
 export const MAX_SESSIONS = 10;
+/** Judged swings needed in the latest session and in the earlier ones pooled before a change is named (UNVERIFIED). */
+export const MIN_CHANGE_N = 10;
 
 export function wilson(k, n, z = 1.96) {
   if (!(n > 0)) return { p: 0, lo: 0, hi: 1 };
@@ -66,14 +69,17 @@ export function faultTrends(labRecords, filter = {}) {
       const n = list.reduce((a, s) => a + s.n, 0);
       const k = list.reduce((a, s) => a + s.k, 0);
       let change = null;
+      let few = false;
       if (list.length >= 2) {
         const last = list[list.length - 1];
         const before = list.slice(0, -1);
-        const b = wilson(before.reduce((a, s) => a + s.k, 0), before.reduce((a, s) => a + s.n, 0));
-        if (last.hi < b.lo) change = 'fewer';
+        const bn = before.reduce((a, s) => a + s.n, 0);
+        const b = wilson(before.reduce((a, s) => a + s.k, 0), bn);
+        if (last.n < MIN_CHANGE_N || bn < MIN_CHANGE_N) few = true;
+        else if (last.hi < b.lo) change = 'fewer';
         else if (last.lo > b.hi) change = 'more';
       }
-      rows.push({ id, view: v, n, k, ...wilson(k, n), sessions: list, change });
+      rows.push({ id, view: v, n, k, ...wilson(k, n), sessions: list, change, few });
     }
   }
   const best = new Map();

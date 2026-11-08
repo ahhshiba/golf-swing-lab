@@ -67,6 +67,12 @@ function canvasBlob(canvas) {
   });
 }
 
+/** A made result (preview + share button) scrolled into the sheet's view: it would otherwise sit below the options. */
+function reveal(el, media) {
+  const go = () => { try { el.scrollIntoView({ block: 'nearest', behavior: globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); } catch (_) { /* old engines */ } };
+  if (media && !media.complete && media.tagName === 'IMG') media.addEventListener('load', go, { once: true }); else go();
+}
+
 async function loadShotMedia(app, opts) {
   const id = opts.shot?.shot_id;
   let clipBlob = opts.clipBlob ?? null;
@@ -142,6 +148,7 @@ export async function openShareSheet(app, opts = {}) {
         result.dataset.mime = made.mime;
         result.dataset.duration = String(made.duration_s);
         result.dataset.bytes = String(made.bytes);
+        reveal(result);
       } catch (e) {
         made = null;
         status.textContent = t(ERROR_KEYS[e?.code] ?? 'share.failed');
@@ -199,6 +206,7 @@ export async function openShareSheet(app, opts = {}) {
     cardResult.hidden = false;
     clear(cardOut);
     cardStatus.textContent = t('share.card_ready');
+    reveal(cardResult, img);
   } });
   body.append(h('h3.share-section', {}, t('share.card_section')), makeCard, cardStatus, cardResult);
 
@@ -229,6 +237,8 @@ export function registerShareStates(app) {
   app.e2e?.registerState('shot', 'share_ready', async (a) => {
     await open(a);
     document.querySelector('[data-testid="share-make-card"]')?.click();
-    for (let i = 0; i < 100 && document.querySelector('[data-testid="share-card-preview"]')?.closest('[hidden]'); i++) await new Promise((r) => setTimeout(r, 50));
+    const im = () => document.querySelector('[data-testid="share-card-preview"]');
+    for (let i = 0; i < 100 && (im()?.closest('[hidden]') || !im()?.complete); i++) await new Promise((r) => setTimeout(r, 50));
+    im()?.closest('.share-result')?.scrollIntoView({ block: 'nearest' }); // as reveal(), without the smooth scroll the screenshot would catch mid-way
   });
 }

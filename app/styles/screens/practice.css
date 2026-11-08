@@ -364,14 +364,4 @@
 .drill-map-row select { min-height: var(--hit-min); }
 .dm-what { font: var(--t-headline); }
 
-/* ------------------------------------------------------------------ quick read card (V04-SPEC §A, ui/quickcard.js) */
-.quick-card { display: grid; gap: inherit; grid-template-columns: inherit; grid-column: 1 / -1; }
-.qc-tag { display: inline-block; white-space: nowrap; margin-inline-start: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-pill); font: var(--t-caption); background: var(--tag-low-bg); color: var(--tag-low-fg); }
-.qc-refined { background: var(--accent-tint); }
-.qc-tile .mt-ci { margin-inline-start: auto; }
-.qc-note { flex: 1 0 100%; font: var(--t-footnote); color: var(--text-2); }
-.qc-num { font: var(--t-title1); }
-/* large text: the two hero numbers only (as 0.3.0; the compact ones stay in the card's status line for screen readers)
-   and no transient "quick → full" line; the ± goes up beside the label: the shot count, club and toolbar stay on screen */
-@container live (max-width: 18em) { .qc-mini, .qc-change { display: none; } .qc-tile .mt-ci { order: -1; } .qc-tile .hero-label { order: -2; } }
-@media (prefers-reduced-motion: no-preference) { .qc-change { transition: opacity var(--dur-slow); } .qc-change.is-fading { opacity: 0; } }
+/* quick read card: styles/screens/quick.css (lazy, main.js SCREEN_STYLES live) */

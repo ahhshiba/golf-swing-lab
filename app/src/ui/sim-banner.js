@@ -8,8 +8,31 @@
 import { h, clear } from './dom.js';
 import * as C from './components.js';
 import { t } from '../i18n/index.js';
-import { fmtMetric } from '../i18n/units.js';
+import { convert, fmtQuantity, unitLabel } from '../i18n/units.js';
+import { fmtNum } from '../i18n/index.js';
 import { clubName } from './glossary.js';
+
+/**
+ * A simulated distance with its uncertainty, rounded to what the error supports (CRITIC-1): ± (95 % half width) to two
+ * significant figures, the value to the same step (never finer than the unit's own digits); when ± is over 30 % of the
+ * value the range is the number ("100–310 yd") and the point value is secondary.
+ *   honestDistance(m, half95_m | null, units) -> { text, range: boolean, value, pm, lo, hi, unit }
+ */
+export function honestDistance(m, half, units) {
+  const q = fmtQuantity(m, 'distance', units);
+  if (!(typeof half === 'number' && half > 0) || !(typeof m === 'number' && Number.isFinite(m)) || q.unit === '') return { text: q.text, range: false, value: q.value, pm: null, unit: q.unit };
+  const du = units?.distance === 'm' ? 'm' : 'yd';
+  const v = convert(m, 'm', du), hd = convert(half, 'm', du);
+  const step = Math.max(1, 10 ** (Math.floor(Math.log10(hd)) - 1));
+  const r = (x) => Math.round(x / step) * step;
+  const unit = unitLabel(du);
+  const value = fmtNum(r(v)), pm = fmtNum(Math.max(step, r(hd)));
+  if (hd / v > 0.3) {
+    const lo = fmtNum(Math.max(0, r(v - hd))), hi = fmtNum(r(v + hd));
+    return { text: `${lo}–${hi} ${unit}`, range: true, value, pm, lo, hi, unit };
+  }
+  return { text: `${value} ± ${pm} ${unit}`, range: false, value, pm, unit };
+}
 
 /**
  * @param {HTMLElement} el
@@ -40,9 +63,12 @@ export function mountSimBanner(el, app, ctx, opts = {}) {
       parts.push(h('p.hint.sb-hint', t('sim.banner.wait')));
     } else {
       const m = last.metrics?.carry_m;
-      const f = m && typeof m.value === 'number' ? fmtMetric(m, app.units(), { id: 'carry_m' }) : null;
-      parts.push(h('p.sb-read', { 'data-testid': 'sim-banner-read' },
-        f ? t('sim.banner.read', { d: `${f.value} ${f.unit}`, pm: f.ci ? `± ${f.ci}` : '' }) : t('sim.banner.read_none')),
+      const half = Array.isArray(m?.ci95) && m.ci95.every(Number.isFinite) ? (m.ci95[1] - m.ci95[0]) / 2 : Number.isFinite(m?.sigma) ? 1.96 * m.sigma : null;
+      const f = m && typeof m.value === 'number' ? honestDistance(m.value, half, app.units()) : null;
+      // the quick read is low confidence by contract: the ▲ pill with the 速報 sub-label, its range or ±
+      parts.push(h('div.sb-read-row', {}, C.validityTag(m?.validity ?? 'low_confidence'), h('span.sb-sub', t('sim.quick_tag'))),
+        h('p.sb-read', { 'data-testid': 'sim-banner-read', 'data-range': f?.range ? '1' : '0' },
+          f ? t(f.range ? 'sim.banner.read_range' : 'sim.banner.read', { d: f.text, about: f.range ? `${f.value} ${f.unit}` : '' }) : t('sim.banner.read_none')),
       h('div.sb-actions', {},
         C.button({ label: t('sim.use_shot'), variant: 'primary', size: 'lg', testid: 'sim-banner-use', onClick: use }),
         C.button({ label: t('sim.retake'), size: 'lg', testid: 'sim-banner-retake', onClick: () => { last = null; paint(); } })));

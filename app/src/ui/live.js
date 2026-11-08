@@ -116,7 +116,7 @@ export function mountLive(root, app) {
   // once per shown screen (qcP is reset by show / hide); a card for an old render is never kept
   const loadQuick = () => (qcP ??= app.settings().quick?.enabled === false ? Promise.resolve() : (async (el) => {
     try {
-      const c = await (await import('./quickcard.js')).attachQuick(el, app, () => ({ focus, clip: clipOptions, banner, video: els.video, empty: renderHero }));
+      const c = await (await import('./quickcard.js')).attachQuick(el, app, () => ({ focus, clip: clipOptions, banner, video: els.video, empty: renderHero, n: shots, els }));
       if (els.hero === el) qc = c;
     } catch (_) { /* no quick read: the 0.3.0 hero stays */ }
   })(els.hero));

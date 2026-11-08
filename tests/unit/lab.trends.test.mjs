@@ -87,3 +87,17 @@ test('phases: 8 cards in event order, metrics with numbers, faults on their phas
   assert.equal(stepFault(marks, 40, -1), null);
   assert.equal(stepFault([], 0, 1), null);
 });
+
+test('trends (CRITIC-1): no change named from a tiny sample, even when the intervals do not overlap', async () => {
+  const { MIN_CHANGE_N } = await import('../../app/src/lab/trends.js');
+  assert.ok(MIN_CHANGE_N >= 10);
+  const shots = []; const recs = [];
+  const add = (sess, day, i, st) => { const id = `${sess}-${i}`; shots.push({ shot_id: id, session_id: sess, created_at: `2026-11-0${day}T10:00:${String(i).padStart(2, '0')}.000+08:00` }); recs.push(rec(id, 'dtl', { early_extension: st })); };
+  // 0/6, 0/6, then 3/3 (0 %, 0 %, 100 %): Wilson intervals [0, .39] vs [.44, 1] do not overlap, but 3 swings is not a trend
+  for (let i = 0; i < 6; i++) add('a', 1, i, 'ok');
+  for (let i = 0; i < 6; i++) add('b', 2, i, 'ok');
+  for (let i = 0; i < 3; i++) add('c', 3, i, 'fault');
+  const r = faultTrends(recs, { shots, now: Date.parse('2026-11-05T00:00:00Z') }).rows.find((x) => x.id === 'early_extension');
+  assert.equal(r.change, null);
+  assert.equal(r.few, true);
+});

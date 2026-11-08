@@ -1,6 +1,6 @@
 // ui/scorecard.js — the scorecard of a simulated round (V04-SPEC §C.4). Lazy screen 'scorecard'. Owner V4-D.
 // Never stored: always sim/round.js scorecard(round) from the strokes. One table, a row per hole and a column per player
-// (P-number headers with a name legend above, so names never squeeze the cells): strokes per hole (putts and penalties
+// (short-name headers, full names in the legend above and in each header's accessible name): strokes per hole (putts and penalties
 // in each cell's sheet), Out / In / Total / To par, putts and penalties totals. Every cell is a button (≥ 44 px) that
 // opens the strokes of that hole with where each number came from (validity word + source). Share (score-share) opens
 // the round card (ui/share.js, kind 'round'). The footer line score.disclaimer (score-disclaimer) is always there.
@@ -12,6 +12,20 @@ import { fmtQuantity } from '../i18n/units.js';
 import { clubName } from './glossary.js';
 import { scorecard } from '../sim/round.js';
 import { sourceKind, sideKind, strokeSigmas } from '../course/draw2d.js';
+
+/** A column header that fits a narrow table column: the name up to 4 letters, else its first 3 + "." (Han: the first 2 characters); the
+ *  full name is the header's accessible name and in the legend above. Two cut names that collide get their number. */
+export function shortNames(names) {
+  const cut = names.map((n) => {
+    const cps = Array.from(String(n ?? ''));
+    if (cps.some((c) => /\p{Script=Han}/u.test(c))) return cps.slice(0, 2).join('');
+    return cps.length <= 4 ? cps.join('') : `${cps.slice(0, 3).join('')}.`;
+  });
+  return cut.map((c, i) => (cut.indexOf(c) !== i || cut.lastIndexOf(c) !== i ? `${c}${i + 1}` : c));
+}
+
+/** Score mark by strokes − par: eagle or better / birdie (circles), par, bogey / double bogey or worse (squares). */
+export const relKind = (rel) => (rel === null ? '' : rel <= -2 ? 'eagle' : rel === -1 ? 'birdie' : rel === 0 ? 'par' : rel === 1 ? 'bogey' : 'double');
 
 const toPar = (n) => (n === null || n === undefined ? '—' : n === 0 ? t('score.even') : n > 0 ? `+${n}` : String(n));
 
@@ -52,8 +66,9 @@ export function mountScorecard(root, app) {
   function table(card) {
     const players = round.players;
     const holes = round.course.holes;
+    const short = shortNames(players.map(nameOf));
     const head = h('tr', {}, h('th', { scope: 'col' }, t('score.hole')), h('th', { scope: 'col' }, t('score.par')),
-      players.map((p, i) => h('th', { scope: 'col', 'aria-label': nameOf(p) }, h('span.player-swatch', { 'data-p': String(i), 'aria-hidden': 'true' }), t('score.p_n', { n: i + 1 }))));
+      players.map((p, i) => h('th.sc-player', { scope: 'col', 'aria-label': nameOf(p), title: nameOf(p) }, h('span.player-swatch', { 'data-p': String(i), 'aria-hidden': 'true' }), h('span.sc-pname', { 'aria-hidden': 'true' }, short[i]))));
     const rowsFor = (from, to) => holes.slice(from, to).map((hole) => h('tr', { 'data-hole': String(hole.n) },
       h('th', { scope: 'row' }, String(hole.n)), h('td', String(hole.par)),
       card.players.map((cp, i) => {
@@ -62,10 +77,10 @@ export function mountScorecard(root, app) {
         const rel = r.done ? r.strokes - r.par : null;
         return h('td', {}, h('button.sc-cell', {
           type: 'button', 'data-testid': 'score-cell', 'data-player': cp.player_id, 'data-hole': String(hole.n), 'data-strokes': r.done ? String(r.strokes) : '',
-          'data-rel': rel === null ? '' : rel < 0 ? 'under' : rel > 0 ? 'over' : 'par',
+          'data-rel': rel === null ? '' : rel < 0 ? 'under' : rel > 0 ? 'over' : 'par', 'data-mark': relKind(rel),
           'aria-label': t('score.cell_a11y', { name: nameOf(players[i]), n: hole.n, s: text, putts: r.putts ?? '—', pen: r.penalties }),
           onclick: () => strokesSheet(players[i], hole),
-        }, text, r.penalties ? h('span.sc-pen', { 'aria-hidden': 'true' }, '•') : null, r.picked_up ? h('span.sc-pen', { 'aria-hidden': 'true' }, '↑') : null));
+        }, h('span.sc-mark', text), r.penalties ? h('span.sc-pen', { 'aria-hidden': 'true' }, '•') : null, r.picked_up ? h('span.sc-pen', { 'aria-hidden': 'true' }, '↑') : null));
       })));
     const sumRow = (label, key, testid) => h('tr.sc-sum', { 'data-testid': testid }, h('th', { scope: 'row', colspan: '2' }, label),
       card.players.map((cp) => h('td', { 'data-player': cp.player_id }, key(cp))));
@@ -97,7 +112,7 @@ export function mountScorecard(root, app) {
     }
     const card = scorecard(round);
     root.dataset.roundId = round.round_id;
-    const legend = h('ul.sc-legend', {}, round.players.map((p, i) => h('li', {}, h('span.player-swatch', { 'data-p': String(i), 'aria-hidden': 'true' }), `${t('score.p_n', { n: i + 1 })} ${nameOf(p)}`)));
+    const legend = h('ul.sc-legend', {}, round.players.map((p, i) => h('li', {}, h('span.player-swatch', { 'data-p': String(i), 'aria-hidden': 'true' }), nameOf(p))));
     const meta = [t(`course.style.${round.course.style}`), t('course.holes', { n: round.course.holes_n }), `${t('course.seed')} ${String(round.course.seed).padStart(6, '0')}`, t(`course.tees.${round.course.tees}`)].join(' · ');
     clear(root, head,
       h('p.sc-meta', meta),

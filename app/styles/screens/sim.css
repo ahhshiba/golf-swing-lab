@@ -37,12 +37,14 @@
 .round-turn { margin: 0 0 var(--s-2); }
 .round-turn-name { font: var(--t-title1); margin: 0; display: flex; align-items: center; overflow-wrap: anywhere; }
 .round-turn-sub { font: var(--t-callout); color: var(--text-2); margin: var(--s-1) 0 0; }
-.round-map-wrap { margin: var(--s-2) 0; border-radius: var(--r-md); overflow: hidden; background: var(--media-bg); }
+.round-map-wrap { margin: var(--s-2) 0; border-radius: var(--r-md); overflow: hidden; background: var(--media-bg); container: roundmap / inline-size; }
 .round-map { display: block; width: 100%; height: min(62vh, 34rem); touch-action: none; }
+/* large text (the wrap is under ~16 em wide): a shorter map, so the turn, distance and Swing come sooner */
+@container roundmap (max-width: 16em) { .round-map { height: min(40vh, 20rem); } }
 .round-fly { display: block; width: 100%; height: min(52vh, 26rem); margin: var(--s-3) 0; border-radius: var(--r-md); background: var(--media-bg); cursor: pointer; }
 .round-legend { list-style: none; padding: 0; margin: 0 0 var(--s-2); display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); font: var(--t-footnote); color: var(--text-2); }
 .round-legend li { display: inline-flex; align-items: center; }
-.legend-ellipse { display: inline-block; width: 1.4em; height: 0.8em; margin-inline-end: var(--s-1); border: 2px dashed var(--trail-1); border-radius: 50%; background: var(--media-bg); }
+.legend-ellipse { display: inline-block; width: 1.4em; height: 0.8em; margin-inline-end: var(--s-1); border: 2px dashed var(--trail-7); border-radius: 50%; background: var(--media-bg); }
 .round-facts { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5); margin: 0 0 var(--s-3); }
 .round-facts div { min-width: 0; }
 .round-facts dt { font: var(--t-caption); color: var(--text-2); }
@@ -55,18 +57,28 @@
 .rr-club { font: var(--t-title2); }
 .rr-range { font: var(--t-callout); }
 .rr-src { font: var(--t-footnote); color: var(--text-2); }
+.rr-tag { display: inline-flex; margin: 2px 0; }
+.rr-sheet-range { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
 .round-club-field select { width: 100%; }
 .round-aim { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); gap: var(--s-2); margin: var(--s-2) 0; }
 .round-aim > .btn { min-height: var(--hit-min); min-width: 0; }
 .round-aim > [data-testid="round-aim-reset"] { grid-column: 1 / -1; }
 .round-aim-info { margin: 0 0 var(--s-3); }
 .round-actions { display: grid; gap: var(--s-2); margin: var(--s-3) 0; }
+/* the primary bar: whose turn + Swing, pinned above the tab bar until its own place scrolls into view */
+.round-go {
+  position: sticky; bottom: var(--tabbar-h, 0px); z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3);
+  margin: var(--s-3) calc(-1 * var(--s-2)) 0; padding: var(--s-2); border-radius: var(--r-md); background: var(--bg); box-shadow: var(--shadow-sheet);
+}
+.round-go-name { display: inline-flex; align-items: center; flex: 0 1 auto; min-width: 0; font: var(--t-headline); overflow-wrap: anywhere; }
+.round-go > .btn { flex: 1 1 8rem; min-width: 0; }
 .round-notes { list-style: none; padding: 0; margin: var(--s-2) 0; font: var(--t-callout); }
 .round-last { margin: var(--s-3) 0; }
 .rl-head { font: var(--t-headline); margin: 0 0 var(--s-1); display: flex; align-items: center; overflow-wrap: anywhere; }
 .rl-carry { font: var(--t-title2); margin: 0 0 var(--s-2); font-variant-numeric: tabular-nums; }
 .rl-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); margin: var(--s-1) 0; }
 .rl-dim { font: var(--t-caption); color: var(--text-2); min-width: 4.5em; }
+.rc-sub { font: var(--t-caption); }
 .round-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-1); padding: 2px var(--s-2); border-radius: var(--r-pill); border: 1px solid var(--control-border); font: var(--t-footnote); }
 .rl-event { font: var(--t-headline); color: var(--warn-text); margin: var(--s-2) 0 0; }
 .rl-sim { margin: var(--s-2) 0 0; }
@@ -102,8 +114,14 @@
   width: 100%; min-width: var(--hit-min); min-height: var(--hit-min); padding: 0 2px; border-radius: var(--r-sm);
   border: 1px solid transparent; background: transparent; color: var(--text); font: var(--t-headline); font-variant-numeric: tabular-nums;
 }
-.sc-cell[data-rel="under"] { border-color: var(--control-border); border-radius: var(--r-pill); }
-.sc-cell[data-rel="over"] { border-color: var(--control-border); }
+/* score marks on the number (not the whole cell): birdie a circle, eagle or better two circles, bogey a square, double
+   bogey or worse two squares (shape, not colour, carries the meaning; .sc-key repeats it in words) */
+.sc-mark { display: inline-flex; align-items: center; justify-content: center; min-width: 1.9em; height: 1.9em; padding: 0 2px; border: 2px solid transparent; }
+.sc-cell[data-mark="birdie"] .sc-mark, .sc-cell[data-mark="eagle"] .sc-mark { border-color: var(--text); border-radius: 50%; }
+.sc-cell[data-mark="bogey"] .sc-mark, .sc-cell[data-mark="double"] .sc-mark { border-color: var(--text); border-radius: 0; }
+.sc-cell[data-mark="eagle"] .sc-mark, .sc-cell[data-mark="double"] .sc-mark { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text); }
+.sc-player { overflow-wrap: normal; }
+.sc-pname { display: block; white-space: nowrap; }
 .sc-pen { color: var(--warn-text); margin-inline-start: 1px; }
 .sc-sum th { text-align: start; font: var(--t-footnote); font-weight: 600; }
 .sc-sum td { font: var(--t-headline); padding: var(--s-2) 2px; }
@@ -119,6 +137,8 @@
 .sim-banner { margin: 0 0 var(--s-2); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--surface); color: var(--text); border: 1px solid var(--control-border); }
 .sb-line { display: flex; align-items: center; gap: var(--s-2); font: var(--t-headline); margin: 0; overflow-wrap: anywhere; }
 .sb-hint { margin: var(--s-1) 0 0; }
+.sb-read-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); margin: var(--s-2) 0 0; }
+.sb-sub { font: var(--t-caption); }
 .sb-read { font: var(--t-title2); margin: var(--s-2) 0; font-variant-numeric: tabular-nums; }
 .sb-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .sb-actions > .btn { flex: 1 1 10rem; }

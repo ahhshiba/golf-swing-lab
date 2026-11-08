@@ -85,7 +85,7 @@ const LAZY_EXACT = Object.freeze([
   'src/ui/developer.js', 'src/ui/diag.js', 'src/diag/report.js', 'src/ui/about.js', 'src/ui/licences.js',
   'src/ui/help.js', 'src/ui/privacy.js', 'src/ui/teach.js', 'src/ui/compare.js', 'src/store/compare.js',
   // 0.4.0 screen styles (V04-SPEC §F.6): never linked by index.html, main.js app.loadStyles(name) adds them on first use
-  'styles/screens/sim.css', 'styles/screens/lab.css', 'styles/screens/share.css',
+  'styles/screens/sim.css', 'styles/screens/lab.css', 'styles/screens/share.css', 'styles/screens/quick.css',
 ]);
 /**
  * Lazy path patterns (`*` = any file name within one directory): every launch-monitor screen and module

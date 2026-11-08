@@ -11,6 +11,8 @@ import * as C from './components.js';
 import { t, plural, fmtNum } from '../i18n/index.js';
 import { fmtMetric } from '../i18n/units.js';
 import { clubName } from './glossary.js';
+// ◐ in span.glyph-est (half disc in app.css; the font's ◐ read like "‹" at caption size), as ui/tiles.js halfGlyph
+const halfGlyph = (s) => String(s).split(/(◐)/).filter(Boolean).map((x) => (x === '◐' ? h('span.glyph-est', {}, x) : x));
 import { historySeg, loadedShots, shotOps, shareOrDownload, fileStamp } from './history.js';
 import { gapping, gappingCSV } from '../store/stats.js';
 import { distUnit, unitText, ticks } from '../viz/draw.js';
@@ -64,7 +66,7 @@ export function mountGapping(root, app) {
     const total = r.total.n ? t('gapping.total', { v: fmt(r.total.median) }) : null;
     return h('li.gap-row', { 'data-testid': 'gapping-row', 'data-club': r.club ?? '', 'data-flag': r.flag ?? '' },
       h('div.gap-head', {}, h('span.gap-club', clubName(r.club)),
-        h('span.gap-carry', {}, h('span.mt-num', fmt(r.carry.median)), ' ', h(`span.dt-est.vtag.vtag-${r.n_hb ? 'low' : 'est'}`, t(r.n_hb ? 'gapping.est_low' : 'gapping.est')))),
+        h('span.gap-carry', {}, h('span.mt-num', fmt(r.carry.median)), ' ', h(`span.dt-est.vtag.vtag-${r.n_hb ? 'low' : 'est'}`, {}, ...halfGlyph(t(r.n_hb ? 'gapping.est_low' : 'gapping.est'))))),
       bar(r, S),
       h('p.gap-sub', [pm === null ? null : t('gapping.median_ci', { v: fmt(pm) }), range, total, plural('gapping.n', r.n), r.n_hb ? t('gapping.n_hb', { n: r.n_hb }) : null, gap].filter(Boolean).join(' · ')),
       flags.length ? h('p.gap-flags', {}, flags) : null);

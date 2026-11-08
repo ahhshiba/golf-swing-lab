@@ -33,7 +33,7 @@
   "lines.not_here": "這個機位不畫的線（{n}）",
   "faults.title": "看到的問題",
   "faults.none": "依目前的規則，這一球沒有看到問題",
-  "faults.ok": "看起來沒問題：{list}",
+  "faults.ok": "這一球沒有看到：{list}",
   "list_sep": "、",
   "faults.unknown": "這個機位或這段影片看不出來的（{n}）",
   "faults.note": "門檻是一般教學經驗值，未經驗證，也不是為你個人訂的；每個問題只在看得到它的機位判斷。「可能」表示誤差範圍跨過門檻。",

@@ -401,6 +401,8 @@ core（shell）只加：`screen.{course,round,scorecard,lab,patterns}.title`、`
 > **實測（2026-11-07 整合）**：shell 990,381 B（比基準 +13,642 B，在各包上限加總 17,100 B 之內；距整合上限只剩 1,619 B，
 > 對 `BUDGETS.shell_bytes` 1,000,000 的 8 KB 保留仍在）、precache 32,209,815 B（+329,213 B，≤ 32,500,000）。
 > 0.4.x 的修正若要加 shell，先把程式搬到 lazy 模組，**不放寬上限**。
+> **設計修正 fix1（2026-11-07）**：速報卡 CSS 搬到 lazy `styles/screens/quick.css`（main.js `SCREEN_STYLES.live` 在 live 首次掛載前載入），
+> 換來 app.css 的 ◐ 半圓繪製；shell 990,114 B（−267 B）。
 
 precache 估計新增（lazy，原始碼大小）：quick 20 KB、course 45 KB（含 draw2d／draw3d）、sim 45 KB、share 35 KB、lab 40 KB（含 overlay）、新 ui 95 KB、lazy CSS 9 KB、
 新 i18n 兩語系 60 KB、round schema／驗證 8 KB → **≈ 360 KB**；整合上限 **precache ≤ 32,500,000 B**。基準值在 V4-A drop 1 時寫入 `tests/fixtures/v4/budget-baseline.json`（當下 manifest 的 shell／precache）。
