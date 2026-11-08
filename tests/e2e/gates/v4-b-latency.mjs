@@ -26,7 +26,8 @@
 //         >= 90 % of jobs within one frame (+2 ms)
 //       - the refined impact, put on the true media timeline, vs the live audio impact it was given: median |dt| <= 12 ms
 //       - refined vs fixture truth (0.9 / 0.3 / 3.0) over the swings whose live audio onset itself is within 15 ms of the
-//         fixture impact (Chromium's fake microphone drifts against the fake camera, see MIN_SWINGS; >= 3 swings):
+//         fixture impact (Chromium's fake microphone drifts against the fake camera, see MIN_SWINGS; >= 3 swings, pooled over
+//         up to 1 + EXTRA_BATCHES fresh live sessions: extra ones run only when the first has fewer, every other check is on the first):
 //         median backswing within 0.05 s, downswing within 0.045 s, tempo within 0.45. Known residual biases: the top
 //         is found ~1 frame (33 ms at the fixture's 30 fps) early on this sharp, asymmetric peak, which alone puts
 //         downswing at ~0.33 and tempo at ~2.7; the 0.3.0 bug added another ~0.035 s (tempo ~2.4).
@@ -43,6 +44,12 @@ export const N_SWINGS = Number(process.env.V4B_N) || 10;
 // real swings it gets and accepts no fewer than MIN_SWINGS.
 export const MIN_SWINGS = 8;
 export const LIMITS = Object.freeze({ median_s: 1.5, max_s: 2.5, refined_s: 12 });
+// Extra fresh live sessions when batch 1 has fewer than TIMING.min_good audio-good swings (see run()); each needs about
+// EXTRA_OVERHEAD_MS besides its swing wait (launch, setup, the refined-analysis tail) and is skipped when less than
+// EXTRA_MIN_WAIT_MS (about one 105 s fixture loop) of the gate's timeoutMs is left for it.
+export const EXTRA_BATCHES = 2;
+const EXTRA_OVERHEAD_MS = 100000;
+const EXTRA_MIN_WAIT_MS = 100000;
 const QUICK_ZH = JSON.parse(fs.readFileSync(path.join(ROOT, 'app/i18n/zh-Hant/quick.json'), 'utf8'));
 
 /** In-page recorder of quick-card stage changes (init script). */
@@ -137,7 +144,12 @@ export function segmentTiming({ jobs, codes, shots }, clk, truth) {
   return out;
 }
 
-export async function run(ctx) {
+/**
+ * One live session (fresh browser, fake devices, stand-ins): wait for N_SWINGS provisional quick cards of real swings (at
+ * most waitMs) and the refined analysis behind them, then collect what the checks need. The browser is closed on return.
+ * timing is null when the frame-code clock was not established.
+ */
+async function collectBatch(ctx, waitMs) {
   const { fixtureClock } = await import('../m5.mjs');
   const { browser, page, w, truth } = await liveContext(ctx, { cpu: Number(process.env.V4B_CPU) || 4 });
   try {
@@ -159,89 +171,121 @@ export async function run(ctx) {
       return out;
     };
     let got = null;
-    await waitFor(async () => { got = classify(await getLog(), await getClock()); return got.real.length >= N_SWINGS; }, { timeout: (Number(process.env.V4B_WAIT_S) || 420) * 1000, interval: 2000, what: `${N_SWINGS} provisional quick cards of real swings` })
+    await waitFor(async () => { got = classify(await getLog(), await getClock()); return got.real.length >= N_SWINGS; }, { timeout: waitMs, interval: 2000, what: `${N_SWINGS} provisional quick cards of real swings` })
       .catch(() => { /* judged below: fewer swings when the fake devices drift (see MIN_SWINGS) */ });
     await page.waitForTimeout((LIMITS.refined_s + 2) * 1000);
     const log = await getLog();
     const clk = await getClock();
     const standIn = await page.evaluate(() => globalThis.__GSL_E2E__.log.slice());
-    need(clk && clk.n >= 10, `frame-code clock not established (${clk?.n ?? 0} coded frames)`);
     const q = await diag.get(page, ctx.baseUrl, 'live.quick');
     const qlog = await diag.get(page, ctx.baseUrl, 'live.quick_log');
     const shotLog = (await diag.get(page, ctx.baseUrl, 'live.shot_log')) ?? [];
     got = classify(log, clk);
-    const swingsDetected = shotLog.filter((x) => x.kind === 'swing').length;
-    need(got.real.length >= MIN_SWINGS, `only ${got.real.length} quick cards of real swings (need ${N_SWINGS}, at least ${MIN_SWINGS}); detected swings ${swingsDetected}; other quick cards ${got.other.length}; diag live.quick ${JSON.stringify(q)}; shot_log ${JSON.stringify(shotLog)}`);
-
-    const rows = [];
-    for (const { p, e } of got.real.slice(0, N_SWINGS)) {
-      const tTruth = p.t_impact - e.d; // fixture impact on the media timeline
-      const latency = p.media - tTruth;
-      // independent figure: performance.now() at the paint − when the first frame at/after the impact reached the stand-in
-      const arr = standIn.find((x) => x[0] >= tTruth && Number.isFinite(x[3]));
-      const lat2 = arr ? (p.perf - arr[3]) / 1000 : null;
-      const i = log.indexOf(p);
-      const after = log.slice(i + 1);
-      const ref = after.find((x) => x.stage === 'refined' && Math.abs(x.t_impact - p.t_impact) < 1e-3);
-      const refined_s = ref ? (ref.perf - p.perf) / 1000 : null;
-      rows.push({ fixture_t: e.r.t_impact_s, latency, lat2, refined_s, superseded: !ref, tiles: p.tiles, impact_err: e.d });
-    }
-    const lat = rows.map((r) => r.latency);
-    const med = median(lat);
-    const max = Math.max(...lat);
-    const refined = rows.filter((r) => r.refined_s !== null);
-    // tempo against the fixture truth (every real m5 swing: address 0, top 0.9 s, impact 1.2 s -> 0.9 / 0.3 / 3.0).
-    // The app's live.quick.miss compares the quick read with the refined shot; on this fixture the refined impact comes
-    // from the fake microphone's onset, which runs late of the video by a varying 0.04–0.14 s (m5: audio-video offset),
-    // so the refined downswing / tempo are off the truth too (backswing, video only, is not). Quick vs truth is the
-    // meaningful check; its downswing / tempo share the same audio-offset impact and are reported, backswing is asserted.
-    const TRUTH = { backswing_s: 0.9, downswing_s: 0.3, tempo_ratio: 3.0 };
-    const qRows = (qlog ?? []).filter((x) => got.real.some(({ p }) => Math.abs(p.t_impact - x.t_impact) < 1e-3));
-    const cover = Object.fromEntries(Object.entries(TRUTH).map(([id, v]) => {
-      const xs = qRows.filter((x) => x[id]);
-      return [id, { n: xs.length, in: xs.filter((x) => v >= x[id][1] && v <= x[id][2]).length, med: median(xs.map((x) => x[id][0])) }];
-    }));
     const shotsAll = await page.evaluate(async () => (await globalThis.__GSL_E2E__.app.repo.queryShots({})).map((sh) => ({ id: sh.shot_id, imp: sh.events?.impact?.t_s ?? null,
       m: ['backswing_s', 'downswing_s', 'tempo_ratio'].map((id) => sh.metrics?.[id]?.value ?? null) })));
-    const shotsT = shotsAll.map((x) => x.m);
-    const timing = segmentTiming({ ...(await page.evaluate(() => ({ jobs: globalThis.__GSL_E2E__.liveJobs ?? [], codes: globalThis.__GSL_E2E__.clip?.codes ?? [] }))), shots: shotsAll }, clk, truth);
-    const refT = ['backswing_s', 'downswing_s', 'tempo_ratio'].map((id, k) => `${id} ${median(shotsT.map((x) => x[k]).filter(Number.isFinite)).toFixed(3)}`).join(', ');
-    const truthTxt = Object.entries(cover).map(([id, c]) => `${id} ci95 covers truth ${c.in}/${c.n} (median ${c.med.toFixed(3)} vs ${TRUTH[id]})`).join('; ');
-    const summary = `CPU x4, ${rows.length} swings: impact -> provisional card (media clock) median ${med.toFixed(2)} s, max ${max.toFixed(2)} s ` +
-      `[${lat.map((x) => x.toFixed(2)).join(', ')}]; impact frame at the page -> paint (perf) median ${median(rows.filter((r) => r.lat2 !== null).map((r) => r.lat2)).toFixed(2)} s; ` +
-      `quick impact vs fixture |dt| median ${median(rows.map((r) => Math.abs(r.impact_err))).toFixed(3)} s; refined in place ${refined.length}/${rows.length} ` +
-      `(${refined.map((r) => r.refined_s.toFixed(1)).join(', ')} s), not refined in place (a newer swing's quick read on screen) ${rows.filter((r) => r.superseded).length}; ` +
-      `quick cards / detected swings ${got.real.length}/${swingsDetected}, quick cards of no real swing ${got.other.length} (practice swings, withdrawn); ` +
-      `quick vs fixture truth: ${truthTxt}; refined shots (median of ${shotsT.length}): ${refT}; ` +
-      `app diag live.quick ${JSON.stringify(q)} (miss = quick vs refined; the refined impact shares the fake microphone's drift, see above); ${timing.summary}`;
-    need(med <= LIMITS.median_s, `median latency ${med.toFixed(2)} s > ${LIMITS.median_s} s: ${summary}`);
-    need(max <= LIMITS.max_s, `max latency ${max.toFixed(2)} s > ${LIMITS.max_s} s: ${summary}`);
-    need(got.other.length <= 1, `${got.other.length} quick cards on no real swing (> 1): ${summary}`);
-    need(got.real.length >= 0.9 * swingsDetected, `quick cards for only ${got.real.length} of ${swingsDetected} detected swings: ${summary}`);
-    need(refined.length >= Math.ceil(rows.length / 2), `only ${refined.length}/${rows.length} quick cards turned refined: ${summary}`);
-    const refMed = median(refined.map((r) => r.refined_s));
-    need(refMed <= LIMITS.refined_s, `refined median ${refMed.toFixed(1)} s after the quick card (> ${LIMITS.refined_s} s, the d-latency median): ${summary}`);
-    for (const r of rows) {
-      need(r.tiles.length >= 1, 'a provisional card without tiles');
-      for (const t of r.tiles) {
-        need(t.stage === 'provisional' && t.tag === QUICK_ZH.provisional, `tile ${t.metric}: stage ${t.stage}, tag "${t.tag}" (want "${QUICK_ZH.provisional}")`);
-        if (t.num !== '—') need(t.ci, `tile ${t.metric} (${t.num}) has no ± range (.mt-ci)`);
-      }
-    }
-    need(cover.backswing_s.n >= MIN_SWINGS && cover.backswing_s.in >= 0.9 * cover.backswing_s.n, `quick backswing ci95 covers the fixture truth in only ${cover.backswing_s.in}/${cover.backswing_s.n}: ${summary}`);
-    need(timing.n >= MIN_SWINGS - 2, `segment timing measured on only ${timing.n} live jobs (clip frame codes): ${summary}`);
-    need(timing.t0_med <= TIMING.t0_median_s, `recorded segment start off the real one by a median ${(timing.t0_med * 1000).toFixed(1)} ms (> ${TIMING.t0_median_s * 1000}): ${summary}`);
-    need(timing.t0_in_frame >= TIMING.t0_in_frame_frac * timing.n, `segment start within one frame for only ${timing.t0_in_frame}/${timing.n} jobs: ${summary}`);
-    need(timing.n_imp >= 3 && timing.imp_med <= TIMING.impact_median_s, `refined impact vs the live audio impact |dt| median ${(timing.imp_med * 1000).toFixed(1)} ms over ${timing.n_imp} (> ${TIMING.impact_median_s * 1000} ms, or < 3): ${summary}`);
-    need(timing.good.length >= TIMING.min_good, `only ${timing.good.length} audio-good swings to judge refined tempo (need ${TIMING.min_good}): ${summary}`);
-    need(Math.abs(timing.bs - 0.9) <= TIMING.backswing_s, `refined backswing median ${timing.bs.toFixed(3)} vs 0.9: ${summary}`);
-    need(Math.abs(timing.ds - 0.3) <= TIMING.downswing_s, `refined downswing median ${timing.ds.toFixed(3)} vs 0.3 (> ${TIMING.downswing_s} s): ${summary}`);
-    need(Math.abs(timing.tempo - 3.0) <= TIMING.tempo, `refined tempo median ${timing.tempo.toFixed(2)} vs 3.0 (> ${TIMING.tempo}): ${summary}`);
-    need(q && Number.isFinite(q.latency_ms_p50), `diag live.quick.latency_ms_p50 missing: ${JSON.stringify(q)}`);
-    need(Array.isArray(qlog) && qlog.length >= N_SWINGS, `diag live.quick_log has ${qlog?.length} entries`);
-    need(w.errors.length === 0, `uncaught page errors: ${w.errors.slice(0, 3).join(' | ')}`);
-    return `${summary} [pose = e2e disc stand-in, not MediaPipe; camera capture delay not included]`;
+    const timing = clk && clk.n >= 10 ? segmentTiming({ ...(await page.evaluate(() => ({ jobs: globalThis.__GSL_E2E__.liveJobs ?? [], codes: globalThis.__GSL_E2E__.clip?.codes ?? [] }))), shots: shotsAll }, clk, truth) : null;
+    return { log, clk, standIn, q, qlog, shotLog, got, shotsAll, timing, errors: w.errors.slice() };
   } finally {
     await browser.close();
   }
+}
+
+/** Audio-good rows pooled over the batches' segment timings (null = a batch without a clock): rows, per-batch counts, medians. */
+export function poolTiming(timings) {
+  const good = timings.flatMap((t) => (t ? t.good : []));
+  const med = (k) => median(good.map((r) => r.m[k]));
+  return { good, per: timings.map((t) => (t ? t.good.length : 0)), bs: med(0), ds: med(1), tempo: med(2) };
+}
+
+export async function run(ctx) {
+  const t0 = Date.now();
+  const waitMs = (Number(process.env.V4B_WAIT_S) || 420) * 1000;
+  const b1 = await collectBatch(ctx, waitMs);
+  const { log, clk, standIn, q, qlog, shotLog, got, shotsAll, timing } = b1;
+  need(clk && clk.n >= 10, `frame-code clock not established (${clk?.n ?? 0} coded frames)`);
+  const swingsDetected = shotLog.filter((x) => x.kind === 'swing').length;
+  need(got.real.length >= MIN_SWINGS, `only ${got.real.length} quick cards of real swings (need ${N_SWINGS}, at least ${MIN_SWINGS}); detected swings ${swingsDetected}; other quick cards ${got.other.length}; diag live.quick ${JSON.stringify(q)}; shot_log ${JSON.stringify(shotLog)}`);
+
+  const rows = [];
+  for (const { p, e } of got.real.slice(0, N_SWINGS)) {
+    const tTruth = p.t_impact - e.d; // fixture impact on the media timeline
+    const latency = p.media - tTruth;
+    // independent figure: performance.now() at the paint − when the first frame at/after the impact reached the stand-in
+    const arr = standIn.find((x) => x[0] >= tTruth && Number.isFinite(x[3]));
+    const lat2 = arr ? (p.perf - arr[3]) / 1000 : null;
+    const i = log.indexOf(p);
+    const after = log.slice(i + 1);
+    const ref = after.find((x) => x.stage === 'refined' && Math.abs(x.t_impact - p.t_impact) < 1e-3);
+    const refined_s = ref ? (ref.perf - p.perf) / 1000 : null;
+    rows.push({ fixture_t: e.r.t_impact_s, latency, lat2, refined_s, superseded: !ref, tiles: p.tiles, impact_err: e.d });
+  }
+  const lat = rows.map((r) => r.latency);
+  const med = median(lat);
+  const max = Math.max(...lat);
+  const refined = rows.filter((r) => r.refined_s !== null);
+  // tempo against the fixture truth (every real m5 swing: address 0, top 0.9 s, impact 1.2 s -> 0.9 / 0.3 / 3.0).
+  // The app's live.quick.miss compares the quick read with the refined shot; on this fixture the refined impact comes
+  // from the fake microphone's onset, which runs late of the video by a varying 0.04–0.14 s (m5: audio-video offset),
+  // so the refined downswing / tempo are off the truth too (backswing, video only, is not). Quick vs truth is the
+  // meaningful check; its downswing / tempo share the same audio-offset impact and are reported, backswing is asserted.
+  const TRUTH = { backswing_s: 0.9, downswing_s: 0.3, tempo_ratio: 3.0 };
+  const qRows = (qlog ?? []).filter((x) => got.real.some(({ p }) => Math.abs(p.t_impact - x.t_impact) < 1e-3));
+  const cover = Object.fromEntries(Object.entries(TRUTH).map(([id, v]) => {
+    const xs = qRows.filter((x) => x[id]);
+    return [id, { n: xs.length, in: xs.filter((x) => v >= x[id][1] && v <= x[id][2]).length, med: median(xs.map((x) => x[id][0])) }];
+  }));
+  const shotsT = shotsAll.map((x) => x.m);
+  const refT = ['backswing_s', 'downswing_s', 'tempo_ratio'].map((id, k) => `${id} ${median(shotsT.map((x) => x[k]).filter(Number.isFinite)).toFixed(3)}`).join(', ');
+  const truthTxt = Object.entries(cover).map(([id, c]) => `${id} ci95 covers truth ${c.in}/${c.n} (median ${c.med.toFixed(3)} vs ${TRUTH[id]})`).join('; ');
+  const summary = `CPU x4, ${rows.length} swings: impact -> provisional card (media clock) median ${med.toFixed(2)} s, max ${max.toFixed(2)} s ` +
+    `[${lat.map((x) => x.toFixed(2)).join(', ')}]; impact frame at the page -> paint (perf) median ${median(rows.filter((r) => r.lat2 !== null).map((r) => r.lat2)).toFixed(2)} s; ` +
+    `quick impact vs fixture |dt| median ${median(rows.map((r) => Math.abs(r.impact_err))).toFixed(3)} s; refined in place ${refined.length}/${rows.length} ` +
+    `(${refined.map((r) => r.refined_s.toFixed(1)).join(', ')} s), not refined in place (a newer swing's quick read on screen) ${rows.filter((r) => r.superseded).length}; ` +
+    `quick cards / detected swings ${got.real.length}/${swingsDetected}, quick cards of no real swing ${got.other.length} (practice swings, withdrawn); ` +
+    `quick vs fixture truth: ${truthTxt}; refined shots (median of ${shotsT.length}): ${refT}; ` +
+    `app diag live.quick ${JSON.stringify(q)} (miss = quick vs refined; the refined impact shares the fake microphone's drift, see above); ${timing.summary}`;
+  need(med <= LIMITS.median_s, `median latency ${med.toFixed(2)} s > ${LIMITS.median_s} s: ${summary}`);
+  need(max <= LIMITS.max_s, `max latency ${max.toFixed(2)} s > ${LIMITS.max_s} s: ${summary}`);
+  need(got.other.length <= 1, `${got.other.length} quick cards on no real swing (> 1): ${summary}`);
+  need(got.real.length >= 0.9 * swingsDetected, `quick cards for only ${got.real.length} of ${swingsDetected} detected swings: ${summary}`);
+  need(refined.length >= Math.ceil(rows.length / 2), `only ${refined.length}/${rows.length} quick cards turned refined: ${summary}`);
+  const refMed = median(refined.map((r) => r.refined_s));
+  need(refMed <= LIMITS.refined_s, `refined median ${refMed.toFixed(1)} s after the quick card (> ${LIMITS.refined_s} s, the d-latency median): ${summary}`);
+  for (const r of rows) {
+    need(r.tiles.length >= 1, 'a provisional card without tiles');
+    for (const t of r.tiles) {
+      need(t.stage === 'provisional' && t.tag === QUICK_ZH.provisional, `tile ${t.metric}: stage ${t.stage}, tag "${t.tag}" (want "${QUICK_ZH.provisional}")`);
+      if (t.num !== '—') need(t.ci, `tile ${t.metric} (${t.num}) has no ± range (.mt-ci)`);
+    }
+  }
+  need(cover.backswing_s.n >= MIN_SWINGS && cover.backswing_s.in >= 0.9 * cover.backswing_s.n, `quick backswing ci95 covers the fixture truth in only ${cover.backswing_s.in}/${cover.backswing_s.n}: ${summary}`);
+  need(timing.n >= MIN_SWINGS - 2, `segment timing measured on only ${timing.n} live jobs (clip frame codes): ${summary}`);
+  need(timing.t0_med <= TIMING.t0_median_s, `recorded segment start off the real one by a median ${(timing.t0_med * 1000).toFixed(1)} ms (> ${TIMING.t0_median_s * 1000}): ${summary}`);
+  need(timing.t0_in_frame >= TIMING.t0_in_frame_frac * timing.n, `segment start within one frame for only ${timing.t0_in_frame}/${timing.n} jobs: ${summary}`);
+  need(timing.n_imp >= 3 && timing.imp_med <= TIMING.impact_median_s, `refined impact vs the live audio impact |dt| median ${(timing.imp_med * 1000).toFixed(1)} ms over ${timing.n_imp} (> ${TIMING.impact_median_s * 1000} ms, or < 3): ${summary}`);
+  // diag and page errors are batch-1 checks too: asserted here, before (and independent of) any retry
+  need(q && Number.isFinite(q.latency_ms_p50), `diag live.quick.latency_ms_p50 missing: ${JSON.stringify(q)}`);
+  need(Array.isArray(qlog) && qlog.length >= N_SWINGS, `diag live.quick_log has ${qlog?.length} entries`);
+  need(b1.errors.length === 0, `uncaught page errors: ${b1.errors.slice(0, 3).join(' | ')}`);
+  // Refined tempo needs >= TIMING.min_good audio-good swings, and Chromium's fake microphone drifts against the fake camera
+  // (0-6 of ~12 per session at CPU x4, with a healthy app). Only when batch 1 yields fewer, run up to EXTRA_BATCHES more
+  // fresh live sessions (time budget permitting) and pool the audio-good rows; the pooled-timing checks below judge them.
+  const timings = [timing];
+  let pool = poolTiming(timings);
+  let stopped = '';
+  for (let k = 1; k <= EXTRA_BATCHES && pool.good.length < TIMING.min_good; k++) {
+    const wait = Math.min(waitMs, meta.timeoutMs - (Date.now() - t0) - EXTRA_OVERHEAD_MS);
+    if (wait < EXTRA_MIN_WAIT_MS) { stopped = `; extra batch ${k + 1} not run (only ${Math.round(wait / 1000)} s left in the ${meta.timeoutMs / 1000} s gate budget)`; break; }
+    const bx = await collectBatch(ctx, wait);
+    need(bx.errors.length === 0, `uncaught page errors in batch ${k + 1}: ${bx.errors.slice(0, 3).join(' | ')}`);
+    timings.push(bx.timing);
+    pool = poolTiming(timings);
+  }
+  const batches = `batches ${timings.length} (extra ones only run when batch 1 has < ${TIMING.min_good} audio-good swings), audio-good per batch [${pool.per.join(', ')}] = ${pool.good.length} pooled; ` +
+    `pooled refined median backswing ${pool.bs.toFixed(3)} (0.9), downswing ${pool.ds.toFixed(3)} (0.3), tempo ${pool.tempo.toFixed(2)} (3.0)${stopped}`;
+  need(pool.good.length >= TIMING.min_good, `only ${pool.good.length} audio-good swings to judge refined tempo (need ${TIMING.min_good}): ${batches}; ${summary}`);
+  need(Math.abs(pool.bs - 0.9) <= TIMING.backswing_s, `refined backswing median ${pool.bs.toFixed(3)} vs 0.9: ${batches}; ${summary}`);
+  need(Math.abs(pool.ds - 0.3) <= TIMING.downswing_s, `refined downswing median ${pool.ds.toFixed(3)} vs 0.3 (> ${TIMING.downswing_s} s): ${batches}; ${summary}`);
+  need(Math.abs(pool.tempo - 3.0) <= TIMING.tempo, `refined tempo median ${pool.tempo.toFixed(2)} vs 3.0 (> ${TIMING.tempo}): ${batches}; ${summary}`);
+  return `${summary}; ${batches} [pose = e2e disc stand-in, not MediaPipe; camera capture delay not included]`;
 }
