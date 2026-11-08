@@ -1,0 +1,30 @@
+{
+  "schema": "gsl-i18n-namespaces/1",
+  "locales": ["zh-Hant", "en"],
+  "namespaces": [
+    "app", "common", "screen", "nav", "unit", "validity", "view", "mode", "club", "event", "metric", "reason", "error", "a11y", "time",
+    "onboarding", "home", "venue", "setup", "calib", "live", "bay", "health", "camera",
+    "import", "shot", "replay", "history", "compare", "label", "teach", "export",
+    "session", "storage", "diag", "update", "offline",
+    "model", "events",
+    "settings", "about", "privacy", "help", "legal", "licence",
+    "tiles", "viz", "drill", "stats", "gapping",
+    "quick", "sim", "course", "score", "share", "lab", "fault", "patterns"
+  ],
+  "owners": {
+    "foundation": ["app", "common", "screen", "nav", "unit", "validity", "view", "mode", "club", "event", "metric", "reason", "error", "a11y", "time"],
+    "practice": ["onboarding", "home", "venue", "setup", "calib", "live", "bay", "health", "camera"],
+    "results": ["import", "shot", "replay", "history", "compare", "label", "teach", "export"],
+    "platform": ["session", "storage", "diag", "update", "offline"],
+    "events": ["model", "events"],
+    "trust": ["settings", "about", "privacy", "help", "legal", "licence"],
+    "lm-c": ["viz"],
+    "lm-d": ["tiles"],
+    "lm-e": ["drill"],
+    "lm-f": ["stats", "gapping"],
+    "v4-b": ["quick"],
+    "v4-d": ["sim", "course", "score"],
+    "v4-e": ["share"],
+    "v4-f": ["lab", "fault", "patterns"]
+  }
+}
